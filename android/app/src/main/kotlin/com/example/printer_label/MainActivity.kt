@@ -90,13 +90,35 @@ class MainActivity: FlutterActivity(){
         curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_SERIAL)
         curConnect!!.connect("$port,$boudrate", connectListener)
     }
+    private fun actitonConnectUSB() {
+        val pathName = getUsbDevicePath(this)
+        if (pathName != null) {
+            connectUSB(pathName)
+        } else {
+            // Handle the case where no USB device is found
+        }
+
+    }
+
+
+    private fun getUsbDevicePath(context: Context): String? {
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+        if (deviceList.isNotEmpty()) {
+            // Get the first available USB device (or loop through if needed)
+            val usbDevice = deviceList.values.firstOrNull()
+            // This is just an example; you would need to use UsbDevice.getDeviceId() or other details to identify the device
+            return usbDevice?.deviceName  // Returns something like "/dev/bus/usb/001/001"
+        }
+        return null
+    }
 
     private fun connectMethod(){
         MethodChannel(flutterEngine!!.dartExecutor, "flutter_printer_label")
             .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
                 when (call.method) {
                     "connect_usb" -> {
-                        connectUSB()
+                        actitonConnectUSB()
                     }
                     "print_barcode" -> {
                         printBarcode(call,result)
@@ -106,7 +128,6 @@ class MainActivity: FlutterActivity(){
                         printImage(call)
 
                     }
-
                     else -> {
                         result.notImplemented()
                     }
@@ -167,25 +188,6 @@ class MainActivity: FlutterActivity(){
         val barcodeContent = barcode["barcodeContent"] as? String ?: ""
         printer.barcode(barcodeX, barcodeY, barcodeType, barcodeHeight, TSPLConst.READABLE_CENTER,TSPLConst.ROTATION_0,2,2,barcodeContent)
     }
-    private fun printContent(printer: TSPLPrinter) {
-        printer.sizeMm(60.0, 30.0)
-            .gapInch(0.0, 0.0)
-            .offsetInch(0.0)
-            .speed(5.0)
-            .density(10)
-            .direction(TSPLConst.DIRECTION_FORWARD)
-            .reference(20, 0)
-            .cls()
-            .box(6, 6, 378, 229, 5)
-            .box(16, 16, 360, 209, 5)
-            .barcode(30, 30, TSPLConst.CODE_TYPE_93, 100, TSPLConst.READABLE_LEFT, TSPLConst.ROTATION_0, 2, 2, "ABCDEFGH")
-            .qrcode(265, 30, TSPLConst.EC_LEVEL_H, 4, TSPLConst.QRCODE_MODE_MANUAL, TSPLConst.ROTATION_0, "test qrcode")
-            .text(200, 144, TSPLConst.FNT_16_24, TSPLConst.ROTATION_0, 1, 1, "Test EN")
-            .text(38, 165, TSPLConst.FNT_16_24, TSPLConst.ROTATION_0, 1, 2, "HELLO")
-            .bar(200, 183, 166, 30)
-            .bar(334, 145, 30, 30)
-            .print(1)
-    }
     private fun processText(text: Map<String, Any>, printer: TSPLPrinter) {
         val textX = text["x"] as? Int ?: 0
         val textY = text["y"] as? Int ?: 144
@@ -200,7 +202,7 @@ class MainActivity: FlutterActivity(){
 
     private fun printImage(call: MethodCall){
         val printer = TSPLPrinter(curConnect)
-        val imageData: ByteArray? = call.argument<ByteArray>("imageData")
+        val imageData: ByteArray? = call.argument<ByteArray>("image_data")
         if (imageData != null) {
             val quantity = call.argument<Int>("quantity") ?: 1
             val size = call.argument<Map<String, Double>>("size")
@@ -216,29 +218,6 @@ class MainActivity: FlutterActivity(){
                 .print(quantity)
             }
         }
-    }
-    private fun connectUSB() {
-        val pathName = getUsbDevicePath(this)
-        if (pathName != null) {
-            curConnect?.close()
-            curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
-            curConnect!!.connect(pathName, connectListener)
-        } else {
-            // Handle the case where no USB device is found
-        }
-
-    }
-
-    private fun getUsbDevicePath(context: Context): String? {
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        if (deviceList.isNotEmpty()) {
-            // Get the first available USB device (or loop through if needed)
-            val usbDevice = deviceList.values.firstOrNull()
-            // This is just an example; you would need to use UsbDevice.getDeviceId() or other details to identify the device
-            return usbDevice?.deviceName  // Returns something like "/dev/bus/usb/001/001"
-        }
-        return null
     }
 
 }

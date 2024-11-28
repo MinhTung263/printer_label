@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-class PrintImageModel {
+class ImageModel {
   final Uint8List imageData;
   final int quantity;
   final double? width;
@@ -9,7 +9,7 @@ class PrintImageModel {
   final int? y;
   final int? widthImage;
 
-  PrintImageModel({
+  ImageModel({
     required this.imageData,
     this.quantity = 1, // Default value is 1
     this.width,
@@ -22,7 +22,7 @@ class PrintImageModel {
   /// Converts the model to a map for use in method channel calls
   Map<String, dynamic> toMap() {
     return {
-      'imageData': imageData,
+      'image_data': imageData,
       'quantity': quantity,
       'widthImage': widthImage,
       'x': x,

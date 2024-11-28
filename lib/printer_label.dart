@@ -10,7 +10,7 @@ class PrinterLabel {
   }
 
   static Future<void> printImage(
-    PrintImageModel model,
+    ImageModel model,
   ) async {
     _channel.invokeMethod(
       'print_image',
@@ -19,7 +19,7 @@ class PrinterLabel {
   }
 
   static Future<void> printBarcode(
-    PrintBarcodeModel printBarcodeModel,
+    BarcodeModel printBarcodeModel,
   ) async {
     await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
   }

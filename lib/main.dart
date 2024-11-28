@@ -57,7 +57,9 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  String imagePath = "images/test.png";
+  String image1 = "images/image1.png";
+  String image2 = "images/image2.png";
+  String imageBarCode = "images/barcode.png";
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
@@ -109,7 +111,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 ];
                 // Create an instance of PrintBarcodeModel
-                final PrintBarcodeModel printBarcodeModel = PrintBarcodeModel(
+                final BarcodeModel printBarcodeModel = BarcodeModel(
                   barcodeY: 50,
                   barcodeContent: "123456",
                   textData: textData,
@@ -121,26 +123,50 @@ class _MyHomePageState extends State<MyHomePage> {
                 "Print barcode",
               ),
             ),
-            const Padding(padding: EdgeInsets.all(20)),
-            Image.asset(imagePath),
-            const Padding(padding: EdgeInsets.all(20)),
+            const Padding(padding: EdgeInsets.all(10)),
+            Image.asset(image1),
+            const Padding(padding: EdgeInsets.all(10)),
             ElevatedButton(
               onPressed: () async {
-                final ByteData data = await rootBundle.load(imagePath);
+                final ByteData data = await rootBundle.load(image1);
                 final Uint8List uint8List = data.buffer.asUint8List();
-                final PrintImageModel model = PrintImageModel(
+                final ImageModel model = ImageModel(
                   imageData: uint8List,
-                  width: 600,
-                  height: 30,
-                  widthImage: 600,
-                  x: 0,
-                  y: 50,
                   quantity: 1,
                 );
                 await PrinterLabel.printImage(model);
               },
               child: const Text(
                 "Print image",
+              ),
+            ),
+            const Padding(padding: EdgeInsets.all(10)),
+            ElevatedButton(
+              onPressed: () async {
+                // Load the images as byte data
+                final List<Uint8List> imageDataList = [];
+                // Example image paths (add your images here)
+                final List<String> imagePaths = [
+                  image1,
+                  image2,
+                  imageBarCode,
+                ];
+
+                // Load each image into Uint8List
+                for (String imagePath in imagePaths) {
+                  final ByteData data = await rootBundle.load(imagePath);
+                  final Uint8List uint8List = data.buffer.asUint8List();
+                  imageDataList.add(uint8List);
+                }
+                for (var i = 0; i < imageDataList.length; i++) {
+                  final ImageModel model = ImageModel(
+                    imageData: imageDataList[i],
+                  );
+                  await PrinterLabel.printImage(model);
+                }
+              },
+              child: const Text(
+                "Print list image",
               ),
             ),
           ],

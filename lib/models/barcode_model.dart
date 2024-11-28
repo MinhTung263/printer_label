@@ -1,7 +1,7 @@
-class PrintBarcodeModel {
+class BarcodeModel {
   final Map<String, dynamic> printData;
 
-  PrintBarcodeModel({
+  BarcodeModel({
     double? width,
     double? height,
     double? gapWidth,
