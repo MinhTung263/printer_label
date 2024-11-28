@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:printer_label/src.dart';
 
 void main() {
   runApp(const MyApp());
@@ -56,7 +57,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final _channel = const MethodChannel('flutter_printer_label');
+  String imagePath = "images/test.png";
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
@@ -81,19 +82,65 @@ class _MyHomePageState extends State<MyHomePage> {
           children: [
             ElevatedButton(
               onPressed: () async {
-                await _channel.invokeMethod('connect_usb');
+                await PrinterLabel.connectUSB();
               },
               child: const Text(
                 "Connect usb",
               ),
             ),
-            Padding(padding: EdgeInsets.all(12)),
+            const Padding(padding: EdgeInsets.all(20)),
             ElevatedButton(
               onPressed: () async {
-                await _channel.invokeMethod('print');
+                final List<TextData> textData = [
+                  TextData(
+                    x: 0,
+                    y: 10,
+                    data: "Hello printer label",
+                  ),
+                  TextData(
+                    x: 0,
+                    y: 150,
+                    data: "30.000",
+                  ),
+                  TextData(
+                    x: 0,
+                    y: 180,
+                    data: "12345678",
+                  ),
+                ];
+                // Create an instance of PrintBarcodeModel
+                final PrintBarcodeModel printBarcodeModel = PrintBarcodeModel(
+                  barcodeY: 50,
+                  barcodeContent: "123456",
+                  textData: textData,
+                  quantity: 1,
+                );
+                await PrinterLabel.printBarcode(printBarcodeModel);
               },
               child: const Text(
-                "Call method",
+                "Print barcode",
+              ),
+            ),
+            const Padding(padding: EdgeInsets.all(20)),
+            Image.asset(imagePath),
+            const Padding(padding: EdgeInsets.all(20)),
+            ElevatedButton(
+              onPressed: () async {
+                final ByteData data = await rootBundle.load(imagePath);
+                final Uint8List uint8List = data.buffer.asUint8List();
+                final PrintImageModel model = PrintImageModel(
+                  imageData: uint8List,
+                  width: 600,
+                  height: 30,
+                  widthImage: 600,
+                  x: 0,
+                  y: 50,
+                  quantity: 1,
+                );
+                await PrinterLabel.printImage(model);
+              },
+              child: const Text(
+                "Print image",
               ),
             ),
           ],
