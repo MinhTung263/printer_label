@@ -96,7 +96,7 @@ class _MyHomePageState extends State<MyHomePage> {
             const Padding(padding: EdgeInsets.all(20)),
             InkWell(
               onTap: () async {
-                await PrinterLabel.connectLan(ipAddress: "");
+                await PrinterLabel.connectLan(ipAddress: "192.168.50.91");
               },
               child: Container(
                 padding: const EdgeInsets.all(8),
@@ -112,24 +112,22 @@ class _MyHomePageState extends State<MyHomePage> {
               onPressed: () async {
                 final List<TextData> textData = [
                   TextData(
-                    x: 0,
-                    y: 10,
+                    y: 20,
                     data: "Hello printer label",
                   ),
                   TextData(
-                    x: 0,
-                    y: 150,
+                    y: 170,
                     data: "30.000",
                   ),
                   TextData(
-                    x: 0,
-                    y: 180,
+                    y: 200,
                     data: "12345678",
                   ),
                 ];
                 // Create an instance of PrintBarcodeModel
                 final BarcodeModel printBarcodeModel = BarcodeModel(
-                  barcodeY: 50,
+                  barcodeY: 60,
+                  width: 300,
                   barcodeContent: "123456",
                   textData: textData,
                   quantity: 1,
