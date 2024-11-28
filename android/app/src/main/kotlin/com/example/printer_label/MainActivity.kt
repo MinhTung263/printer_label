@@ -63,7 +63,7 @@ class MainActivity: FlutterActivity(){
         curConnect!!.connect(pathName, connectListener)
     }
 
-    fun connectNet(ipAddress: String) {
+    private fun connectNet(ipAddress: String) {
         curConnect?.close()
         curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
         curConnect!!.connect(ipAddress, connectListener)
@@ -120,6 +120,12 @@ class MainActivity: FlutterActivity(){
                 when (call.method) {
                     "connect_usb" -> {
                         actitonConnectUSB()
+                    }
+                    "connect_lan" -> {
+                        val ipAddress = call.argument<String>("ip_address")
+                        if(!ipAddress.isNullOrEmpty()){
+                            connectNet(ipAddress)
+                        }
                     }
                     "print_barcode" -> {
                         printBarcode(call,result)

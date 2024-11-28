@@ -94,6 +94,20 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             const Padding(padding: EdgeInsets.all(20)),
+            InkWell(
+              onTap: () async {
+                await PrinterLabel.connectLan(ipAddress: "");
+              },
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                color: widget.isConnectedUsb ? Colors.green : Colors.blue,
+                child: Text(
+                  widget.isConnectedUsb ? "Connect success" : "Connect lan",
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+            const Padding(padding: EdgeInsets.all(20)),
             ElevatedButton(
               onPressed: () async {
                 final List<TextData> textData = [
@@ -120,7 +134,8 @@ class _MyHomePageState extends State<MyHomePage> {
                   textData: textData,
                   quantity: 1,
                 );
-                await PrinterLabel.printBarcode(printBarcodeModel);
+                await PrinterLabel.printBarcode(
+                    printBarcodeModel: printBarcodeModel);
               },
               child: const Text(
                 "Print barcode",
@@ -137,7 +152,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   imageData: uint8List,
                   quantity: 1,
                 );
-                await PrinterLabel.printImage(model);
+                await PrinterLabel.printImage(model: model);
               },
               child: const Text(
                 "Print image",
@@ -165,7 +180,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   final ImageModel model = ImageModel(
                     imageData: imageDataList[i],
                   );
-                  await PrinterLabel.printImage(model);
+                  await PrinterLabel.printImage(model: model);
                 }
               },
               child: const Text(

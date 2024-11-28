@@ -9,18 +9,26 @@ class PrinterLabel {
     _channel.invokeMethod('connect_usb');
   }
 
-  static Future<void> printImage(
-    ImageModel model,
-  ) async {
+  static Future<void> connectLan({
+    required String ipAddress,
+  }) async {
+    _channel.invokeMethod('connect_lan', {
+      "ip_address": ipAddress,
+    });
+  }
+
+  static Future<void> printImage({
+    required ImageModel model,
+  }) async {
     _channel.invokeMethod(
       'print_image',
       model.toMap(),
     );
   }
 
-  static Future<void> printBarcode(
-    BarcodeModel printBarcodeModel,
-  ) async {
+  static Future<void> printBarcode({
+    required BarcodeModel printBarcodeModel,
+  }) async {
     await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
   }
 
