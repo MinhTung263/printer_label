@@ -23,4 +23,15 @@ class PrinterLabel {
   ) async {
     await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
   }
+
+  static void setupConnectionStatusListener(
+    ValueChanged<bool> onStatusChange,
+  ) {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'connectionStatus') {
+        final isConnected = call.arguments as bool;
+        onStatusChange(isConnected);
+      }
+    });
+  }
 }

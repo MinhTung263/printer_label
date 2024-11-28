@@ -20,6 +20,7 @@ import net.posprinter.model.AlgorithmType
 
 class MainActivity: FlutterActivity(){
     private var curConnect: IDeviceConnection? = null
+    private val CHANNEL = "flutter_printer_label"
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Register Flutter plugins
@@ -27,28 +28,21 @@ class MainActivity: FlutterActivity(){
         // Initialize POSConnect
         POSConnect.init(this)  // Initialize POSConnect library
 
-        // Set up listeners for connection status changes via LiveEventBus
-        LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).observe(this) { isConnected ->
-            if (isConnected) {
-                UIUtils.toast(this,R.string.con_success)
-            } else {
-                UIUtils.toast(this,R.string.con_failed)
-            }
-        }
+        getStatusConnectUsb()
         connectMethod()
     }
     private val connectListener = IConnectListener { code,connInfo, msg ->
         when (code) {
             POSConnect.CONNECT_SUCCESS -> {
-                UIUtils.toast(this, R.string.con_success)
+                //UIUtils.toast(this, R.string.con_success)
                 LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).post(true)
             }
             POSConnect.CONNECT_FAIL -> {
-                UIUtils.toast(this,R.string.con_failed)
+                //UIUtils.toast(this,R.string.con_failed)
                 LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).post(false)
             }
             POSConnect.CONNECT_INTERRUPT -> {
-                UIUtils.toast(this,R.string.con_has_disconnect)
+                //UIUtils.toast(this,R.string.con_has_disconnect)
                 LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).post(false)
             }
             POSConnect.SEND_FAIL -> {
@@ -112,9 +106,16 @@ class MainActivity: FlutterActivity(){
         }
         return null
     }
-
+    private  fun getStatusConnectUsb(){
+        MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, CHANNEL).apply {
+            // Assuming LiveEventBus is set up properly in your Android project
+            LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).observe(this@MainActivity) { isConnected ->
+                invokeMethod("connectionStatus", isConnected)
+            }
+        }
+    }
     private fun connectMethod(){
-        MethodChannel(flutterEngine!!.dartExecutor, "flutter_printer_label")
+        MethodChannel(flutterEngine!!.dartExecutor, CHANNEL)
             .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
                 when (call.method) {
                     "connect_usb" -> {
