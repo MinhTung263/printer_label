@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:printer_label/product_from_widget.dart';
 import 'package:printer_label/src.dart';
 
@@ -111,7 +110,11 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
           const Padding(padding: EdgeInsets.all(10)),
           const Text("After screen shoot product"),
-          if (uint8List != null) Image.memory(uint8List!)
+          if (uint8List != null)
+            Card(
+              elevation: 2,
+              child: Image.memory(uint8List!),
+            )
         ],
       ),
     );
