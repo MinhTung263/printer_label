@@ -32,9 +32,9 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  String image1 = "images/image1.png";
-  String image2 = "images/image2.png";
-  String imageBarCode = "images/barcode.png";
+  final String image1 = "images/image1.png";
+  final String image2 = "images/image2.png";
+  final String imageBarCode = "images/barcode.png";
 
   Uint8List? uint8List;
 
@@ -43,7 +43,7 @@ class _MyHomePageState extends State<MyHomePage> {
       barcode: "12345678",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: "28.900.000 VNĐ",
-      quantity: 2,
+      quantity: 1,
     ),
     Product(
       barcode: "56789345233",
@@ -144,8 +144,7 @@ class _MyHomePageState extends State<MyHomePage> {
           final ImageModel model = ImageModel(
             imageData: productImages[i],
             quantity: products[i].quantity,
-            x: -5,
-            y: 10,
+            y: 20,
           );
           await PrinterLabel.printImage(model: model);
         }
