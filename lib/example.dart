@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:printer_label/product_from_widget.dart';
 import 'package:printer_label/src.dart';
 
 void main() {
@@ -37,6 +36,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final String imageBarCode = "images/barcode.png";
 
   Uint8List? uint8List;
+  bool isShowPrint2Label = false;
 
   final List<Product> products = [
     Product(
@@ -45,12 +45,12 @@ class _MyHomePageState extends State<MyHomePage> {
       price: "28.900.000 VNĐ",
       quantity: 1,
     ),
-    Product(
-      barcode: "56789345233",
-      name: "Sản phẩm iPad Pro",
-      price: "27.890.000 VNĐ",
-      quantity: 1,
-    )
+    // Product(
+    //   barcode: "56789345233",
+    //   name: "Sản phẩm iPad Pro",
+    //   price: "27.890.000 VNĐ",
+    //   quantity: 1,
+    // )
   ];
 
   @override
@@ -78,44 +78,48 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text("Printer label"),
       ),
-      body: Column(
-        children: [
-          const Padding(padding: EdgeInsets.all(10)),
-          _buildButtonConnect(),
-          const Padding(padding: EdgeInsets.all(10)),
-          Card(
-            elevation: 2,
-            child: ProductView(
-              product: Product(
-                barcode: "12345678",
-                name: "Sản phẩm iPhone 16 Pro Max",
-                price: "28.900.000 VNĐ",
-              ),
-            ),
-          ),
-          const Padding(padding: EdgeInsets.all(10)),
-          Row(
-            children: [
-              _printListImageLocal(),
-              const Padding(padding: EdgeInsets.all(10)),
-              _buildPrintBarcode(),
-            ],
-          ),
-          const Padding(padding: EdgeInsets.all(10)),
-          Row(
-            children: [
-              _viewCapture(),
-              _printListProduct(),
-            ],
-          ),
-          const Padding(padding: EdgeInsets.all(10)),
-          const Text("After screen shoot product"),
-          if (uint8List != null)
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            const Padding(padding: EdgeInsets.all(10)),
+            _buildButtonConnect(),
+            const Padding(padding: EdgeInsets.all(10)),
             Card(
               elevation: 2,
-              child: Image.memory(uint8List!),
-            )
-        ],
+              child: ProductView(
+                product: Product(
+                  barcode: "12345678",
+                  name: "Sản phẩm iPhone 16 Pro Max",
+                  price: "28.900.000 VNĐ",
+                ),
+              ),
+            ),
+            const Padding(padding: EdgeInsets.all(10)),
+            Row(
+              children: [
+                _printListImageLocal(),
+                const Padding(padding: EdgeInsets.all(10)),
+                _buildPrintBarcode(),
+              ],
+            ),
+            const Padding(padding: EdgeInsets.all(10)),
+            Row(
+              children: [
+                _viewCapture(),
+                _printTypeSingleLabel(),
+              ],
+            ),
+            _printTypeDoubleLabel(),
+            const Padding(padding: EdgeInsets.all(10)),
+            const Text("After screen shoot product"),
+            if (uint8List != null) ...[
+              Card(
+                elevation: 2,
+                child: Image.memory(uint8List!),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -125,9 +129,10 @@ class _MyHomePageState extends State<MyHomePage> {
       onPressed: () async {
         final List<Uint8List> productImages =
             await captureProductListAsImages(products, context);
-
         uint8List = productImages.first;
-        setState(() {});
+        setState(() {
+          isShowPrint2Label = false;
+        });
       },
       child: const Text(
         "View capture",
@@ -135,11 +140,44 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget _printListProduct() {
+  Widget _printTypeDoubleLabel() {
     return ElevatedButton(
       onPressed: () async {
-        final List<Uint8List> productImages =
-            await captureProductListAsImages(products, context);
+        final List<Uint8List> productImages = await captureProductListAsImages(
+          products,
+          context,
+          typePrintEnum: TypePrintEnum.double,
+        );
+        for (var i = 0; i < products.length; i++) {
+          final ImageModel model = ImageModel(
+            imageData: productImages[i],
+            quantity: products[i].quantity,
+            height: 25,
+            x: 0,
+            y: 5,
+            width: 70,
+          );
+          await PrinterLabel.printImage(model: model);
+        }
+      },
+      child: Text(
+        "Print list( ${products.map(
+              (e) => e.quantity,
+            ).reduce(
+              (value, element) => value + element,
+            )}) product 2 label",
+      ),
+    );
+  }
+
+  Widget _printTypeSingleLabel() {
+    return ElevatedButton(
+      onPressed: () async {
+        final List<Uint8List> productImages = await captureProductListAsImages(
+          products,
+          context,
+          typePrintEnum: TypePrintEnum.single,
+        );
         for (var i = 0; i < products.length; i++) {
           final ImageModel model = ImageModel(
             imageData: productImages[i],

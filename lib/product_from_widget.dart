@@ -1,15 +1,18 @@
 import 'dart:typed_data';
 
 import 'package:barcode_widget/barcode_widget.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
 import 'capture_widget.dart';
+import 'src.dart';
 
 Future<List<Uint8List>> captureProductListAsImages(
   List<Product> products,
-  BuildContext context,
-) async {
+  BuildContext context, {
+  TypePrintEnum? typePrintEnum,
+}) async {
   final List<Uint8List> images = [];
 
   for (var product in products) {
@@ -18,6 +21,7 @@ Future<List<Uint8List>> captureProductListAsImages(
     );
     final imageBytes = await ScreenshotController.captureFromWidget(
       productWidget,
+      // ignore: use_build_context_synchronously
       context: context,
       pixelRatio: 2,
       targetSize: const Size(360, 200),
@@ -25,6 +29,7 @@ Future<List<Uint8List>> captureProductListAsImages(
 
     final image = await resizeImage(
       imageBytes,
+      type: typePrintEnum,
     );
     images.add(image);
   }
@@ -34,8 +39,7 @@ Future<List<Uint8List>> captureProductListAsImages(
 
 Future<Uint8List> resizeImage(
   Uint8List originalBytes, {
-  int width = 360,
-  int height = 200,
+  TypePrintEnum? type,
 }) async {
   // Chuyển đổi Uint8List thành đối tượng ảnh
   img.Image? image = img.decodeImage(Uint8List.fromList(originalBytes));
@@ -47,8 +51,8 @@ Future<Uint8List> resizeImage(
   // Resize ảnh
   img.Image resizedImage = img.copyResize(
     image,
-    width: width,
-    height: height,
+    width: type?.width,
+    height: type?.height,
   );
 
   // Chuyển ảnh đã resize lại thành Uint8List
