@@ -8,6 +8,8 @@ import com.example.printer_label.utils.Constant
 import com.example.printer_label.utils.UIUtils
 import com.jeremyliao.liveeventbus.LiveEventBus
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugins.GeneratedPluginRegistrant
@@ -17,8 +19,10 @@ import net.posprinter.POSConnect
 import net.posprinter.TSPLConst
 import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
+import printer_label.R
 
-class MainActivity: FlutterActivity(){
+
+class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler,FlutterPlugin {
     private var curConnect: IDeviceConnection? = null
     private val CHANNEL = "flutter_printer_label"
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,9 +31,47 @@ class MainActivity: FlutterActivity(){
         GeneratedPluginRegistrant.registerWith(flutterEngine!!)
         // Initialize POSConnect
         POSConnect.init(this)  // Initialize POSConnect library
-
+        MethodChannel(flutterEngine!!.dartExecutor, CHANNEL).setMethodCallHandler(this)
         getStatusConnectUsb()
-        connectMethod()
+
+    }
+    private lateinit var channel: MethodChannel
+    override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        channel = MethodChannel(binding.binaryMessenger, "flutter_printer_label")
+        channel.setMethodCallHandler(this)
+    }
+
+
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        channel.setMethodCallHandler(null)
+    }
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        GeneratedPluginRegistrant.registerWith(flutterEngine!!)
+    }
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "connect_usb" -> {
+                actitonConnectUSB()
+            }
+            "connect_lan" -> {
+                val ipAddress = call.argument<String>("ip_address")
+                if(!ipAddress.isNullOrEmpty()){
+                    connectNet(ipAddress)
+                }
+            }
+            "print_barcode" -> {
+                printBarcode(call,result)
+
+            }
+            "print_image" -> {
+                printImage(call)
+
+            }
+            else -> {
+                result.notImplemented()
+            }
+        }
     }
     private val connectListener = IConnectListener { code,connInfo, msg ->
         when (code) {
@@ -46,7 +88,7 @@ class MainActivity: FlutterActivity(){
                 LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).post(false)
             }
             POSConnect.SEND_FAIL -> {
-                UIUtils.toast(this,R.string.send_failed)
+                UIUtils.toast(this, R.string.send_failed)
             }
             POSConnect.USB_DETACHED -> {
                 UIUtils.toast(this,R.string.usb_detached)
@@ -114,33 +156,7 @@ class MainActivity: FlutterActivity(){
             }
         }
     }
-    private fun connectMethod(){
-        MethodChannel(flutterEngine!!.dartExecutor, CHANNEL)
-            .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
-                when (call.method) {
-                    "connect_usb" -> {
-                        actitonConnectUSB()
-                    }
-                    "connect_lan" -> {
-                        val ipAddress = call.argument<String>("ip_address")
-                        if(!ipAddress.isNullOrEmpty()){
-                            connectNet(ipAddress)
-                        }
-                    }
-                    "print_barcode" -> {
-                        printBarcode(call,result)
 
-                    }
-                    "print_image" -> {
-                        printImage(call)
-
-                    }
-                    else -> {
-                        result.notImplemented()
-                    }
-                }
-            }
-    }
     private fun printBarcode(call: MethodCall,result: MethodChannel.Result) {
 
         val size = call.argument<Map<String, Double>>("size")
@@ -226,6 +242,8 @@ class MainActivity: FlutterActivity(){
             }
         }
     }
+
+
 
 }
 
