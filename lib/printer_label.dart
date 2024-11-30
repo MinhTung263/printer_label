@@ -2,17 +2,17 @@ import 'package:flutter/services.dart';
 
 import 'src.dart';
 
-const MethodChannel _channel = MethodChannel('flutter_printer_label');
-
 class PrinterLabel {
+  static const MethodChannel _channel = MethodChannel('flutter_printer_label');
+
   static Future<void> connectUSB() async {
-    _channel.invokeMethod('connect_usb');
+    await _channel.invokeMethod('connect_usb');
   }
 
   static Future<void> connectLan({
     required String ipAddress,
   }) async {
-    _channel.invokeMethod('connect_lan', {
+    await _channel.invokeMethod('connect_lan', {
       "ip_address": ipAddress,
     });
   }
@@ -20,10 +20,15 @@ class PrinterLabel {
   static Future<void> printImage({
     required ImageModel model,
   }) async {
-    _channel.invokeMethod(
+    await _channel.invokeMethod(
       'print_image',
       model.toMap(),
     );
+  }
+
+   static Future<String?> get platformVersion async {
+    final String? version = await _channel.invokeMethod('getPlatformVersion');
+    return version;
   }
 
   static Future<void> printBarcode({
@@ -32,9 +37,9 @@ class PrinterLabel {
     await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
   }
 
-  static void setupConnectionStatusListener(
+  static Future<void> setupConnectionStatusListener(
     ValueChanged<bool> onStatusChange,
-  ) {
+  ) async {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'connectionStatus') {
         final isConnected = call.arguments as bool;
