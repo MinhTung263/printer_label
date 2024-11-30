@@ -56,7 +56,6 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    PrinterLabel.connectLan(ipAddress: "192.168.50.91");
     initConnectionListener();
   }
 

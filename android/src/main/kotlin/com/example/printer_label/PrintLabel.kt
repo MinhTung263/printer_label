@@ -21,7 +21,7 @@ import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
 
 class PrintLabel: FlutterActivity() {
-    private var curConnect: IDeviceConnection? = nul
+    private var curConnect: IDeviceConnection? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
