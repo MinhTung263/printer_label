@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
 
 import 'capture_widget.dart';
 import 'src.dart';
@@ -18,49 +17,18 @@ Future<List<Uint8List>> captureProductListAsImages(
   for (var product in products) {
     final productWidget = ProductView(
       product: product,
+      typePrintEnum: typePrintEnum,
     );
     final imageBytes = await ScreenshotController.captureFromWidget(
       productWidget,
       // ignore: use_build_context_synchronously
       context: context,
-      pixelRatio: 2,
       targetSize: const Size(360, 200),
     );
-
-    final image = await resizeImage(
-      imageBytes,
-      type: typePrintEnum,
-    );
-    images.add(image);
+    images.add(imageBytes);
   }
 
   return images;
-}
-
-Future<Uint8List> resizeImage(
-  Uint8List originalBytes, {
-  TypePrintEnum? type,
-}) async {
-  // Chuyển đổi Uint8List thành đối tượng ảnh
-  img.Image? image = img.decodeImage(Uint8List.fromList(originalBytes));
-
-  if (image == null) {
-    throw Exception("Failed to decode image");
-  }
-
-  // Resize ảnh
-  img.Image resizedImage = img.copyResize(
-    image,
-    width: type?.width,
-    height: type?.height,
-  );
-
-  // Chuyển ảnh đã resize lại thành Uint8List
-  final Uint8List resizedBytes = Uint8List.fromList(
-    img.encodeBmp(resizedImage),
-  );
-
-  return resizedBytes;
 }
 
 class Product {
@@ -101,42 +69,56 @@ class ProductView extends StatelessWidget {
   const ProductView({
     super.key,
     required this.product,
+    this.typePrintEnum,
   });
   final Product product;
-
+  final TypePrintEnum? typePrintEnum;
   @override
   Widget build(BuildContext context) {
     return Container(
       color: Colors.white,
+      width: typePrintEnum?.width,
+      height: typePrintEnum?.height,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text(
+          _buildText(
             "EasyPos",
-            style: TextStyle(
-              fontSize: 16,
-            ),
           ),
-          Text(
+          _buildText(
             product.name,
-            style: const TextStyle(fontSize: 14),
+            fontWeight: FontWeight.bold,
           ),
           BarcodeWidget(
             barcode: Barcode.code93(), // Loại mã vạch (có thể thay đổi)
             data: product.barcode,
-            width: 280,
-            height: 80,
+            width: typePrintEnum?.width,
+            height: typePrintEnum?.barcodeHeight,
             drawText: true, // Hiển thị mã số dưới mã vạch
-            style: const TextStyle(fontSize: 14),
+            style: const TextStyle(fontSize: 18),
           ),
-          Text(
+          _buildText(
             product.price,
-            style: const TextStyle(
-              fontSize: 14,
-            ),
+            fontWeight: FontWeight.bold,
+            addFontSize: 5,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildText(
+    String text, {
+    FontWeight? fontWeight,
+    double? addFontSize,
+  }) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: (typePrintEnum?.fontSize ?? 20) + (addFontSize ?? 0),
+        fontWeight: fontWeight,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

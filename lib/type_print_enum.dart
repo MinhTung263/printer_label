@@ -1,12 +1,42 @@
 enum TypePrintEnum {
-  single,
-  double;
+  singleLabel,
+  doubleLabel;
 
-  static const Map<TypePrintEnum, Map<String, int>> dimensions = {
-    TypePrintEnum.single: {'width': 240, 'height': 170},
-    TypePrintEnum.double: {'width': 360, 'height': 200},
-  };
+  Dimensions get dimensions {
+    switch (this) {
+      case TypePrintEnum.singleLabel:
+        return const Dimensions(
+          width: 360,
+          height: 200,
+          barcodeHeight: 100,
+          fontSize: 20,
+        );
+      case TypePrintEnum.doubleLabel:
+        return const Dimensions(
+          width: 230,
+          height: 180,
+          barcodeHeight: 70,
+          fontSize: 16,
+        );
+    }
+  }
 
-  int get width => dimensions[this]!['width']!;
-  int get height => dimensions[this]!['height']!;
+  double get width => dimensions.width;
+  double get height => dimensions.height;
+  double get barcodeHeight => dimensions.barcodeHeight;
+  double get fontSize => dimensions.fontSize;
+}
+
+class Dimensions {
+  final double width;
+  final double height;
+  final double barcodeHeight;
+  final double fontSize;
+
+  const Dimensions({
+    required this.width,
+    required this.height,
+    required this.barcodeHeight,
+    required this.fontSize,
+  });
 }

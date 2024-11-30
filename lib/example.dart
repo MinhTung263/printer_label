@@ -84,6 +84,7 @@ class _MyHomePageState extends State<MyHomePage> {
             const Padding(padding: EdgeInsets.all(10)),
             _buildButtonConnect(),
             const Padding(padding: EdgeInsets.all(10)),
+            const Text("Print single label"),
             Card(
               elevation: 2,
               child: ProductView(
@@ -92,6 +93,19 @@ class _MyHomePageState extends State<MyHomePage> {
                   name: "Sản phẩm iPhone 16 Pro Max",
                   price: "28.900.000 VNĐ",
                 ),
+                typePrintEnum: TypePrintEnum.singleLabel,
+              ),
+            ),
+            const Text("Print double label"),
+            Card(
+              elevation: 2,
+              child: ProductView(
+                product: Product(
+                  barcode: "12345678",
+                  name: "Sản phẩm iPhone 16 Pro Max",
+                  price: "28.900.000 VNĐ",
+                ),
+                typePrintEnum: TypePrintEnum.doubleLabel,
               ),
             ),
             const Padding(padding: EdgeInsets.all(10)),
@@ -146,7 +160,7 @@ class _MyHomePageState extends State<MyHomePage> {
         final List<Uint8List> productImages = await captureProductListAsImages(
           products,
           context,
-          typePrintEnum: TypePrintEnum.double,
+          typePrintEnum: TypePrintEnum.doubleLabel,
         );
         for (var i = 0; i < products.length; i++) {
           final ImageModel model = ImageModel(
@@ -176,7 +190,7 @@ class _MyHomePageState extends State<MyHomePage> {
         final List<Uint8List> productImages = await captureProductListAsImages(
           products,
           context,
-          typePrintEnum: TypePrintEnum.single,
+          typePrintEnum: TypePrintEnum.singleLabel,
         );
         for (var i = 0; i < products.length; i++) {
           final ImageModel model = ImageModel(
