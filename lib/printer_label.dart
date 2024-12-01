@@ -5,6 +5,7 @@ import 'src.dart';
 class PrinterLabel {
   static const MethodChannel _channel = MethodChannel('flutter_printer_label');
 
+
   static Future<void> connectUSB() async {
     await _channel.invokeMethod('connect_usb');
   }
@@ -26,7 +27,7 @@ class PrinterLabel {
     );
   }
 
-   static Future<String?> get platformVersion async {
+  static Future<String?> get platformVersion async {
     final String? version = await _channel.invokeMethod('getPlatformVersion');
     return version;
   }
