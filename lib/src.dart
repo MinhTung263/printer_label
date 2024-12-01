@@ -1,4 +1,6 @@
-export 'printer_label.dart';
+export 'printer_label_method_channel.dart';
 export 'models/src.dart';
-export 'product_from_widget.dart';
-export 'type_print_enum.dart';
+export 'component/src.dart';
+export 'enums/type_print_enum.dart';
+export 'printer_label_interface.dart';
+export 'printer_label.dart';

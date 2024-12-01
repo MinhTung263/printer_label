@@ -1,43 +1,27 @@
-import 'package:flutter/services.dart';
-
 import 'src.dart';
 
+PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
+
 class PrinterLabel {
-  static const MethodChannel _channel = MethodChannel('flutter_printer_label');
+  static Future<String?> get platformVersion => _platform.platformVersion;
 
-  static Future<void> connectUSB() async {
-    await _channel.invokeMethod('connect_usb');
-  }
+  static Future<void> connectUSB() => _platform.connectUSB();
 
-  static Future<void> connectLan({
-    required String ipAddress,
-  }) async {
-    await _channel.invokeMethod('connect_lan', {
-      "ip_address": ipAddress,
-    });
+  static Future<bool> getConnectionStatus() => _platform.getConnectionStatus();
+
+  static Future<void> connectLan({required String ipAddress}) {
+    return _platform.connectLan(ipAddress: ipAddress);
   }
 
   static Future<void> printImage({
-    required ImageModel model,
-  }) async {
-    await _channel.invokeMethod(
-      'print_image',
-      model.toMap(),
-    );
-  }
-
-  static Future<String?> get platformVersion async {
-    final String? version = await _channel.invokeMethod('getPlatformVersion');
-    return version;
+    required ImageModel imageModel,
+  }) {
+    return _platform.printImage(imageModel: imageModel);
   }
 
   static Future<void> printBarcode({
     required BarcodeModel printBarcodeModel,
-  }) async {
-    await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
-  }
-
-  static Future<bool> getConnectionStatus() async {
-    return await _channel.invokeMethod('getConnectionStatus');
+  }) {
+    return _platform.printBarcode(printBarcodeModel: printBarcodeModel);
   }
 }

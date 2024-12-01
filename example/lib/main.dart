@@ -38,8 +38,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Uint8List? uint8List;
   bool isShowPrint2Label = false;
 
-  final List<Product> products = [
-    Product(
+  final List<ProductBarcodeModel> products = [
+    ProductBarcodeModel(
       barcode: "12345678",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: "28.900.000 VNĐ",
@@ -84,8 +84,8 @@ class _MyHomePageState extends State<MyHomePage> {
             const Text("Print single label"),
             Card(
               elevation: 2,
-              child: ProductView(
-                product: Product(
+              child: BarcodeView(
+                product: ProductBarcodeModel(
                   barcode: "12345678",
                   name: "Sản phẩm iPhone 16 Pro Max",
                   price: "28.900.000 VNĐ",
@@ -96,8 +96,8 @@ class _MyHomePageState extends State<MyHomePage> {
             const Text("Print double label"),
             Card(
               elevation: 2,
-              child: ProductView(
-                product: Product(
+              child: BarcodeView(
+                product: ProductBarcodeModel(
                   barcode: "12345678",
                   name: "Sản phẩm iPhone 16 Pro Max",
                   price: "28.900.000 VNĐ",
@@ -168,7 +168,7 @@ class _MyHomePageState extends State<MyHomePage> {
             y: 5,
             width: 70,
           );
-          await PrinterLabel.printImage(model: model);
+          await PrinterLabel.printImage(imageModel: model);
         }
       },
       child: Text(
@@ -195,7 +195,7 @@ class _MyHomePageState extends State<MyHomePage> {
             quantity: products[i].quantity,
             y: 20,
           );
-          await PrinterLabel.printImage(model: model);
+          await PrinterLabel.printImage(imageModel: model);
         }
       },
       child: Text(
@@ -299,7 +299,7 @@ class _MyHomePageState extends State<MyHomePage> {
             imageData: imageDataList[i],
             quantity: 2,
           );
-          await PrinterLabel.printImage(model: model);
+          await PrinterLabel.printImage(imageModel: model);
         }
       },
       child: const Text(
