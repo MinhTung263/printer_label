@@ -39,6 +39,9 @@ class MainActivity: FlutterPlugin, MethodCallHandler {
   override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
     when (call.method) {
       "getPlatformVersion" -> result.success("Android ${android.os.Build.VERSION.RELEASE}")
+      "getConnectionStatus" -> {
+        getStatusConnectUsb(result)
+      }
       "connect_usb" -> {
         actitonConnectUSB()
       }
@@ -89,6 +92,13 @@ class MainActivity: FlutterPlugin, MethodCallHandler {
       POSConnect.USB_ATTACHED -> {
         toast("USB_ATTACHED")
       }
+    }
+  }
+  private fun getStatusConnectUsb(result: Result) {
+    // Lắng nghe sự kiện kết nối từ LiveEventBus
+    LiveEventBus.get<Boolean>("EVENT_CONNECT_STATUS").observeForever { isConnected ->
+      // Gửi kết quả về Flutter thông qua MethodChannel
+      result.success(isConnected)
     }
   }
   private fun toast(str: String) {

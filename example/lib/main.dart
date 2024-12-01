@@ -59,14 +59,11 @@ class _MyHomePageState extends State<MyHomePage> {
     initConnectionListener();
   }
 
-  void initConnectionListener() {
-    PrinterLabel.setupConnectionStatusListener(
-      (isConnected) {
-        setState(
-          () {
-            widget.isConnectedUsb = isConnected;
-          },
-        );
+  void initConnectionListener() async {
+    final status = await PrinterLabel.getConnectionStatus();
+    setState(
+      () {
+        widget.isConnectedUsb = status;
       },
     );
   }
