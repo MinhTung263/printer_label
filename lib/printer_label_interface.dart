@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'src.dart';
 
@@ -33,5 +34,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required BarcodeModel printBarcodeModel,
   });
 
-  Future<bool> getConnectionStatus();
+  void setupConnectionStatusListener(
+    ValueChanged<bool> onStatusChange,
+  );
 }

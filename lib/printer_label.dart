@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+
 import 'src.dart';
 
 PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
@@ -7,7 +9,10 @@ class PrinterLabel {
 
   static Future<void> connectUSB() => _platform.connectUSB();
 
-  static Future<bool> getConnectionStatus() => _platform.getConnectionStatus();
+  static void getConnectionStatus(
+    ValueChanged<bool> onStatusChange,
+  ) =>
+      _platform.setupConnectionStatusListener(onStatusChange);
 
   static Future<void> connectLan({required String ipAddress}) {
     return _platform.connectLan(ipAddress: ipAddress);

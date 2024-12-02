@@ -37,7 +37,15 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
   }
 
-  Future<bool> getConnectionStatus() async {
-    return await _channel.invokeMethod('getConnectionStatus');
+
+  void setupConnectionStatusListener(
+    ValueChanged<bool> onStatusChange,
+  ) {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'connectionStatus') {
+        final isConnected = call.arguments as bool;
+        onStatusChange(isConnected);
+      }
+    });
   }
 }
