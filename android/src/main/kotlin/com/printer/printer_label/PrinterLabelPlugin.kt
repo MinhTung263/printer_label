@@ -26,12 +26,15 @@ import net.posprinter.model.AlgorithmType
 class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
 
   private lateinit var channel : MethodChannel
+  private var CHANNEL = "flutter_printer_label"
   private var mContext: Context? = null
   private var curConnect: IDeviceConnection? = null
+
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_printer_label")
+    channel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL)
     channel.setMethodCallHandler(this)
     mContext = flutterPluginBinding.applicationContext
+      getStatusConnectUsb(flutterPluginBinding)
     POSConnect.init(mContext)
   }
 
@@ -39,9 +42,6 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
   override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
     when (call.method) {
       "getPlatformVersion" -> result.success("Android ${android.os.Build.VERSION.RELEASE}")
-      "getConnectionStatus" -> {
-        getStatusConnectUsb(result)
-      }
       "connect_usb" -> {
         actitonConnectUSB()
       }
@@ -68,7 +68,13 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
   override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
     channel.setMethodCallHandler(null)
   }
-
+    private  fun getStatusConnectUsb(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding){
+        MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL).apply {
+            LiveEventBus.get<Boolean>("EVENT_CONNECT_STATUS").observeForever { isConnected ->
+                invokeMethod("connectionStatus", isConnected)
+            }
+        }
+    }
   private val connectListener = IConnectListener { code,connInfo, msg ->
     when (code) {
       POSConnect.CONNECT_SUCCESS -> {
@@ -92,13 +98,6 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
       POSConnect.USB_ATTACHED -> {
         toast("USB_ATTACHED")
       }
-    }
-  }
-  private fun getStatusConnectUsb(result: Result) {
-    // Lắng nghe sự kiện kết nối từ LiveEventBus
-    LiveEventBus.get<Boolean>("EVENT_CONNECT_STATUS").observeForever { isConnected ->
-      // Gửi kết quả về Flutter thông qua MethodChannel
-      result.success(isConnected)
     }
   }
   private fun toast(str: String) {
