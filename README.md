@@ -1,6 +1,6 @@
 # printer_label
 
-A new Flutter project.
+Make printer label easy
 
 ## Getting Started
 
