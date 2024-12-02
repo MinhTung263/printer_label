@@ -44,7 +44,7 @@ Future<List<Uint8List>> captureProductListAsImages(
           );
 
           if (i < currentBatch - 1) {
-            productWidgets.add(SizedBox(width: 50));
+            productWidgets.add(SizedBox(width: 60));
           }
         }
 
