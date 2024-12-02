@@ -1,8 +1,6 @@
-//package com.example.printer_label
+package com.printer.printer_label
 //
 //import android.app.Application
-//import com.example.printer_label.utils.Constant
-//import com.example.printer_label.utils.UIUtils
 //import com.jeremyliao.liveeventbus.LiveEventBus
 //import net.posprinter.IConnectListener
 //import net.posprinter.IDeviceConnection

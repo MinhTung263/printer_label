@@ -1,4 +1,4 @@
-package com.example.printer_label.utils
+package com.printer.printer_label.utils
 
 /**
  * @author: star

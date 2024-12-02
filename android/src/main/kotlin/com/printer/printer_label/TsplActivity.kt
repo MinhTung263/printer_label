@@ -1,4 +1,4 @@
-//package com.example.printer_label
+package com.printer.printer_label
 //import android.graphics.Bitmap
 //import android.os.Bundle
 //import androidx.appcompat.app.AppCompatActivity

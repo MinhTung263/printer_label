@@ -1,4 +1,4 @@
-package com.example.printer_label
+package com.printer.printer_label
 
 import android.content.Context
 import android.graphics.BitmapFactory
@@ -7,7 +7,7 @@ import android.os.Build
 import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.annotation.RequiresApi
-import com.example.printer_label.utils.Constant
+import com.printer.printer_label.utils.Constant
 import com.jeremyliao.liveeventbus.LiveEventBus
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -23,7 +23,7 @@ import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
 
 /** SamplePluginFlutterPlugin */
-class MainActivity: FlutterPlugin, MethodCallHandler {
+class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
 
   private lateinit var channel : MethodChannel
   private var mContext: Context? = null

@@ -1,4 +1,4 @@
-group 'com.example.printer_label'
+group 'com.printer.printer_label'
 version '1.0'
 apply from: "./resolve_dependencies.gradle"
 buildscript {
