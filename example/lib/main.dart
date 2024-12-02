@@ -1,3 +1,4 @@
+import 'package:example/preview_image_printer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printer_label/src.dart';
@@ -35,17 +36,16 @@ class _MyHomePageState extends State<MyHomePage> {
   final String image2 = "images/image2.png";
   final String imageBarCode = "images/barcode.png";
 
-  Uint8List? uint8List;
-  bool isShowPrint2Label = false;
+  List<Uint8List> productImages = [];
 
   final List<ProductBarcodeModel> products = [
     ProductBarcodeModel(
       barcode: "12345678",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: "28.900.000 VNĐ",
-      quantity: 1,
+      quantity: 3,
     ),
-    // Product(
+    // ProductBarcodeModel(
     //   barcode: "56789345233",
     //   name: "Sản phẩm iPad Pro",
     //   price: "27.890.000 VNĐ",
@@ -57,6 +57,16 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     initConnectionListener();
+  }
+
+  Future<void> getListProd({
+    TypePrintEnum? typePrintEnum,
+  }) async {
+    productImages = await captureProductListAsImages(
+      products,
+      context,
+      typePrintEnum: typePrintEnum ?? TypePrintEnum.singleLabel,
+    );
   }
 
   void initConnectionListener() {
@@ -96,18 +106,6 @@ class _MyHomePageState extends State<MyHomePage> {
                 typePrintEnum: TypePrintEnum.singleLabel,
               ),
             ),
-            const Text("Print double label"),
-            Card(
-              elevation: 2,
-              child: BarcodeView(
-                product: ProductBarcodeModel(
-                  barcode: "12345678",
-                  name: "Sản phẩm iPhone 16 Pro Max",
-                  price: "28.900.000 VNĐ",
-                ),
-                typePrintEnum: TypePrintEnum.doubleLabel,
-              ),
-            ),
             const Padding(padding: EdgeInsets.all(10)),
             Row(
               children: [
@@ -119,37 +117,13 @@ class _MyHomePageState extends State<MyHomePage> {
             const Padding(padding: EdgeInsets.all(10)),
             Row(
               children: [
-                _viewCapture(),
                 _printTypeSingleLabel(),
+                _printTypeDoubleLabel(),
               ],
             ),
-            _printTypeDoubleLabel(),
-            const Padding(padding: EdgeInsets.all(10)),
-            const Text("After screen shoot product"),
-            if (uint8List != null) ...[
-              Card(
-                elevation: 2,
-                child: Image.memory(uint8List!),
-              ),
-            ],
+            _viewListImage(),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _viewCapture() {
-    return ElevatedButton(
-      onPressed: () async {
-        final List<Uint8List> productImages =
-            await captureProductListAsImages(products, context);
-        uint8List = productImages.first;
-        setState(() {
-          isShowPrint2Label = false;
-        });
-      },
-      child: const Text(
-        "View capture",
       ),
     );
   }
@@ -157,15 +131,20 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget _printTypeDoubleLabel() {
     return ElevatedButton(
       onPressed: () async {
-        final List<Uint8List> productImages = await captureProductListAsImages(
-          products,
-          context,
-          typePrintEnum: TypePrintEnum.doubleLabel,
-        );
-        for (var i = 0; i < products.length; i++) {
+        final total = products
+            .map(
+              (e) => e.quantity,
+            )
+            .reduce(
+              (value, element) => value + element,
+            );
+
+        await getListProd(typePrintEnum: TypePrintEnum.doubleLabel);
+        for (var product in productImages) {
           final ImageModel model = ImageModel(
-            imageData: productImages[i],
-            quantity: products[i].quantity,
+            imageData: product,
+            //quantity print
+            quantity: (total / 2).ceil(),
             height: 25,
             x: 0,
             y: 5,
@@ -175,7 +154,7 @@ class _MyHomePageState extends State<MyHomePage> {
         }
       },
       child: Text(
-        "Print list( ${products.map(
+        "Print(${products.map(
               (e) => e.quantity,
             ).reduce(
               (value, element) => value + element,
@@ -184,14 +163,32 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  Widget _viewListImage() {
+    return ElevatedButton(
+      onPressed: () async {
+        await getListProd(typePrintEnum: TypePrintEnum.doubleLabel);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                ImageDisplayScreen(imageBytesList: productImages),
+          ),
+        );
+      },
+      child: Text(
+        "View list( ${products.map(
+              (e) => e.quantity,
+            ).reduce(
+              (value, element) => value + element,
+            )})",
+      ),
+    );
+  }
+
   Widget _printTypeSingleLabel() {
     return ElevatedButton(
       onPressed: () async {
-        final List<Uint8List> productImages = await captureProductListAsImages(
-          products,
-          context,
-          typePrintEnum: TypePrintEnum.singleLabel,
-        );
+        await getListProd();
         for (var i = 0; i < products.length; i++) {
           final ImageModel model = ImageModel(
             imageData: productImages[i],
@@ -202,7 +199,7 @@ class _MyHomePageState extends State<MyHomePage> {
         }
       },
       child: Text(
-        "Print list( ${products.map(
+        "Print(${products.map(
               (e) => e.quantity,
             ).reduce(
               (value, element) => value + element,
