@@ -45,12 +45,12 @@ class _MyHomePageState extends State<MyHomePage> {
       price: "28.900.000 VNĐ",
       quantity: 3,
     ),
-    // ProductBarcodeModel(
-    //   barcode: "56789345233",
-    //   name: "Sản phẩm iPad Pro",
-    //   price: "27.890.000 VNĐ",
-    //   quantity: 1,
-    // )
+    ProductBarcodeModel(
+      barcode: "56789345233",
+      name: "Sản phẩm iPad Pro",
+      price: "27.890.000 VNĐ",
+      quantity: 2,
+    )
   ];
 
   @override
@@ -79,6 +79,29 @@ class _MyHomePageState extends State<MyHomePage> {
         );
       },
     );
+  }
+
+  Future<void> printProductLabels() async {
+    final images = await captureProductListAsImages(
+      products,
+      context,
+      typePrintEnum: TypePrintEnum.doubleLabel,
+    );
+
+    final totalQuantity =
+        products.fold(0, (sum, product) => sum + product.quantity);
+
+    for (var image in images) {
+      final model = ImageModel(
+        imageData: image,
+        quantity: (totalQuantity / 2).ceil(),
+        height: 25,
+        x: 0,
+        y: 5,
+        width: 70,
+      );
+      await PrinterLabel.printImage(imageModel: model);
+    }
   }
 
   @override
@@ -131,27 +154,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget _printTypeDoubleLabel() {
     return ElevatedButton(
       onPressed: () async {
-        final total = products
-            .map(
-              (e) => e.quantity,
-            )
-            .reduce(
-              (value, element) => value + element,
-            );
-
-        await getListProd(typePrintEnum: TypePrintEnum.doubleLabel);
-        for (var product in productImages) {
-          final ImageModel model = ImageModel(
-            imageData: product,
-            //quantity print
-            quantity: (total / 2).ceil(),
-            height: 25,
-            x: 0,
-            y: 5,
-            width: 70,
-          );
-          await PrinterLabel.printImage(imageModel: model);
-        }
+        await printProductLabels();
       },
       child: Text(
         "Print(${products.map(
