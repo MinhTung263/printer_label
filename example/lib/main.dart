@@ -87,7 +87,7 @@ class _MyHomePageState extends State<MyHomePage> {
     );
 
     final totalQuantity =
-        products.fold(0, (sum, product) => sum + product.quantity);
+        products.fold(0.0, (sum, product) => sum + product.quantity);
 
     for (var image in productImages) {
       final model = BarcodeImageModel(
@@ -190,7 +190,7 @@ class _MyHomePageState extends State<MyHomePage> {
         for (var i = 0; i < products.length; i++) {
           final BarcodeImageModel model = BarcodeImageModel(
             imageData: productImages[i],
-            quantity: products[i].quantity,
+            quantity: products[i].quantity.toInt(),
             y: 20,
           );
           await PrinterLabel.printImage(imageModel: model);

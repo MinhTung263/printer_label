@@ -2,7 +2,7 @@ class ProductBarcodeModel {
   final String barcode;
   final String name;
   final double price;
-  int quantity;
+  double quantity;
 
   ProductBarcodeModel({
     required this.barcode,
