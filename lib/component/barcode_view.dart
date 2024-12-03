@@ -37,7 +37,7 @@ class BarcodeView extends StatelessWidget {
             style: const TextStyle(fontSize: 18),
           ),
           _buildText(
-            product.price,
+            product.price.toString(),
             fontWeight: FontWeight.bold,
             addFontSize: 5,
           ),

@@ -1,7 +1,7 @@
 class ProductBarcodeModel {
   final String barcode;
   final String name;
-  final String price;
+  final double price;
   final int quantity;
 
   ProductBarcodeModel({
@@ -16,7 +16,7 @@ class ProductBarcodeModel {
     return {
       'barcode': barcode,
       'name': name,
-      'description': price,
+      'price': price,
       'quantity': quantity,
     };
   }
@@ -26,7 +26,7 @@ class ProductBarcodeModel {
     return ProductBarcodeModel(
       barcode: map['barcode'] ?? '',
       name: map['name'] ?? '',
-      price: map['description'] ?? '',
+      price: map['price'] ?? '',
       quantity: map['quantity'] ?? 1,
     );
   }

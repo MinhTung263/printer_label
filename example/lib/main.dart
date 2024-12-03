@@ -42,13 +42,13 @@ class _MyHomePageState extends State<MyHomePage> {
     ProductBarcodeModel(
       barcode: "12345678",
       name: "Sản phẩm iPhone 16 Pro Max",
-      price: "28.900.000 VNĐ",
+      price: 28990000,
       quantity: 3,
     ),
     ProductBarcodeModel(
       barcode: "56789345233",
       name: "Sản phẩm iPad Pro",
-      price: "27.890.000 VNĐ",
+      price: 27890000,
       quantity: 4,
     )
   ];
@@ -119,11 +119,7 @@ class _MyHomePageState extends State<MyHomePage> {
             Card(
               elevation: 2,
               child: BarcodeView(
-                product: ProductBarcodeModel(
-                  barcode: "12345678",
-                  name: "Sản phẩm iPhone 16 Pro Max",
-                  price: "28.900.000 VNĐ",
-                ),
+                product: products.first,
                 typePrintEnum: TypePrintEnum.singleLabel,
               ),
             ),
