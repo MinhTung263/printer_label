@@ -18,7 +18,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   Future<void> printImage({
-    required ImageModel imageModel,
+    required BarcodeImageModel imageModel,
   }) async {
     await _channel.invokeMethod(
       'print_image',
@@ -36,7 +36,6 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }) async {
     await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
   }
-
 
   void setupConnectionStatusListener(
     ValueChanged<bool> onStatusChange,

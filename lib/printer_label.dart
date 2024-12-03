@@ -19,7 +19,7 @@ class PrinterLabel {
   }
 
   static Future<void> printImage({
-    required ImageModel imageModel,
+    required BarcodeImageModel imageModel,
   }) {
     return _platform.printImage(imageModel: imageModel);
   }

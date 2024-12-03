@@ -27,7 +27,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required String ipAddress,
   });
   Future<void> printImage({
-    required ImageModel imageModel,
+    required BarcodeImageModel imageModel,
   });
 
   Future<void> printBarcode({

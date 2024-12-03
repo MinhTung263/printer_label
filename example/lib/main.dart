@@ -49,7 +49,7 @@ class _MyHomePageState extends State<MyHomePage> {
       barcode: "56789345233",
       name: "Sản phẩm iPad Pro",
       price: "27.890.000 VNĐ",
-      quantity: 2,
+      quantity: 4,
     )
   ];
 
@@ -82,17 +82,15 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> printProductLabels() async {
-    final images = await captureProductListAsImages(
-      products,
-      context,
+    await getListProd(
       typePrintEnum: TypePrintEnum.doubleLabel,
     );
 
     final totalQuantity =
         products.fold(0, (sum, product) => sum + product.quantity);
 
-    for (var image in images) {
-      final model = ImageModel(
+    for (var image in productImages) {
+      final model = BarcodeImageModel(
         imageData: image,
         quantity: (totalQuantity / 2).ceil(),
         height: 25,
@@ -171,6 +169,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onPressed: () async {
         await getListProd(typePrintEnum: TypePrintEnum.doubleLabel);
         Navigator.push(
+          // ignore: use_build_context_synchronously
           context,
           MaterialPageRoute(
             builder: (context) =>
@@ -193,7 +192,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onPressed: () async {
         await getListProd();
         for (var i = 0; i < products.length; i++) {
-          final ImageModel model = ImageModel(
+          final BarcodeImageModel model = BarcodeImageModel(
             imageData: productImages[i],
             quantity: products[i].quantity,
             y: 20,
@@ -298,7 +297,7 @@ class _MyHomePageState extends State<MyHomePage> {
           imageDataList.add(uint8List);
         }
         for (var i = 0; i < imageDataList.length; i++) {
-          final ImageModel model = ImageModel(
+          final BarcodeImageModel model = BarcodeImageModel(
             imageData: imageDataList[i],
             quantity: 2,
           );

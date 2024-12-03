@@ -9,10 +9,10 @@ Future<List<Uint8List>> captureProductListAsImages(
   BuildContext context, {
   TypePrintEnum? typePrintEnum,
 }) async {
-  final List<Uint8List> images = [];
   final screenshotController = ScreenshotController();
   final constraints = BoxConstraints.tightFor();
   if (typePrintEnum == TypePrintEnum.singleLabel) {
+    final List<Uint8List> images = [];
     for (var product in products) {
       final productWidget = BarcodeView(
         product: product,
@@ -25,45 +25,60 @@ Future<List<Uint8List>> captureProductListAsImages(
       );
       images.add(imageBytes);
     }
+    return images;
   } else {
+    final List<Uint8List> images = [];
+    List<ProductBarcodeModel> expandedProducts = [];
     for (var product in products) {
-      int remainingQuantity = product.quantity;
-      int maxPerRow = 2;
-
-      while (remainingQuantity > 0) {
-        int currentBatch =
-            remainingQuantity >= maxPerRow ? maxPerRow : remainingQuantity;
-
-        final productWidgets = <Widget>[];
-        for (int i = 0; i < currentBatch; i++) {
-          productWidgets.add(
-            BarcodeView(
-              product: product,
-              typePrintEnum: typePrintEnum,
-            ),
-          );
-
-          if (i < currentBatch - 1) {
-            productWidgets.add(SizedBox(width: 60));
-          }
-        }
-
-        final productWidget = Row(
-          children: productWidgets,
-        );
-
-        final imageBytes = await screenshotController.captureFromLongWidget(
-          productWidget,
-          context: context,
-          constraints: constraints,
-        );
-
-        images.add(imageBytes);
-
-        remainingQuantity -= currentBatch;
+      for (int i = 0; i < product.quantity; i++) {
+        expandedProducts.add(product);
       }
     }
-  }
+    List<List<ProductBarcodeModel>> groupedProducts = [];
+    int itemsPerRow = 2;
 
-  return images;
+    for (int i = 0; i < expandedProducts.length; i++) {
+      if (i % itemsPerRow == 0) {
+        groupedProducts.add([]);
+      }
+      groupedProducts.last.add(expandedProducts[i]);
+    }
+
+    for (var row in groupedProducts) {
+      List<Widget> productWidgets = [];
+
+      for (int i = 0; i < row.length; i++) {
+        // Thêm widget sản phẩm vào danh sách
+        productWidgets.add(
+          BarcodeView(
+            product: row[i],
+            typePrintEnum: typePrintEnum,
+          ),
+        );
+
+        if (i < row.length - 1) {
+          productWidgets.add(SizedBox(width: 60));
+        }
+      }
+      if (row.length % 2 != 0) {
+        productWidgets.add(SizedBox(
+          width: (typePrintEnum?.width ?? 0) + 60,
+          height: typePrintEnum?.height,
+        ));
+      }
+
+      final rowWidget = Row(
+        children: productWidgets,
+      );
+
+      final imageBytes = await screenshotController.captureFromLongWidget(
+        rowWidget,
+        context: context,
+        constraints: constraints,
+      );
+
+      images.add(imageBytes);
+    }
+    return images;
+  }
 }

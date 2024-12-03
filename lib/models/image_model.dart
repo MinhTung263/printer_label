@@ -1,15 +1,15 @@
 import 'dart:typed_data';
 
-class ImageModel {
+class BarcodeImageModel {
   final Uint8List imageData;
-  final int quantity;
+  int quantity;
   final double? width;
   final double? height;
   final int? x;
   final int? y;
   final int? widthImage;
 
-  ImageModel({
+  BarcodeImageModel({
     required this.imageData,
     this.quantity = 1, // Default value is 1
     this.width,
