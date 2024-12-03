@@ -43,7 +43,7 @@ Future<List<Uint8List>> captureProductListAsImages(
       }
       groupedProducts.last.add(expandedProducts[i]);
     }
-
+    List<Widget> productWidgetsResult = [];
     for (var row in groupedProducts) {
       List<Widget> productWidgets = [];
 
@@ -70,15 +70,32 @@ Future<List<Uint8List>> captureProductListAsImages(
       final rowWidget = Row(
         children: productWidgets,
       );
+      productWidgetsResult.add(Column(
+        children: [
+          // if (groupedProducts.length % 2 != 0)
+          SizedBox(
+            height: 15,
+          ),
+          rowWidget,
+        ],
+      ));
+      // final imageBytes = await screenshotController.captureFromLongWidget(
+      //   rowWidget,
+      //   context: context,
+      //   constraints: constraints,
+      // );
 
-      final imageBytes = await screenshotController.captureFromLongWidget(
-        rowWidget,
-        context: context,
-        constraints: constraints,
-      );
-
-      images.add(imageBytes);
+      // images.add(imageBytes);
     }
-    return images;
+
+    final imageBytes = await screenshotController.captureFromLongWidget(
+      Column(
+        children: productWidgetsResult,
+      ),
+      context: context,
+      constraints: constraints,
+    );
+    return [imageBytes];
+    // return images;
   }
 }

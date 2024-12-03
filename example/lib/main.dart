@@ -43,7 +43,13 @@ class _MyHomePageState extends State<MyHomePage> {
       barcode: "12345678",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: "28.900.000 VNĐ",
-      quantity: 3,
+      quantity: 1,
+    ),
+    ProductBarcodeModel(
+      barcode: "12345678",
+      name: "Sản phẩm Ipad 4",
+      price: "30.900.000 VNĐ",
+      quantity: 2,
     ),
     ProductBarcodeModel(
       barcode: "56789345233",
@@ -88,18 +94,32 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final totalQuantity =
         products.fold(0, (sum, product) => sum + product.quantity);
-
-    for (var image in productImages) {
+    for (var i = 0; i < productImages.length; i++) {
       final model = BarcodeImageModel(
-        imageData: image,
-        quantity: (totalQuantity / 2).ceil(),
-        height: 25,
+        imageData: productImages[i],
+        height: (25 * (totalQuantity / 2).ceil().toDouble()),
         x: 0,
         y: 5,
         width: 70,
       );
       await PrinterLabel.printImage(imageModel: model);
+      // await Future.delayed(const Duration(seconds: 1));
+      // await PrinterLabel.printImage(imageModel: model);
     }
+
+    // for (var image in productImages) {
+    //   final model = BarcodeImageModel(
+    //     imageData: image,
+    // quantity: (totalQuantity / 2).ceil(),
+    //     height: 25,
+    //     x: 0,
+    //     y: 5,
+    //     width: 70,
+    //   );
+    //   await PrinterLabel.printImage(imageModel: model);
+    //   await PrinterLabel.printImage(imageModel: model);
+
+    // }
   }
 
   @override
