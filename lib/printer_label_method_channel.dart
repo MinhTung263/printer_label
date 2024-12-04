@@ -18,16 +18,22 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<void> printImage({
+  Future<bool> printImage({
     required List<Map<String, dynamic>> productList,
   }) async {
-    final Map<String, dynamic> params = {
-      'products': productList,
-    };
-    await _channel.invokeMethod(
-      'print_image',
-      params,
-    );
+    try {
+      final Map<String, dynamic> params = {
+        'products': productList,
+      };
+      final bool? result = await _channel.invokeMethod<bool>(
+        'print_image',
+        params,
+      );
+      return result ?? false;
+    } catch (e) {
+      print('Error while printing image: $e');
+      return false;
+    }
   }
 
   Future<String?> get platformVersion async {

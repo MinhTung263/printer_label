@@ -18,7 +18,7 @@ class PrinterLabel {
     return _platform.connectLan(ipAddress: ipAddress);
   }
 
-  static Future<void> printImage({
+  static Future<bool> printImage({
     required List<Map<String, dynamic>> productList,
   }) {
     return _platform.printImage(

@@ -26,7 +26,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   Future<void> connectLan({
     required String ipAddress,
   });
-  Future<void> printImage({
+  Future<bool> printImage({
     required List<Map<String, dynamic>> productList,
   });
 

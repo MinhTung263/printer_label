@@ -56,7 +56,7 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
 
       }
       "print_image" -> {
-        printImage(call)
+        printImage(call,result)
       }
       else -> {
         result.notImplemented()
@@ -217,9 +217,13 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
     printer.text(textX, textY, font, rotation, sizeX, sizeY, textData)
   }
 
-  private fun printImage(call: MethodCall){
-    val printer = TSPLPrinter(curConnect)
-      val productList: List<Map<String, Any>> = call.argument("products") ?: return
+  private fun printImage(call: MethodCall,result: MethodChannel.Result){
+    try {
+      val printer = TSPLPrinter(curConnect)
+      val productList: List<Map<String, Any>> = call.argument("products") ?: run {
+        result.error("INVALID_ARGUMENT", "Products argument is missing", null)
+        return
+      }
       for (product in productList) {
           val imageData: ByteArray? = product["image_data"] as? ByteArray
           if (imageData != null) {
@@ -238,6 +242,11 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
               }
           }
       }
+      result.success(true)
+    } catch (e: Exception) {
+      // Trả kết quả lỗi về Flutter
+      result.error("PRINT_ERROR", "Failed to print image: ${e.message}", null)
+    }
   }
 }
 

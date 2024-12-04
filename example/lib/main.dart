@@ -93,25 +93,21 @@ class _MyHomePageState extends State<MyHomePage> {
     required TypePrintEnum typePrint,
   }) async {
     final isPrintSigle = typePrint == TypePrintEnum.singleLabel;
-    try {
-      final List<Map<String, dynamic>> productList = [];
-      for (int i = 0; i < products.length; i++) {
-        final product = products[i];
-        final imageBytes = images[i];
-        final model = BarcodeImageModel(
-          imageData: imageBytes,
-          quantity: product.quantity.toInt(),
-          y: isPrintSigle ? 20 : 5,
-          width: isPrintSigle ? null : 70,
-          height: isPrintSigle ? null : 25,
-        );
-        productList.add(model.toMap());
-      }
 
-      await PrinterLabel.printImage(productList: productList);
-    } on PlatformException catch (e) {
-      print("Error printing images: ${e.message}");
+    final List<Map<String, dynamic>> productList = [];
+    for (int i = 0; i < products.length; i++) {
+      final product = products[i];
+      final imageBytes = images[i];
+      final model = BarcodeImageModel(
+        imageData: imageBytes,
+        quantity: product.quantity.toInt(),
+        y: isPrintSigle ? 20 : 5,
+        width: isPrintSigle ? null : 70,
+        height: isPrintSigle ? null : 25,
+      );
+      productList.add(model.toMap());
     }
+    await PrinterLabel.printImage(productList: productList);
   }
 
   @override

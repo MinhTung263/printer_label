@@ -8,18 +8,16 @@ Future<List<Uint8List>> captureProductListAsImages(
   List<ProductBarcodeModel> products,
   BuildContext context, {
   TypePrintEnum? typePrintEnum,
-  Widget? child,
 }) async {
   final screenshotController = ScreenshotController();
   final constraints = BoxConstraints.tightFor();
   if (typePrintEnum == TypePrintEnum.singleLabel) {
     final List<Uint8List> images = [];
     for (var product in products) {
-      final productWidget = child ??
-          BarcodeView(
-            product: product,
-            typePrintEnum: typePrintEnum,
-          );
+      final productWidget = BarcodeView(
+        product: product,
+        typePrintEnum: typePrintEnum,
+      );
       final imageBytes = await screenshotController.captureFromWidget(
         productWidget,
         context: context,
@@ -52,11 +50,10 @@ Future<List<Uint8List>> captureProductListAsImages(
       for (int i = 0; i < row.length; i++) {
         // Thêm widget sản phẩm vào danh sách
         productWidgets.add(
-          child ??
-              BarcodeView(
-                product: row[i],
-                typePrintEnum: typePrintEnum,
-              ),
+          BarcodeView(
+            product: row[i],
+            typePrintEnum: typePrintEnum,
+          ),
         );
 
         if (i < row.length - 1) {
