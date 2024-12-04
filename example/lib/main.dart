@@ -43,13 +43,19 @@ class _MyHomePageState extends State<MyHomePage> {
       barcode: "12345678",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: 28990000,
-      quantity: 3,
+      quantity: 1,
     ),
     ProductBarcodeModel(
       barcode: "56789345233",
       name: "Sản phẩm iPad Pro",
       price: 27890000,
-      quantity: 4,
+      quantity: 2,
+    ),
+    ProductBarcodeModel(
+      barcode: "2222",
+      name: "Áo phông",
+      price: 50000,
+      quantity: 3,
     )
   ];
 
@@ -81,24 +87,30 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Future<void> printProductLabels() async {
-    await getListProd(
-      typePrintEnum: TypePrintEnum.doubleLabel,
-    );
+  Future<void> configPrintImage({
+    required List<Uint8List> images,
+    required List<ProductBarcodeModel> products,
+    required TypePrintEnum typePrint,
+  }) async {
+    final isPrintSigle = typePrint == TypePrintEnum.singleLabel;
+    try {
+      final List<Map<String, dynamic>> productList = [];
+      for (int i = 0; i < products.length; i++) {
+        final product = products[i];
+        final imageBytes = images[i];
+        final model = BarcodeImageModel(
+          imageData: imageBytes,
+          quantity: product.quantity.toInt(),
+          y: isPrintSigle ? 20 : 5,
+          width: isPrintSigle ? null : 70,
+          height: isPrintSigle ? null : 25,
+        );
+        productList.add(model.toMap());
+      }
 
-    final totalQuantity =
-        products.fold(0.0, (sum, product) => sum + product.quantity);
-
-    for (var image in productImages) {
-      final model = BarcodeImageModel(
-        imageData: image,
-        quantity: (totalQuantity / 2).ceil(),
-        height: 25,
-        x: 0,
-        y: 5,
-        width: 70,
-      );
-      await PrinterLabel.printImage(imageModel: model);
+      await PrinterLabel.printImage(productList: productList);
+    } on PlatformException catch (e) {
+      print("Error printing images: ${e.message}");
     }
   }
 
@@ -124,38 +136,17 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             const Padding(padding: EdgeInsets.all(10)),
-            Row(
-              children: [
-                _printListImageLocal(),
-                const Padding(padding: EdgeInsets.all(10)),
-                _buildPrintBarcode(),
-              ],
-            ),
+            _buildPrintBarcode(),
             const Padding(padding: EdgeInsets.all(10)),
-            Row(
-              children: [
-                _printTypeSingleLabel(),
-                _printTypeDoubleLabel(),
-              ],
+            _printImage(
+              typePrintEnum: TypePrintEnum.singleLabel,
+            ),
+            _printImage(
+              typePrintEnum: TypePrintEnum.doubleLabel,
             ),
             _viewListImage(),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _printTypeDoubleLabel() {
-    return ElevatedButton(
-      onPressed: () async {
-        await printProductLabels();
-      },
-      child: Text(
-        "Print(${products.map(
-              (e) => e.quantity,
-            ).reduce(
-              (value, element) => value + element,
-            )}) product 2 label",
       ),
     );
   }
@@ -175,7 +166,7 @@ class _MyHomePageState extends State<MyHomePage> {
       },
       child: Text(
         "View list( ${products.map(
-              (e) => e.quantity,
+              (e) => e.quantity.toDouble(),
             ).reduce(
               (value, element) => value + element,
             )})",
@@ -183,22 +174,23 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget _printTypeSingleLabel() {
+  Widget _printImage({
+    required TypePrintEnum typePrintEnum,
+  }) {
     return ElevatedButton(
       onPressed: () async {
-        await getListProd();
-        for (var i = 0; i < products.length; i++) {
-          final BarcodeImageModel model = BarcodeImageModel(
-            imageData: productImages[i],
-            quantity: products[i].quantity.toInt(),
-            y: 20,
-          );
-          await PrinterLabel.printImage(imageModel: model);
-        }
+        await getListProd(
+          typePrintEnum: typePrintEnum,
+        );
+        await configPrintImage(
+          products: products,
+          images: productImages,
+          typePrint: typePrintEnum,
+        );
       },
       child: Text(
-        "Print(${products.map(
-              (e) => e.quantity,
+        "Print ${typePrintEnum.name} (${products.map(
+              (e) => e.quantity.toInt(),
             ).reduce(
               (value, element) => value + element,
             )}) product",
@@ -270,38 +262,6 @@ class _MyHomePageState extends State<MyHomePage> {
       },
       child: const Text(
         "Print barcode",
-      ),
-    );
-  }
-
-  Widget _printListImageLocal() {
-    return ElevatedButton(
-      onPressed: () async {
-        // Load the images as byte data
-        final List<Uint8List> imageDataList = [];
-        // Example image paths (add your images here)
-        final List<String> imagePaths = [
-          image1,
-          image2,
-          imageBarCode,
-        ];
-
-        // Load each image into Uint8List
-        for (String imagePath in imagePaths) {
-          final ByteData data = await rootBundle.load(imagePath);
-          final Uint8List uint8List = data.buffer.asUint8List();
-          imageDataList.add(uint8List);
-        }
-        for (var i = 0; i < imageDataList.length; i++) {
-          final BarcodeImageModel model = BarcodeImageModel(
-            imageData: imageDataList[i],
-            quantity: 2,
-          );
-          await PrinterLabel.printImage(imageModel: model);
-        }
-      },
-      child: const Text(
-        "Print list image local",
       ),
     );
   }

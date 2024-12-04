@@ -17,12 +17,16 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     });
   }
 
+  @override
   Future<void> printImage({
-    required BarcodeImageModel imageModel,
+    required List<Map<String, dynamic>> productList,
   }) async {
+    final Map<String, dynamic> params = {
+      'products': productList,
+    };
     await _channel.invokeMethod(
       'print_image',
-      imageModel.toMap(),
+      params,
     );
   }
 

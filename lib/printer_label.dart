@@ -19,9 +19,11 @@ class PrinterLabel {
   }
 
   static Future<void> printImage({
-    required BarcodeImageModel imageModel,
+    required List<Map<String, dynamic>> productList,
   }) {
-    return _platform.printImage(imageModel: imageModel);
+    return _platform.printImage(
+      productList: productList,
+    );
   }
 
   static Future<void> printBarcode({

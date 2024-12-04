@@ -57,7 +57,6 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
       }
       "print_image" -> {
         printImage(call)
-
       }
       else -> {
         result.notImplemented()
@@ -153,7 +152,6 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
 
 
   private fun printBarcode(call: MethodCall,result: MethodChannel.Result) {
-
     val size = call.argument<Map<String, Double>>("size")
     val gap = call.argument<Map<String, Double>>("gap")
     val barcode = call.argument<Map<String, Any>>("barcode")
@@ -221,22 +219,25 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
 
   private fun printImage(call: MethodCall){
     val printer = TSPLPrinter(curConnect)
-    val imageData: ByteArray? = call.argument<ByteArray>("image_data")
-    if (imageData != null) {
-      val quantity = call.argument<Int>("quantity") ?: 1
-      val size = call.argument<Map<String, Double>>("size")
-      val (sizeWidth, sizeHeight) = extractSizeImage(size)
-      val width = call.argument<Int>("widthImage") ?: 600
-      val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData!!.size)
-      val x = call.argument<Int>("x") ?: 0
-      val y = call.argument<Int>("y") ?: 50
-      if (bitmap != null) {
-        printer.sizeMm(sizeWidth, sizeHeight)
-          .cls()
-          .bitmap(x, y, TSPLConst.BMP_MODE_OVERWRITE, width, bitmap, AlgorithmType.Threshold)
-          .print(quantity)
+      val productList: List<Map<String, Any>> = call.argument("products") ?: return
+      for (product in productList) {
+          val imageData: ByteArray? = product["image_data"] as? ByteArray
+          if (imageData != null) {
+              val quantity = product["quantity"] as? Int ?: 1
+              val size = product["size"] as? Map<String, Double>
+              val (sizeWidth, sizeHeight) = extractSizeImage(size)
+              val width = product["widthImage"] as? Int ?: 600
+              val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+              val x = product["x"] as? Int ?: 0
+              val y = product["y"] as? Int ?: 50
+              if (bitmap != null) {
+                  printer.sizeMm(sizeWidth, sizeHeight)
+                      .cls()
+                      .bitmap(x, y, TSPLConst.BMP_MODE_OVERWRITE, width, bitmap, AlgorithmType.Threshold)
+                      .print(quantity)
+              }
+          }
       }
-    }
   }
 }
 
