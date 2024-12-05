@@ -9,6 +9,8 @@ Future<List<Uint8List>> captureProductListAsImages(
   BuildContext context, {
   TypePrintEnum? typePrintEnum,
   int itemsPerRow = 2,
+  double spacer = 60,
+  Size? targetSize,
 }) async {
   final screenshotController = ScreenshotController();
   final constraints = BoxConstraints.tightFor();
@@ -22,7 +24,7 @@ Future<List<Uint8List>> captureProductListAsImages(
       final imageBytes = await screenshotController.captureFromWidget(
         productWidget,
         context: context,
-        targetSize: const Size(360, 200),
+        targetSize: targetSize ?? const Size(360, 200),
       );
       images.add(imageBytes);
     }
@@ -55,13 +57,13 @@ Future<List<Uint8List>> captureProductListAsImages(
         );
 
         if (i < row.length - 1) {
-          productWidgets.add(SizedBox(width: 60));
+          productWidgets.add(SizedBox(width: spacer));
         }
       }
       final itemsToAdd = itemsPerRow - row.length;
       for (int i = 0; i < itemsToAdd; i++) {
         productWidgets.add(SizedBox(
-          width: (typePrintEnum?.width ?? 0) + 60,
+          width: (typePrintEnum?.width ?? 0) + spacer,
           height: typePrintEnum?.height,
         ));
       }
