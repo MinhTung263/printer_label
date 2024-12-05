@@ -38,7 +38,7 @@ dependencies:
   barcode_widget: ^2.0.4
   screenshot: ^3.0.0
   plugin_platform_interface: ^2.1.2
-  intl: ^0.20.1
+  intl: ^0.19.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
