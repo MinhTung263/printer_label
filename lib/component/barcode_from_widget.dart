@@ -8,7 +8,7 @@ Future<List<Uint8List>> captureProductListAsImages(
   List<ProductBarcodeModel> products,
   BuildContext context, {
   TypePrintEnum? typePrintEnum,
-  int itemsPerRow = 7,
+  int itemsPerRow = 2,
 }) async {
   final screenshotController = ScreenshotController();
   final constraints = BoxConstraints.tightFor();
