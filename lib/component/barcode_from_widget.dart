@@ -8,6 +8,7 @@ Future<List<Uint8List>> captureProductListAsImages(
   List<ProductBarcodeModel> products,
   BuildContext context, {
   TypePrintEnum? typePrintEnum,
+  int itemsPerRow = 7,
 }) async {
   final screenshotController = ScreenshotController();
   final constraints = BoxConstraints.tightFor();
@@ -28,14 +29,13 @@ Future<List<Uint8List>> captureProductListAsImages(
     return images;
   } else {
     final List<Uint8List> images = [];
-    List<ProductBarcodeModel> expandedProducts = [];
+    final List<ProductBarcodeModel> expandedProducts = [];
     for (var product in products) {
       for (int i = 0; i < product.quantity; i++) {
         expandedProducts.add(product);
       }
     }
-    List<List<ProductBarcodeModel>> groupedProducts = [];
-    int itemsPerRow = 2;
+    final List<List<ProductBarcodeModel>> groupedProducts = [];
 
     for (int i = 0; i < expandedProducts.length; i++) {
       if (i % itemsPerRow == 0) {
@@ -45,10 +45,8 @@ Future<List<Uint8List>> captureProductListAsImages(
     }
 
     for (var row in groupedProducts) {
-      List<Widget> productWidgets = [];
-
+      final List<Widget> productWidgets = [];
       for (int i = 0; i < row.length; i++) {
-        // Thêm widget sản phẩm vào danh sách
         productWidgets.add(
           BarcodeView(
             product: row[i],
@@ -60,13 +58,13 @@ Future<List<Uint8List>> captureProductListAsImages(
           productWidgets.add(SizedBox(width: 60));
         }
       }
-      if (row.length % 2 != 0) {
+      final itemsToAdd = itemsPerRow - row.length;
+      for (int i = 0; i < itemsToAdd; i++) {
         productWidgets.add(SizedBox(
           width: (typePrintEnum?.width ?? 0) + 60,
           height: typePrintEnum?.height,
         ));
       }
-
       final rowWidget = Row(
         children: productWidgets,
       );
