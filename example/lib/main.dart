@@ -115,6 +115,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }) async {
     final model = BarcodeImageModel(
       y: 5,
+      x: 10,
       images: images,
       width: 70,
       height: 25,
