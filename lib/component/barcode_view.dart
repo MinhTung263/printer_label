@@ -1,5 +1,6 @@
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../src.dart';
 
@@ -37,7 +38,11 @@ class BarcodeView extends StatelessWidget {
             style: const TextStyle(fontSize: 18),
           ),
           _buildText(
-            product.price.toString(),
+            NumberFormat.currency(
+                  locale: 'vi_VN',
+                  symbol: '',
+                ).format(product.price) +
+                "VNĐ",
             fontWeight: FontWeight.bold,
             addFontSize: 5,
           ),
