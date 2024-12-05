@@ -30,6 +30,9 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required List<Map<String, dynamic>> productList,
   });
 
+  Future<void> printMultiLabel({
+    required BarcodeImageModel imageModel,
+  });
   Future<void> printBarcode({
     required BarcodeModel printBarcodeModel,
   });

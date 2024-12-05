@@ -43,19 +43,19 @@ class _MyHomePageState extends State<MyHomePage> {
       barcode: "12345678",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: 28990000,
-      quantity: 1,
+      quantity: 7,
     ),
     ProductBarcodeModel(
       barcode: "56789345233",
       name: "Sản phẩm iPad Pro",
       price: 27890000,
-      quantity: 2,
+      quantity: 3,
     ),
     ProductBarcodeModel(
       barcode: "2222",
       name: "Áo phông",
       price: 50000,
-      quantity: 3,
+      quantity: 4,
     )
   ];
 
@@ -110,6 +110,18 @@ class _MyHomePageState extends State<MyHomePage> {
     await PrinterLabel.printImage(productList: productList);
   }
 
+  Future<void> configPrintMultiLabel({
+    required List<Uint8List> images,
+  }) async {
+    final model = BarcodeImageModel(
+      y: 5,
+      images: images,
+      width: 70,
+      height: 25,
+    );
+    await PrinterLabel.printMultiLabel(barcodeImageModel: model);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -137,9 +149,7 @@ class _MyHomePageState extends State<MyHomePage> {
             _printImage(
               typePrintEnum: TypePrintEnum.singleLabel,
             ),
-            _printImage(
-              typePrintEnum: TypePrintEnum.doubleLabel,
-            ),
+            _printMultilLabel(),
             _viewListImage(),
           ],
         ),
@@ -186,6 +196,26 @@ class _MyHomePageState extends State<MyHomePage> {
       },
       child: Text(
         "Print ${typePrintEnum.name} (${products.map(
+              (e) => e.quantity.toInt(),
+            ).reduce(
+              (value, element) => value + element,
+            )}) product",
+      ),
+    );
+  }
+
+  Widget _printMultilLabel() {
+    return ElevatedButton(
+      onPressed: () async {
+        await getListProd(
+          typePrintEnum: TypePrintEnum.doubleLabel,
+        );
+        await configPrintMultiLabel(
+          images: productImages,
+        );
+      },
+      child: Text(
+        "Print multi label (${products.map(
               (e) => e.quantity.toInt(),
             ).reduce(
               (value, element) => value + element,

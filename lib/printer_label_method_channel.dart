@@ -57,4 +57,11 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       }
     });
   }
+
+  @override
+  Future<void> printMultiLabel({
+    required BarcodeImageModel imageModel,
+  }) async {
+    await _channel.invokeMethod('print_multiLabel', imageModel.toMap());
+  }
 }

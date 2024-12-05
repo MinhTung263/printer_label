@@ -1,7 +1,8 @@
 import 'dart:typed_data';
 
 class BarcodeImageModel {
-  final Uint8List imageData;
+  final Uint8List? imageData;
+  final List<Uint8List>? images;
   int quantity;
   final double? width;
   final double? height;
@@ -10,7 +11,8 @@ class BarcodeImageModel {
   final int? widthImage;
 
   BarcodeImageModel({
-    required this.imageData,
+    this.imageData,
+    this.images,
     this.quantity = 1, // Default value is 1
     this.width,
     this.height,
@@ -23,6 +25,7 @@ class BarcodeImageModel {
   Map<String, dynamic> toMap() {
     return {
       'image_data': imageData,
+      'images': images,
       'quantity': quantity,
       'widthImage': widthImage,
       'x': x,

@@ -58,6 +58,9 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
       "print_image" -> {
         printImage(call,result)
       }
+      "print_multiLabel" -> {
+        printMultiLabel(call)
+      }
       else -> {
         result.notImplemented()
       }
@@ -246,6 +249,25 @@ class PrinterLabelPlugin: FlutterPlugin, MethodCallHandler {
     } catch (e: Exception) {
       // Trả kết quả lỗi về Flutter
       result.error("PRINT_ERROR", "Failed to print image: ${e.message}", null)
+    }
+  }
+  private fun printMultiLabel(call: MethodCall) {
+    val images: List<ByteArray>? = call.argument<List<ByteArray>>("images")
+    val printer = TSPLPrinter(curConnect)
+    images?.forEach { imageData ->
+      val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+      if (bitmap != null) {
+        val size = call.argument<Map<String, Double>>("size")
+        val (sizeWidth, sizeHeight) = extractSizeImage(size)
+        val width = call.argument<Int>("widthImage") ?: 600
+        val x = call.argument<Int>("x") ?: 0
+        val y = call.argument<Int>("y") ?: 50
+        val quantity = 1
+        printer.sizeMm(sizeWidth, sizeHeight)
+          .cls()
+          .bitmap(x, y, TSPLConst.BMP_MODE_OVERWRITE, width, bitmap, AlgorithmType.Threshold)
+          .print(quantity)
+      }
     }
   }
 }

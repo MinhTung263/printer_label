@@ -26,6 +26,12 @@ class PrinterLabel {
     );
   }
 
+  static Future<void> printMultiLabel({
+    required BarcodeImageModel barcodeImageModel,
+  }) {
+    return _platform.printMultiLabel(imageModel: barcodeImageModel);
+  }
+
   static Future<void> printBarcode({
     required BarcodeModel printBarcodeModel,
   }) {
