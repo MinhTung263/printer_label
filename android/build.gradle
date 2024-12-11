@@ -30,7 +30,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-
+    namespace 'com.printer.printer_label'
     viewBinding {
         enabled = true
     }

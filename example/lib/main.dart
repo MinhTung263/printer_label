@@ -40,22 +40,22 @@ class _MyHomePageState extends State<MyHomePage> {
 
   final List<ProductBarcodeModel> products = [
     ProductBarcodeModel(
-      barcode: "12345678",
+      barcode: "76789634223",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: 28990000,
-      quantity: 7,
+      quantity: 2,
     ),
     ProductBarcodeModel(
       barcode: "56789345233",
       name: "Sản phẩm iPad Pro",
       price: 27890000,
-      quantity: 3,
+      quantity: 2,
     ),
     ProductBarcodeModel(
-      barcode: "2222",
+      barcode: "1234543234",
       name: "Áo phông",
-      price: 50000,
-      quantity: 4,
+      price: 350000,
+      quantity: 3,
     )
   ];
 
