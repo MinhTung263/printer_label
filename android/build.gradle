@@ -1,6 +1,5 @@
 group 'com.printer.printer_label'
 version '1.0'
-apply from: "./resolve_dependencies.gradle"
 buildscript {
     ext.kotlin_version = '1.8.22'
     repositories {
@@ -30,28 +29,27 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
+     if (project.android.hasProperty("namespace")) {
     namespace 'com.printer.printer_label'
-    viewBinding {
-        enabled = true
     }
     compileSdk 34
     defaultConfig {
         minSdkVersion 21
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+    lintOptions {
+        disable 'InvalidPackage'
     }
 
 }
 
 
 dependencies {
-   implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    implementation 'androidx.lifecycle:lifecycle-extensions:2.2.0'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.1'
-    implementation 'com.google.android.material:material:1.8.0'
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
     implementation "io.reactivex.rxjava3:rxjava:3.1.5"
     implementation 'io.github.jeremyliao:live-event-bus-x:1.8.0'
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
     implementation files('libs/printer-lib-3.2.0/classes.jar')
     testImplementation 'junit:junit:4.13.2'
 
