@@ -1,6 +1,8 @@
 package com.printer.printer_label
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.BitmapFactory
 import android.hardware.usb.UsbManager
@@ -8,9 +10,6 @@ import android.os.Build
 import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.annotation.RequiresApi
-import com.printer.printer_label.utils.Constant
-import com.jeremyliao.liveeventbus.LiveEventBus
-
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -82,35 +81,22 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         binding.applicationContext.unregisterReceiver(usbReceiver)
     }
 
-    private fun getStatusConnectUsb(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL).apply {
-            LiveEventBus.get<Boolean>("EVENT_CONNECT_STATUS").observeForever { isConnected ->
-                invokeMethod("connectionStatus", isConnected)
-            }
-        }
-    }
-
     private val connectListener = IConnectListener { code, connInfo, msg ->
         when (code) {
             POSConnect.CONNECT_SUCCESS -> {
                 toast("CONNECT_SUCCESS")
-                LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).post(true)
+                channel.invokeMethod("connectionStatus", true)
             }
-
             POSConnect.CONNECT_FAIL -> {
                 toast("CONNECT_FAIL")
-                LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).post(false)
+                channel.invokeMethod("connectionStatus", false)
             }
-
             POSConnect.CONNECT_INTERRUPT -> {
                 toast("CONNECT_INTERRUPT")
-                LiveEventBus.get<Boolean>(Constant.EVENT_CONNECT_STATUS).post(false)
             }
-
             POSConnect.SEND_FAIL -> {
                 toast("SEND_FAIL")
             }
-
             POSConnect.USB_DETACHED -> {
                 toast("USB_DETACHED")
             }
@@ -126,7 +112,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     @RequiresApi(Build.VERSION_CODES.HONEYCOMB_MR1)
-    private fun actitonConnectUSB() {
+    fun actitonConnectUSB() {
         val pathName = getUsbDevicePath(mContext!!)
         if (pathName != null) {
             connectUSB(pathName)
@@ -138,10 +124,15 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
         val deviceList = usbManager.deviceList
         if (deviceList.isNotEmpty()) {
-            // Get the first available USB device (or loop through if needed)
             val usbDevice = deviceList.values.firstOrNull()
-            // This is just an example; you would need to use UsbDevice.getDeviceId() or other details to identify the device
-            return usbDevice?.deviceName  // Returns something like "/dev/bus/usb/001/001"
+            if (usbDevice != null && usbManager.hasPermission(usbDevice)) {
+                return usbDevice.deviceName
+            } else {
+                val permissionIntent = PendingIntent.getBroadcast(
+                    context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE
+                )
+                usbManager.requestPermission(usbDevice, permissionIntent)
+            }
         }
         return null
     }
@@ -312,6 +303,9 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     .print(quantity)
             }
         }
+    }
+    companion object {
+        private const val ACTION_USB_PERMISSION = "com.example.USB_PERMISSION"
     }
 }
 

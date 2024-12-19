@@ -13,9 +13,7 @@ class UsbConnectionReceiver(private val methodChannel: MethodChannel,private val
         if (UsbManager.ACTION_USB_DEVICE_ATTACHED == action) {
             val device: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
             if (device != null) {
-                val pathName =printerLabelPlugin.getUsbDevicePath(printerLabelPlugin.mContext!!)
-                printerLabelPlugin.connectUSB(pathName!!)
-                methodChannel.invokeMethod("connectionStatus", true)
+                printerLabelPlugin.actitonConnectUSB()
             }
         } else if (UsbManager.ACTION_USB_DEVICE_DETACHED == action) {
             methodChannel.invokeMethod("connectionStatus", false)
