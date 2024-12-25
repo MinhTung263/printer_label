@@ -30,6 +30,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <receiver
+            android:name="com.sersoluciones.flutter_pos_printer_platform.usb.UsbReceiver"
+            android:exported="false">
+
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.ACTION_USB_PERMISSION" />
+                <action android:name="android.hardware.usb.action.USB_DEVICE_DETACHED" />
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+                <action android:name="com.example.USB_PERMISSION" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
