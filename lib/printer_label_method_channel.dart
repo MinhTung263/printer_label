@@ -64,4 +64,14 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }) async {
     await _channel.invokeMethod('print_multiLabel', imageModel.toMap());
   }
+
+  @override
+  Future<void> printThermal({
+    required PrintThermalModel printThermalModel,
+  }) async {
+    await _channel.invokeMethod(
+      'print_thermal',
+      printThermalModel.toJson(),
+    );
+  }
 }

@@ -18,6 +18,8 @@ import io.flutter.plugin.common.MethodChannel.Result
 import net.posprinter.IConnectListener
 import net.posprinter.IDeviceConnection
 import net.posprinter.POSConnect
+import net.posprinter.POSConst
+import net.posprinter.POSPrinter
 import net.posprinter.TSPLConst
 import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
@@ -30,13 +32,12 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     public var mContext: Context? = null
     private var curConnect: IDeviceConnection? = null
     private lateinit var usbReceiver: UsbConnectionReceiver
-
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL)
         channel.setMethodCallHandler(this)
         mContext = flutterPluginBinding.getApplicationContext()
         POSConnect.init(mContext)
-        usbReceiver = UsbConnectionReceiver(channel,this)
+        usbReceiver = UsbConnectionReceiver(channel, this)
         val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         flutterPluginBinding.applicationContext.registerReceiver(usbReceiver, filter)
@@ -70,6 +71,20 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 printMultiLabel(call)
             }
 
+            "print_thermal" -> {
+                val printer = POSPrinter(curConnect);
+                val image: ByteArray? = call.argument<ByteArray>("image")
+                val size: Int? = call.argument<Int>("size")
+                if (image != null) {
+                    val bitmap = BitmapFactory.decodeByteArray(image, 0, image.size)
+                    printer.initializePrinter()
+                        .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, size ?: 384)
+                        .feedLine()
+                        .cutHalfAndFeed(1)
+                }
+
+            }
+
             else -> {
                 result.notImplemented()
             }
@@ -87,16 +102,20 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 toast("CONNECT_SUCCESS")
                 channel.invokeMethod("connectionStatus", true)
             }
+
             POSConnect.CONNECT_FAIL -> {
                 toast("CONNECT_FAIL")
                 channel.invokeMethod("connectionStatus", false)
             }
+
             POSConnect.CONNECT_INTERRUPT -> {
                 toast("CONNECT_INTERRUPT")
             }
+
             POSConnect.SEND_FAIL -> {
                 toast("SEND_FAIL")
             }
+
             POSConnect.USB_DETACHED -> {
                 toast("USB_DETACHED")
             }
@@ -304,6 +323,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
         }
     }
+
     companion object {
         private const val ACTION_USB_PERMISSION = "com.example.USB_PERMISSION"
     }

@@ -37,4 +37,10 @@ class PrinterLabel {
   }) {
     return _platform.printBarcode(printBarcodeModel: printBarcodeModel);
   }
+
+  static Future<void> printThermal({
+    required PrintThermalModel printThermalModel,
+  }) {
+    return _platform.printThermal(printThermalModel: printThermalModel);
+  }
 }

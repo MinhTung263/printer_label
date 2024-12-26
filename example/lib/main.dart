@@ -40,23 +40,23 @@ class _MyHomePageState extends State<MyHomePage> {
 
   final List<ProductBarcodeModel> products = [
     ProductBarcodeModel(
-      barcode: "76789634223",
+      barcode: "83868888",
       name: "Sản phẩm iPhone 16 Pro Max",
       price: 28990000,
       quantity: 2,
     ),
-    ProductBarcodeModel(
-      barcode: "56789345233",
-      name: "Sản phẩm iPad Pro",
-      price: 27890000,
-      quantity: 2,
-    ),
-    ProductBarcodeModel(
-      barcode: "1234543234",
-      name: "Áo phông",
-      price: 350000,
-      quantity: 3,
-    )
+    // ProductBarcodeModel(
+    //   barcode: "56789345233",
+    //   name: "Sản phẩm iPad Pro",
+    //   price: 27890000,
+    //   quantity: 2,
+    // ),
+    // ProductBarcodeModel(
+    //   barcode: "1234543234",
+    //   name: "Áo phông",
+    //   price: 350000,
+    //   quantity: 3,
+    // )
   ];
 
   @override
@@ -152,6 +152,19 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             _printMultilLabel(),
             _viewListImage(),
+            ElevatedButton(
+              onPressed: () async {
+                await getListProd();
+
+                await PrinterLabel.printThermal(
+                    printThermalModel: PrintThermalModel(
+                  image: productImages.first,
+                ));
+              },
+              child: const Text(
+                "Print thermal",
+              ),
+            )
           ],
         ),
       ),

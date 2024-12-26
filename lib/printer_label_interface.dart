@@ -33,6 +33,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   Future<void> printMultiLabel({
     required BarcodeImageModel imageModel,
   });
+
   Future<void> printBarcode({
     required BarcodeModel printBarcodeModel,
   });
@@ -40,4 +41,8 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   void setupConnectionStatusListener(
     ValueChanged<bool> onStatusChange,
   );
+
+  Future<void> printThermal({
+    required PrintThermalModel printThermalModel,
+  });
 }
