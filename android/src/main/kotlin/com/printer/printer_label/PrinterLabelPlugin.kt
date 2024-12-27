@@ -32,6 +32,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     public var mContext: Context? = null
     private var curConnect: IDeviceConnection? = null
     private lateinit var usbReceiver: UsbConnectionReceiver
+    private var printThermal = PrinterThermal()
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL)
         channel.setMethodCallHandler(this)
@@ -72,17 +73,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
 
             "print_thermal" -> {
-                val printer = POSPrinter(curConnect);
-                val image: ByteArray? = call.argument<ByteArray>("image")
-                val size: Int? = call.argument<Int>("size")
-                if (image != null) {
-                    val bitmap = BitmapFactory.decodeByteArray(image, 0, image.size)
-                    printer.initializePrinter()
-                        .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, size ?: 384)
-                        .feedLine()
-                        .cutHalfAndFeed(1)
-                }
-
+                printThermal.printImage(call, curConnect!!)
             }
 
             else -> {
