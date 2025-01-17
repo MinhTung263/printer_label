@@ -1,7 +1,7 @@
 class ProductBarcodeModel {
   final String barcode;
   final String name;
-  final double price;
+  double price;
   double quantity;
 
   ProductBarcodeModel({
