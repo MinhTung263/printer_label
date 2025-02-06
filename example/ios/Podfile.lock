@@ -1,16 +1,22 @@
 PODS:
   - Flutter (1.0.0)
+  - printer_label (0.0.1):
+    - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
+  - printer_label (from `.symlinks/plugins/printer_label/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
+  printer_label:
+    :path: ".symlinks/plugins/printer_label/ios"
 
 SPEC CHECKSUMS:
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  printer_label: 1f1c81cd4fac83f5bface219eb1de66ca5618ca9
 
-PODFILE CHECKSUM: 819463e6a0290f5a72f145ba7cde16e8b6ef0796
+PODFILE CHECKSUM: 7be2f5f74864d463a8ad433546ed1de7e0f29aef
 
 COCOAPODS: 1.15.2

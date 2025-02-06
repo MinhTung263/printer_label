@@ -37,7 +37,8 @@ class _MyHomePageState extends State<MyHomePage> {
   final String imageBarCode = "images/barcode.png";
 
   List<Uint8List> productImages = [];
-
+  final MethodChannel _channel = MethodChannel('flutter_printer_label');
+  List<String> _devices = [];
   final List<ProductBarcodeModel> products = [
     ProductBarcodeModel(
       barcode: "83868888",
@@ -73,6 +74,24 @@ class _MyHomePageState extends State<MyHomePage> {
       context,
       typePrintEnum: typePrintEnum ?? TypePrintEnum.singleLabel,
     );
+  }
+
+  Future<List<String>> getBluetoothDevices() async {
+    try {
+      final List<dynamic> devices =
+          await _channel.invokeMethod('getBluetoothDevices');
+      return devices.cast<String>();
+    } catch (e) {
+      print('Error getting Bluetooth devices: $e');
+      return [];
+    }
+  }
+
+  Future<void> _getBluetoothDevices() async {
+    List<String> devices = await getBluetoothDevices();
+    setState(() {
+      _devices = devices;
+    });
   }
 
   void initConnectionListener() {
@@ -164,7 +183,24 @@ class _MyHomePageState extends State<MyHomePage> {
               child: const Text(
                 "Print thermal",
               ),
-            )
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                await _getBluetoothDevices();
+              },
+              child: const Text(
+                "Ios",
+              ),
+            ),
+            ListView.builder(
+              itemCount: _devices.length,
+              shrinkWrap: true,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: Text(_devices[index]),
+                );
+              },
+            ),
           ],
         ),
       ),
