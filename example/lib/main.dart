@@ -1,4 +1,5 @@
 import 'package:example/preview_image_printer.dart';
+import 'package:example/printer_ios.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printer_label/src.dart';
@@ -37,8 +38,8 @@ class _MyHomePageState extends State<MyHomePage> {
   final String imageBarCode = "images/barcode.png";
 
   List<Uint8List> productImages = [];
-  final MethodChannel _channel = MethodChannel('flutter_printer_label');
-  List<String> _devices = [];
+
+  Map<String, String>? _device;
   final List<ProductBarcodeModel> products = [
     ProductBarcodeModel(
       barcode: "83868888",
@@ -74,24 +75,6 @@ class _MyHomePageState extends State<MyHomePage> {
       context,
       typePrintEnum: typePrintEnum ?? TypePrintEnum.singleLabel,
     );
-  }
-
-  Future<List<String>> getBluetoothDevices() async {
-    try {
-      final List<dynamic> devices =
-          await _channel.invokeMethod('getBluetoothDevices');
-      return devices.cast<String>();
-    } catch (e) {
-      print('Error getting Bluetooth devices: $e');
-      return [];
-    }
-  }
-
-  Future<void> _getBluetoothDevices() async {
-    List<String> devices = await getBluetoothDevices();
-    setState(() {
-      _devices = devices;
-    });
   }
 
   void initConnectionListener() {
@@ -186,20 +169,24 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             ElevatedButton(
               onPressed: () async {
-                await _getBluetoothDevices();
+                final device = await PrinterIos.openPrinterSelection();
+                setState(() {
+                  _device = device;
+                });
               },
               child: const Text(
-                "Ios",
+                "Connect bluetooth",
               ),
             ),
-            ListView.builder(
-              itemCount: _devices.length,
-              shrinkWrap: true,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  title: Text(_devices[index]),
-                );
+            ElevatedButton(
+              onPressed: () async {
+                if (_device != null) {
+                  await PrinterIos.printWithSelectedPrinter(_device!);
+                }
               },
+              child: Text(
+                _device != null ? _device!["name"].toString() : "Connect",
+              ),
             ),
           ],
         ),
