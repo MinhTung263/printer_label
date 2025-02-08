@@ -23,4 +23,12 @@ class PrinterIos {
       print('Error: $e');
     }
   }
+
+  static Future<void> printWithWifi() async {
+    try {
+      await _channel.invokeMethod('printWifi');
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
 }

@@ -27,7 +27,8 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 }
             }
             result(nil)
-            
+        case "printWifi":
+            printWifi()
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -70,6 +71,15 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         
         
     }
+    
+    private func printWifi() {
+        let pt = PTPrinter.init()
+        pt.ip = "192.168.50.91"
+        pt.module = .wiFi
+        pt.port = "9100"
+        connectAndPrint(printer: pt)
+        
+    }
     func showAlert(message: String) {
         DispatchQueue.main.async {
             let alertController = UIAlertController(title: nil, message: message, preferredStyle: .alert)
@@ -80,4 +90,5 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             }
         }
     }
+    
 }

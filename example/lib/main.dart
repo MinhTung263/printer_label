@@ -188,6 +188,14 @@ class _MyHomePageState extends State<MyHomePage> {
                 _device != null ? _device!["name"].toString() : "Connect",
               ),
             ),
+            ElevatedButton(
+              onPressed: () async {
+                await PrinterIos.printWithWifi();
+              },
+              child: const Text(
+                "print Wifi",
+              ),
+            ),
           ],
         ),
       ),
