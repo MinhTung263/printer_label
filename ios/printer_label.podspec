@@ -3,27 +3,22 @@ Pod::Spec.new do |s|
   s.version          = '0.0.1'
   s.summary          = 'A Flutter plugin for printer label support.'
   s.description      = <<-DESC
-  This plugin allows Flutter apps to interact with Bluetooth printers.
+  This plugin allows Flutter apps to interact with printer label.
   DESC
-  s.homepage         = 'https://your-website.com'
+  s.homepage         = 'https://github.com/MinhTung263/printer_label'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Name' => 'your@email.com' }
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
+  s.source_files = 'Classes/**/*.{h,m,swift,a}'
   s.public_header_files = 'Classes/**/*.h'
-  s.frameworks       = 'CoreBluetooth'
+  s.static_framework = true
   s.dependency 'Flutter'
   s.platform         = :ios, '12.0'
-
   s.ios.deployment_target = '12.0'
-  s.preserve_paths = 'Classes/**/*'
   s.swift_version = '5.0'
-
-  flutter_root = `flutter --version`.lines.last.split(' ').last.strip
+  s.vendored_libraries = '**/*.a'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'OTHER_LDFLAGS' => '-framework Flutter'
   }
-  s.xcconfig = { 'HEADER_SEARCH_PATHS' => "$(inherited) $(SDKROOT)/usr/include" }
-  s.vendored_frameworks = "#{flutter_root}/bin/cache/artifacts/engine/ios-release/Flutter.xcframework"
 end

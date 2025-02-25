@@ -1,5 +1,4 @@
 import 'package:example/preview_image_printer.dart';
-import 'package:example/printer_ios.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printer_label/src.dart';
@@ -39,7 +38,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
   List<Uint8List> productImages = [];
 
-  Map<String, String>? _device;
   final List<ProductBarcodeModel> products = [
     ProductBarcodeModel(
       barcode: "83868888",
@@ -165,35 +163,6 @@ class _MyHomePageState extends State<MyHomePage> {
               },
               child: const Text(
                 "Print thermal",
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final device = await PrinterIos.openPrinterSelection();
-                setState(() {
-                  _device = device;
-                });
-              },
-              child: const Text(
-                "Connect bluetooth",
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (_device != null) {
-                  await PrinterIos.printWithSelectedPrinter(_device!);
-                }
-              },
-              child: Text(
-                _device != null ? _device!["name"].toString() : "Connect",
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                await PrinterIos.printWithWifi();
-              },
-              child: const Text(
-                "print Wifi",
               ),
             ),
           ],
