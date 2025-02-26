@@ -1,6 +1,8 @@
 package com.printer.printer_label
 
+import android.annotation.TargetApi
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -42,15 +44,13 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         flutterPluginBinding.applicationContext.registerReceiver(usbReceiver, filter)
+        checkAndRequestUsbPermission(mContext!!)
     }
 
     @RequiresApi(Build.VERSION_CODES.HONEYCOMB_MR1)
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
         when (call.method) {
             "getPlatformVersion" -> result.success("Android ${android.os.Build.VERSION.RELEASE}")
-            "connect_usb" -> {
-                actitonConnectUSB()
-            }
 
             "connect_lan" -> {
                 val ipAddress = call.argument<String>("ip_address")
@@ -121,31 +121,39 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
     }
 
-    @RequiresApi(Build.VERSION_CODES.HONEYCOMB_MR1)
-    fun actitonConnectUSB() {
-        val pathName = getUsbDevicePath(mContext!!)
-        if (pathName != null) {
-            connectUSB(pathName)
+    @TargetApi(Build.VERSION_CODES.O)
+    fun checkAndRequestUsbPermission(context: Context) {
+        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+        val deviceList = usbManager.deviceList
+
+        if (deviceList.isEmpty()) {
+            return
+        }
+
+        val usbDevice = deviceList.values.firstOrNull() ?: return
+
+        if (usbManager.hasPermission(usbDevice)) {
+
+            connectUSB(usbDevice.deviceName)
+        } else {
+
+            val permissionIntent = PendingIntent.getBroadcast(
+                context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE
+            )
+
+            context.registerReceiver(object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    if (intent?.action == ACTION_USB_PERMISSION) {
+                        connectUSB(usbDevice.deviceName)
+                        context?.unregisterReceiver(this)
+                    }
+                }
+            }, IntentFilter(ACTION_USB_PERMISSION), Context.RECEIVER_EXPORTED)
+
+            usbManager.requestPermission(usbDevice, permissionIntent)
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.HONEYCOMB_MR1)
-    fun getUsbDevicePath(context: Context): String? {
-        val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-        if (deviceList.isNotEmpty()) {
-            val usbDevice = deviceList.values.firstOrNull()
-            if (usbDevice != null && usbManager.hasPermission(usbDevice)) {
-                return usbDevice.deviceName
-            } else {
-                val permissionIntent = PendingIntent.getBroadcast(
-                    context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE
-                )
-                usbManager.requestPermission(usbDevice, permissionIntent)
-            }
-        }
-        return null
-    }
 
     fun connectUSB(pathName: String) {
         curConnect?.close()
