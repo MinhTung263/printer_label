@@ -5,8 +5,8 @@ import 'src.dart';
 class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   final MethodChannel _channel = MethodChannel('flutter_printer_label');
 
-  Future<void> connectUSB() async {
-    await _channel.invokeMethod('connect_usb');
+  Future<bool> checkConnect() async {
+    return await _channel.invokeMethod('checkConnect');
   }
 
   Future<void> connectLan({
@@ -45,17 +45,6 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     required BarcodeModel printBarcodeModel,
   }) async {
     await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
-  }
-
-  void setupConnectionStatusListener(
-    ValueChanged<bool> onStatusChange,
-  ) {
-    _channel.setMethodCallHandler((call) async {
-      if (call.method == 'connectionStatus') {
-        final isConnected = call.arguments as bool;
-        onStatusChange(isConnected);
-      }
-    });
   }
 
   @override
