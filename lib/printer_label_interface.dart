@@ -21,8 +21,6 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   Future<String?> get platformVersion;
 
-  Future<void> connectUSB();
-
   Future<void> connectLan({
     required String ipAddress,
   });

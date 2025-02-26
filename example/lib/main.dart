@@ -242,19 +242,6 @@ class _MyHomePageState extends State<MyHomePage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        InkWell(
-          onTap: () async {
-            await PrinterLabel.connectUSB();
-          },
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            color: widget.isConnectedUsb ? Colors.green : Colors.blue,
-            child: Text(
-              widget.isConnectedUsb ? "Connect USB success" : "Connect usb",
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-        ),
         const Padding(padding: EdgeInsets.all(10)),
         InkWell(
           onTap: () async {

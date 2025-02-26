@@ -7,8 +7,6 @@ PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
 class PrinterLabel {
   static Future<String?> get platformVersion => _platform.platformVersion;
 
-  static Future<void> connectUSB() => _platform.connectUSB();
-
   static void getConnectionStatus(
     ValueChanged<bool> onStatusChange,
   ) =>

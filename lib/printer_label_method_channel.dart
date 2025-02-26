@@ -5,10 +5,6 @@ import 'src.dart';
 class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   final MethodChannel _channel = MethodChannel('flutter_printer_label');
 
-  Future<void> connectUSB() async {
-    await _channel.invokeMethod('connect_usb');
-  }
-
   Future<void> connectLan({
     required String ipAddress,
   }) async {
