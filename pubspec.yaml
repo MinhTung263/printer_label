@@ -1,7 +1,7 @@
 name: printer_label
 description: "Make printer label"
 homepage: https://github.com/MinhTung263/printer_label
-version: 1.0.2
+version: 1.0.3
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
