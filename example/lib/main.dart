@@ -62,7 +62,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    initConnectionListener();
+    checkConnectPrint();
   }
 
   Future<void> getListProd({
@@ -75,16 +75,11 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  void initConnectionListener() {
-    PrinterLabel.getConnectionStatus(
-      (isConnected) {
-        setState(
-          () {
-            widget.isConnectedUsb = isConnected;
-          },
-        );
-      },
-    );
+  Future<void> checkConnectPrint() async {
+    final isConnected = await PrinterLabel.checkConnect();
+    setState(() {
+      widget.isConnectedUsb = isConnected;
+    });
   }
 
   Future<void> configPrintImage({
@@ -245,13 +240,13 @@ class _MyHomePageState extends State<MyHomePage> {
         const Padding(padding: EdgeInsets.all(10)),
         InkWell(
           onTap: () async {
-            await PrinterLabel.connectLan(ipAddress: "192.168.50.91");
+            await checkConnectPrint();
           },
           child: Container(
             padding: const EdgeInsets.all(8),
             color: widget.isConnectedUsb ? Colors.green : Colors.red,
             child: Text(
-              widget.isConnectedUsb ? "Connect Lan success" : "Connect lan",
+              widget.isConnectedUsb ? "Connect success" : "Connect",
               style: const TextStyle(color: Colors.white),
             ),
           ),

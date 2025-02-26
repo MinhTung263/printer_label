@@ -1,5 +1,5 @@
-import 'package:flutter/services.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+
 import 'src.dart';
 
 abstract class PrinterLabelPlatform extends PlatformInterface {
@@ -21,9 +21,12 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   Future<String?> get platformVersion;
 
+  Future<bool> checkConnect();
+
   Future<void> connectLan({
     required String ipAddress,
   });
+
   Future<bool> printImage({
     required List<Map<String, dynamic>> productList,
   });
@@ -35,10 +38,6 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   Future<void> printBarcode({
     required BarcodeModel printBarcodeModel,
   });
-
-  void setupConnectionStatusListener(
-    ValueChanged<bool> onStatusChange,
-  );
 
   Future<void> printThermal({
     required PrintThermalModel printThermalModel,

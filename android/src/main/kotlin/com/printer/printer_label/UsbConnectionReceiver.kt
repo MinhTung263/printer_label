@@ -19,7 +19,7 @@ class UsbConnectionReceiver(
                 printerLabelPlugin.checkAndRequestUsbPermission(context)
             }
         } else if (UsbManager.ACTION_USB_DEVICE_DETACHED == action) {
-            methodChannel.invokeMethod("connectionStatus", false)
+
         }
     }
 }

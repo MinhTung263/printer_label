@@ -51,14 +51,15 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
         when (call.method) {
             "getPlatformVersion" -> result.success("Android ${android.os.Build.VERSION.RELEASE}")
-
+            "checkConnect" -> {
+                result.success(curConnect!!.isConnect())
+            }
             "connect_lan" -> {
                 val ipAddress = call.argument<String>("ip_address")
                 if (!ipAddress.isNullOrEmpty()) {
                     connectNet(ipAddress)
                 }
             }
-
             "print_barcode" -> {
                 printBarcode(call, result)
 
@@ -91,12 +92,10 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         when (code) {
             POSConnect.CONNECT_SUCCESS -> {
                 toast("CONNECT_SUCCESS")
-                channel.invokeMethod("connectionStatus", true)
             }
 
             POSConnect.CONNECT_FAIL -> {
                 toast("CONNECT_FAIL")
-                channel.invokeMethod("connectionStatus", false)
             }
 
             POSConnect.CONNECT_INTERRUPT -> {
