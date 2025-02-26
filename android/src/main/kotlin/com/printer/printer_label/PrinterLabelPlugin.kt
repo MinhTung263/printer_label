@@ -53,11 +53,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             "getPlatformVersion" -> result.success("Android ${android.os.Build.VERSION.RELEASE}")
 
             "checkConnect" -> {
-                if (curConnect != null) {
-                    result.success(curConnect!!.isConnect())
-                } else {
-                    result.error("NULL_ERROR", "curConnect is null", null)
-                }
+                result.success(curConnect?.isConnect() ?: false)
             }
 
             "connect_lan" -> {
