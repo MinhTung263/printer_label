@@ -135,23 +135,24 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val usbDevice = deviceList.values.firstOrNull() ?: return
 
         if (usbManager.hasPermission(usbDevice)) {
-
             connectUSB(usbDevice.deviceName)
         } else {
-
             val permissionIntent = PendingIntent.getBroadcast(
                 context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE
             )
-
-            context.registerReceiver(object : BroadcastReceiver() {
+            val usbReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
                     if (intent?.action == ACTION_USB_PERMISSION) {
-                        connectUSB(usbDevice.deviceName)
+                        if (usbManager.hasPermission(usbDevice)) {
+                            connectUSB(usbDevice.deviceName)
+                        }
                         context?.unregisterReceiver(this)
                     }
                 }
-            }, IntentFilter(ACTION_USB_PERMISSION), Context.RECEIVER_EXPORTED)
-
+            }
+            val filter = IntentFilter(ACTION_USB_PERMISSION)
+            context.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
+            // Yêu cầu quyền truy cập USB
             usbManager.requestPermission(usbDevice, permissionIntent)
         }
     }
@@ -161,7 +162,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         curConnect?.close()
         curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
         curConnect!!.connect(pathName, connectListener)
-
     }
 
     private fun connectNet(ipAddress: String) {
