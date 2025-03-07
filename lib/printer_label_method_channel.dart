@@ -58,9 +58,14 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   Future<void> printThermal({
     required PrintThermalModel printThermalModel,
   }) async {
-    await _channel.invokeMethod(
-      'print_thermal',
-      printThermalModel.toJson(),
-    );
+    try {
+      await _channel.invokeMethod(
+        'print_thermal',
+        printThermalModel.toJson(),
+      );
+    } catch (e) {
+      print("Error printing thermal: $e");      
+    }
   }
+
 }
