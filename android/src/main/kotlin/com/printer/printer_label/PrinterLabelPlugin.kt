@@ -77,7 +77,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
 
             "print_thermal" -> {
-                printThermal.printImage(call, curConnect!!)
+                printThermal.printImage(call, curConnect!!, result)
             }
 
             else -> {
