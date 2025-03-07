@@ -152,7 +152,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
             val filter = IntentFilter(ACTION_USB_PERMISSION)
             context.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
-            // Yêu cầu quyền truy cập USB
             usbManager.requestPermission(usbDevice, permissionIntent)
         }
     }
