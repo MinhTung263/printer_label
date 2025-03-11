@@ -1,3 +1,5 @@
+## [v1.0.6] - 2025/03/11
+* Fix print only android
 ## [v1.0.5] - 2025/03/07
 * Add result print thermal
 ## [v1.0.4] - 2025/03/05

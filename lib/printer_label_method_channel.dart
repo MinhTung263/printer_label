@@ -64,8 +64,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
         printThermalModel.toJson(),
       );
     } catch (e) {
-      print("Error printing thermal: $e");      
+      print("Error printing thermal: $e");
     }
   }
-
 }
