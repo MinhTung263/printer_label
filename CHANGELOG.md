@@ -1,3 +1,5 @@
+## [v1.0.8] - 2025/06/28
+* Fixed installation issue on devices that do not support USB host feature.
 ## [v1.0.7] - 2025/03/11
 * downgrade   intl: ^0.19.0
 ## [v1.0.6] - 2025/03/11
