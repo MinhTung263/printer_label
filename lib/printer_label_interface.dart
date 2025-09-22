@@ -23,7 +23,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   Future<bool> checkConnect();
 
-  Future<void> connectLan({
+  Future<bool> connectLan({
     required String ipAddress,
   });
 

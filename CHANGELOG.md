@@ -1,3 +1,5 @@
+## [v1.0.9] - 2025/09/22
+* Fix connect LAN  only android
 ## [v1.0.8] - 2025/06/28
 * Fixed installation issue on devices that do not support USB host feature.
 ## [v1.0.7] - 2025/03/11
@@ -11,7 +13,5 @@
 ## [v1.0.3] - 2025/02/26
 * Config auto connect USB
 * Add check connect
-
 ## [v1.0.0] - 2025/02/05
-
 * Initial version

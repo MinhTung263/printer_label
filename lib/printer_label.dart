@@ -11,8 +11,9 @@ class PrinterLabel {
     return Platform.isAndroid && await _platform.checkConnect();
   }
 
-  static Future<void> connectLan({required String ipAddress}) async {
-    return await _platform.connectLan(ipAddress: ipAddress);
+  static Future<bool> connectLan({required String ipAddress}) async {
+    return Platform.isAndroid &&
+        await _platform.connectLan(ipAddress: ipAddress);
   }
 
   static Future<bool> printImage({

@@ -9,10 +9,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     return await _channel.invokeMethod('checkConnect');
   }
 
-  Future<void> connectLan({
+  Future<bool> connectLan({
     required String ipAddress,
   }) async {
-    await _channel.invokeMethod('connect_lan', {
+    return await _channel.invokeMethod('connect_lan', {
       "ip_address": ipAddress,
     });
   }
