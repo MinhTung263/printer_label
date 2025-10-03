@@ -1,3 +1,5 @@
+## [v1.0.10] - 2025/10/03
+* Upgrade fvm 3.35.4, intl 0.20.2
 ## [v1.0.9] - 2025/09/22
 * Fix connect LAN  only android
 ## [v1.0.8] - 2025/06/28
