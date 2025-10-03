@@ -14,9 +14,9 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/printer_label/ios"
 
 SPEC CHECKSUMS:
-  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
-  printer_label: 8d94538fb9191d31ca7de8eb760c60a9899409ca
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  printer_label: d2d58363b92f7bfdda693272dc64e4ee31ba72bb
 
-PODFILE CHECKSUM: 7be2f5f74864d463a8ad433546ed1de7e0f29aef
+PODFILE CHECKSUM: a57f30d18f102dd3ce366b1d62a55ecbef2158e5
 
-COCOAPODS: 1.15.2
+COCOAPODS: 1.16.2
