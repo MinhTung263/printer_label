@@ -35,6 +35,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private var curConnect: IDeviceConnection? = null
     private lateinit var usbReceiver: UsbConnectionReceiver
     private var printThermal = PrinterThermal()
+    private var connectResult: MethodChannel.Result? = null
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL)
         channel.setMethodCallHandler(this)
@@ -58,10 +59,12 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
             "connect_lan" -> {
                 val ipAddress = call.argument<String>("ip_address")
-                if (!ipAddress.isNullOrEmpty()) {
-                    connectNet(ipAddress)
+                if (ipAddress.isNullOrEmpty()) {
+                    result.success(false)
+                    return
                 }
-                result.success(curConnect?.isConnect() ?: false)
+                connectResult = result
+                connectNet(ipAddress)
             }
 
             "print_barcode" -> {
@@ -91,26 +94,32 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         when (code) {
             POSConnect.CONNECT_SUCCESS -> {
                 toast("CONNECT_SUCCESS")
+                connectResult?.success(true)
             }
 
             POSConnect.CONNECT_FAIL -> {
                 toast("CONNECT_FAIL")
+                connectResult?.success(false)
             }
 
             POSConnect.CONNECT_INTERRUPT -> {
                 toast("CONNECT_INTERRUPT")
+                connectResult?.success(false)
             }
 
             POSConnect.SEND_FAIL -> {
                 toast("SEND_FAIL")
+                connectResult?.success(false)
             }
 
             POSConnect.USB_DETACHED -> {
                 toast("USB_DETACHED")
+                connectResult?.success(false)
             }
 
             POSConnect.USB_ATTACHED -> {
                 toast("USB_ATTACHED")
+                connectResult?.success(false)
             }
         }
     }
