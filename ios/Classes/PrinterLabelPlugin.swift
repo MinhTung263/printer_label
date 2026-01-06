@@ -65,9 +65,9 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         }
    
         let sizeMap = args["size"] as? [String: Any]
-        let labelWidthMM: Int = sizeMap?["width"] as? Int ?? 200
+        let labelWidthMM: Int = sizeMap?["width"] as? Int ?? 100
         let labelHeightMM: Int = sizeMap?["height"] as? Int ?? 20
-        let startX     = args["x"] as? Int ?? 10
+        let startX     = args["x"] as? Int ?? 0
         let startY     = args["y"] as? Int ?? 0
 
         for imageData in images {

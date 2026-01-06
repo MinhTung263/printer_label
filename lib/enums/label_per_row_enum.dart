@@ -1,5 +1,3 @@
-import 'dart:io';
-
 enum LabelPerRow {
   one,
   two,
@@ -21,22 +19,13 @@ class _LabelConfig {
 }
 
 extension LabelPerRowExt on LabelPerRow {
-  static final bool _isIOS = Platform.isIOS;
-
-  static const _androidConfig = {
+  static const _configs = {
     LabelPerRow.one: _LabelConfig(x: 20, y: 0, width: 40, height: 25),
     LabelPerRow.two: _LabelConfig(x: 60, y: 0, width: 80, height: 20),
-    LabelPerRow.three: _LabelConfig(x: 10, y: 0, width: 110, height: 20),
-  };
-  static const _defaultIosConfig = _LabelConfig(x: null, y: null);
-  static const _iosConfig = {
-    LabelPerRow.one: _LabelConfig(x: 20, y: 0, width: 40, height: 25),
-    LabelPerRow.two: _LabelConfig(x: 170, y: null),
-    LabelPerRow.three: _defaultIosConfig,
+    LabelPerRow.three: _LabelConfig(x: 0, y: 0, width: 100, height: 20),
   };
 
-  _LabelConfig get _config =>
-      _isIOS ? _iosConfig[this]! : _androidConfig[this]!;
+  _LabelConfig get _config => _configs[this]!;
 
   int get count => index + 1;
 

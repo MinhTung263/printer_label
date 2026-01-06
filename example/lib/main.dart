@@ -66,7 +66,7 @@ class _MyHomePageState extends State<MyHomePage> {
         barcode: "56782123931231",
         name: "iPad Pro",
         price: 34980000,
-        quantity: 1,
+        quantity: 3,
       ),
       // ProductBarcodeModel(
       //   barcode: "56789345233",
@@ -107,7 +107,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> configPrintMultiLabel({
     required List<Uint8List> images,
   }) async {
-    const LabelPerRow labelPerRow = LabelPerRow.one;
+    const LabelPerRow labelPerRow = LabelPerRow.three;
 
     await getListProd(
       labelPerRow: labelPerRow,
