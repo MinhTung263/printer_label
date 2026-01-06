@@ -24,13 +24,13 @@ extension LabelPerRowExt on LabelPerRow {
   static final bool _isIOS = Platform.isIOS;
 
   static const _androidConfig = {
-    LabelPerRow.one: _LabelConfig(x: 40, y: 0, width: 40, height: 25),
+    LabelPerRow.one: _LabelConfig(x: 20, y: 0, width: 40, height: 25),
     LabelPerRow.two: _LabelConfig(x: 60, y: 0, width: 80, height: 20),
     LabelPerRow.three: _LabelConfig(x: 10, y: 0, width: 110, height: 20),
   };
   static const _defaultIosConfig = _LabelConfig(x: null, y: null);
   static const _iosConfig = {
-    LabelPerRow.one: _defaultIosConfig,
+    LabelPerRow.one: _LabelConfig(x: 20, y: 0, width: 40, height: 25),
     LabelPerRow.two: _LabelConfig(x: 170, y: null),
     LabelPerRow.three: _defaultIosConfig,
   };

@@ -19,16 +19,8 @@ class Dimensions {
     fontSize: 16,
   );
 
-  /// Sau này thêm preset mới rất dễ
-  static const small = Dimensions(
-    width: 180,
-    height: 140,
-    barcodeHeight: 55,
-    fontSize: 14,
-  );
-
   static const large = Dimensions(
-    width: 230,
+    width: 280,
     height: 220,
     barcodeHeight: 100,
     fontSize: 20,

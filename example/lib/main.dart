@@ -43,7 +43,6 @@ class _MyHomePageState extends State<MyHomePage> {
   final TextEditingController textEditingController =
       TextEditingController(text: "192.168.1.46");
   FocusNode focusNode = FocusNode();
-  bool isEnable = false;
 
   final List<ProductBarcodeModel> products = [];
 
@@ -52,26 +51,21 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     checkConnectPrint();
     addProducts();
-    textEditingController.addListener(() {
-      setState(() {
-        isEnable = textEditingController.text.trim().isNotEmpty;
-      });
-    });
   }
 
   void addProducts() {
     products.clear();
     products.addAll([
+      // ProductBarcodeModel(
+      //   barcode: "83868888",
+      //   name: "iPhone 17 Pro Max",
+      //   price: 28990000,
+      //   quantity: 2,
+      // ),
       ProductBarcodeModel(
-        barcode: "83868888",
-        name: "iPhone 17 Pro Max",
-        price: 28990000,
-        quantity: 2,
-      ),
-      ProductBarcodeModel(
-        barcode: "56789345233",
+        barcode: "56782123931231",
         name: "iPad Pro",
-        price: 27890000,
+        price: 34980000,
         quantity: 1,
       ),
       // ProductBarcodeModel(
@@ -136,7 +130,6 @@ class _MyHomePageState extends State<MyHomePage> {
       widget.isConnected = connect;
     });
     focusNode.unfocus();
-    checkConnectPrint();
   }
 
   @override
@@ -169,7 +162,7 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             padding(),
             ElevatedButton(
-              onPressed: isEnable ? () async => await connectLan() : null,
+              onPressed: () async => await connectLan(),
               child: const Text(
                 "Connect Lan",
               ),
@@ -255,7 +248,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onPressed: () async {
         addProducts();
         await getListProd(
-          labelPerRow: LabelPerRow.two,
+          labelPerRow: products.length == 1 ? LabelPerRow.one : LabelPerRow.two,
         );
         Navigator.push(
           // ignore: use_build_context_synchronously

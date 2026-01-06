@@ -47,9 +47,9 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
             // 3. Connect lại
             dispatcher?.connect(printer)
-        case "print_multiLabel":
+        case "print_label":
             if let args = call.arguments as? [String: Any] {
-                printMultiLabel(args: args,result: result)
+                printLabel(args: args,result: result)
             } else {
                 print("Invalid arguments for print_multi_label")
             }
@@ -57,7 +57,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             result(FlutterMethodNotImplemented)
         }
     }
-    func printMultiLabel(args: [String: Any],result: @escaping FlutterResult) {
+    func printLabel(args: [String: Any],result: @escaping FlutterResult) {
         guard let images = args["images"] as? [FlutterStandardTypedData], !images.isEmpty else {
             print("No images")
             result(false)
