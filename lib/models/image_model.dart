@@ -1,39 +1,31 @@
 import 'dart:typed_data';
 
+import '../enums/label_per_row_enum.dart';
+
 class BarcodeImageModel {
-  final Uint8List? imageData;
-  final List<Uint8List>? images;
+  final List<Uint8List> images;
   int quantity;
-  final double? width;
-  final double? height;
-  final int? x;
-  final int? y;
-  final int? widthImage;
+  final LabelPerRow? labelPerRow;
 
   BarcodeImageModel({
-    this.imageData,
-    this.images,
-    this.quantity = 1, // Default value is 1
-    this.width,
-    this.height,
-    this.x,
-    this.y,
-    this.widthImage,
+    required this.images,
+    this.quantity = 1,
+    this.labelPerRow,
   });
 
   /// Converts the model to a map for use in method channel calls
   Map<String, dynamic> toMap() {
-    return {
-      'image_data': imageData,
+    final label = labelPerRow ?? LabelPerRow.one;
+    final map = <String, dynamic>{
       'images': images,
       'quantity': quantity,
-      'widthImage': widthImage,
-      'x': x,
-      'y': y,
+      'x': label.x,
+      'y': label.y,
       'size': {
-        'width': width,
-        'height': height,
+        'width': label.width,
+        'height': label.height,
       },
     };
+    return map;
   }
 }

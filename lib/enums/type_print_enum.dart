@@ -1,32 +1,3 @@
-enum TypePrintEnum {
-  singleLabel,
-  doubleLabel;
-
-  Dimensions get dimensions {
-    switch (this) {
-      case TypePrintEnum.singleLabel:
-        return const Dimensions(
-          width: 360,
-          height: 200,
-          barcodeHeight: 100,
-          fontSize: 20,
-        );
-      case TypePrintEnum.doubleLabel:
-        return const Dimensions(
-          width: 230,
-          height: 180,
-          barcodeHeight: 70,
-          fontSize: 16,
-        );
-    }
-  }
-
-  double get width => dimensions.width;
-  double get height => dimensions.height;
-  double get barcodeHeight => dimensions.barcodeHeight;
-  double get fontSize => dimensions.fontSize;
-}
-
 class Dimensions {
   final double width;
   final double height;
@@ -39,4 +10,27 @@ class Dimensions {
     required this.barcodeHeight,
     required this.fontSize,
   });
+
+  /// Preset mặc định
+  static const defaultDimens = Dimensions(
+    width: 230,
+    height: 180,
+    barcodeHeight: 70,
+    fontSize: 16,
+  );
+
+  /// Sau này thêm preset mới rất dễ
+  static const small = Dimensions(
+    width: 180,
+    height: 140,
+    barcodeHeight: 55,
+    fontSize: 14,
+  );
+
+  static const large = Dimensions(
+    width: 230,
+    height: 220,
+    barcodeHeight: 100,
+    fontSize: 20,
+  );
 }

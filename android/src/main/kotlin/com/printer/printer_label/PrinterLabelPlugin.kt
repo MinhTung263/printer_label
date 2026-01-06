@@ -61,23 +61,19 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 if (!ipAddress.isNullOrEmpty()) {
                     connectNet(ipAddress)
                 }
+                result.success(curConnect?.isConnect() ?: false)
             }
 
             "print_barcode" -> {
                 printBarcode(call, result)
 
             }
-
-            "print_image" -> {
-                printImage(call, result)
-            }
-
-            "print_multiLabel" -> {
-                printMultiLabel(call)
+            "print_label" -> {
+                printLabel(call)
             }
 
             "print_thermal" -> {
-                printThermal.printImage(call, curConnect!!, result)
+                printThermal.printTiket(call, curConnect!!, result)
             }
 
             else -> {
@@ -160,13 +156,13 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     fun connectUSB(pathName: String) {
         curConnect?.close()
         curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
-        curConnect!!.connect(pathName, connectListener)
+        curConnect?.connect(pathName, connectListener)
     }
 
     private fun connectNet(ipAddress: String) {
         curConnect?.close()
         curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
-        curConnect!!.connect(ipAddress, connectListener)
+        curConnect?.connect(ipAddress, connectListener)
     }
 
     private fun connectBt(macAddress: String) {
@@ -228,9 +224,9 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         return Pair(width, height)
     }
 
-    private fun extractSizeImage(size: Map<String, Double>?): Pair<Double, Double> {
-        val width = size?.get("width") ?: 600.0
-        val height = size?.get("height") ?: 30.0
+    private fun extractSizeImage(size: Map<String, Int>?): Pair<Int, Int> {
+        val width = size?.get("width") ?: 600
+        val height = size?.get("height") ?: 20
         return Pair(width, height)
     }
 
@@ -257,59 +253,18 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
         printer.text(textX, textY, font, rotation, sizeX, sizeY, textData)
     }
-
-    private fun printImage(call: MethodCall, result: MethodChannel.Result) {
-        try {
-            val printer = TSPLPrinter(curConnect)
-            val productList: List<Map<String, Any>> = call.argument("products") ?: run {
-                result.error("INVALID_ARGUMENT", "Products argument is missing", null)
-                return
-            }
-            for (product in productList) {
-                val imageData: ByteArray? = product["image_data"] as? ByteArray
-                if (imageData != null) {
-                    val quantity = product["quantity"] as? Int ?: 1
-                    val size = product["size"] as? Map<String, Double>
-                    val (sizeWidth, sizeHeight) = extractSizeImage(size)
-                    val width = product["widthImage"] as? Int ?: 600
-                    val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
-                    val x = product["x"] as? Int ?: 0
-                    val y = product["y"] as? Int ?: 50
-                    if (bitmap != null) {
-                        printer.sizeMm(sizeWidth, sizeHeight)
-                            .cls()
-                            .bitmap(
-                                x,
-                                y,
-                                TSPLConst.BMP_MODE_OVERWRITE,
-                                width,
-                                bitmap,
-                                AlgorithmType.Threshold
-                            )
-                            .print(quantity)
-                    }
-                }
-            }
-            result.success(true)
-        } catch (e: Exception) {
-            // Trả kết quả lỗi về Flutter
-            result.error("PRINT_ERROR", "Failed to print image: ${e.message}", null)
-        }
-    }
-
-    private fun printMultiLabel(call: MethodCall) {
+    private fun printLabel(call: MethodCall) {
         val images: List<ByteArray>? = call.argument<List<ByteArray>>("images")
         val printer = TSPLPrinter(curConnect)
         images?.forEach { imageData ->
             val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
             if (bitmap != null) {
-                val size = call.argument<Map<String, Double>>("size")
+                val size = call.argument<Map<String, Int>>("size")
                 val (sizeWidth, sizeHeight) = extractSizeImage(size)
-                val width = call.argument<Int>("widthImage") ?: 600
+                val width = 900
                 val x = call.argument<Int>("x") ?: 0
-                val y = call.argument<Int>("y") ?: 50
-                val quantity = 1
-                printer.sizeMm(sizeWidth, sizeHeight)
+                val y = call.argument<Int>("y") ?: 0
+                printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
                     .cls()
                     .bitmap(
                         x,
@@ -319,7 +274,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                         bitmap,
                         AlgorithmType.Threshold
                     )
-                    .print(quantity)
+                    .print(1)
             }
         }
     }

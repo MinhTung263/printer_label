@@ -17,25 +17,6 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     });
   }
 
-  @override
-  Future<bool> printImage({
-    required List<Map<String, dynamic>> productList,
-  }) async {
-    try {
-      final Map<String, dynamic> params = {
-        'products': productList,
-      };
-      final bool? result = await _channel.invokeMethod<bool>(
-        'print_image',
-        params,
-      );
-      return result ?? false;
-    } catch (e) {
-      print('Error while printing image: $e');
-      return false;
-    }
-  }
-
   Future<String?> get platformVersion async {
     final String? version = await _channel.invokeMethod('getPlatformVersion');
     return version;
@@ -48,10 +29,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<void> printMultiLabel({
+  Future<void> printLabel({
     required BarcodeImageModel imageModel,
   }) async {
-    await _channel.invokeMethod('print_multiLabel', imageModel.toMap());
+    await _channel.invokeMethod('print_label', imageModel.toMap());
   }
 
   @override

@@ -12,22 +12,13 @@ class PrinterLabel {
   }
 
   static Future<bool> connectLan({required String ipAddress}) async {
-    return Platform.isAndroid &&
-        await _platform.connectLan(ipAddress: ipAddress);
+    return await _platform.connectLan(ipAddress: ipAddress);
   }
 
-  static Future<bool> printImage({
-    required List<Map<String, dynamic>> productList,
-  }) async {
-    return await _platform.printImage(
-      productList: productList,
-    );
-  }
-
-  static Future<void> printMultiLabel({
+  static Future<void> printLabel({
     required BarcodeImageModel barcodeImageModel,
   }) async {
-    return await _platform.printMultiLabel(imageModel: barcodeImageModel);
+    return await _platform.printLabel(imageModel: barcodeImageModel);
   }
 
   static Future<void> printBarcode({

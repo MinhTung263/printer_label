@@ -1,7 +1,9 @@
-import 'package:example/preview_image_printer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:printer_label/enums/label_per_row_enum.dart';
 import 'package:printer_label/src.dart';
+
+import 'preview_image_printer.dart';
 
 void main() {
   runApp(const MyApp());
@@ -25,7 +27,7 @@ class MyApp extends StatelessWidget {
 // ignore: must_be_immutable
 class MyHomePage extends StatefulWidget {
   MyHomePage({super.key});
-  bool isConnectedUsb = false;
+  bool isConnected = false;
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -38,84 +40,103 @@ class _MyHomePageState extends State<MyHomePage> {
 
   List<Uint8List> productImages = [];
 
-  final List<ProductBarcodeModel> products = [
-    ProductBarcodeModel(
-      barcode: "83868888",
-      name: "Sản phẩm iPhone 16 Pro Max",
-      price: 28990000,
-      quantity: 2,
-    ),
-    // ProductBarcodeModel(
-    //   barcode: "56789345233",
-    //   name: "Sản phẩm iPad Pro",
-    //   price: 27890000,
-    //   quantity: 2,
-    // ),
-    // ProductBarcodeModel(
-    //   barcode: "1234543234",
-    //   name: "Áo phông",
-    //   price: 350000,
-    //   quantity: 3,
-    // )
-  ];
+  final TextEditingController textEditingController =
+      TextEditingController(text: "192.168.1.46");
+  FocusNode focusNode = FocusNode();
+  bool isEnable = false;
+
+  final List<ProductBarcodeModel> products = [];
 
   @override
   void initState() {
     super.initState();
     checkConnectPrint();
+    addProducts();
+    textEditingController.addListener(() {
+      setState(() {
+        isEnable = textEditingController.text.trim().isNotEmpty;
+      });
+    });
+  }
+
+  void addProducts() {
+    products.clear();
+    products.addAll([
+      ProductBarcodeModel(
+        barcode: "83868888",
+        name: "iPhone 17 Pro Max",
+        price: 28990000,
+        quantity: 2,
+      ),
+      ProductBarcodeModel(
+        barcode: "56789345233",
+        name: "iPad Pro",
+        price: 27890000,
+        quantity: 1,
+      ),
+      // ProductBarcodeModel(
+      //   barcode: "56789345233",
+      //   name: "Apple Pencil",
+      //   price: 2350000,
+      //   quantity: 2,
+      // ),
+      // ProductBarcodeModel(
+      //   barcode: "1234543234",
+      //   name: "MacBook Pro",
+      //   price: 6589000,
+      //   quantity: 3,
+      // )
+    ]);
   }
 
   Future<void> getListProd({
-    TypePrintEnum? typePrintEnum,
+    required LabelPerRow labelPerRow,
+    Dimensions? dimensions,
   }) async {
-    productImages = await captureProductListAsImages(
+    final list = await captureProductListAsImages(
       products,
       context,
-      typePrintEnum: typePrintEnum ?? TypePrintEnum.singleLabel,
+      labelPerRow: labelPerRow,
+      dimensions: dimensions,
     );
+    productImages.clear();
+    productImages.addAll(list);
   }
 
   Future<void> checkConnectPrint() async {
     final isConnected = await PrinterLabel.checkConnect();
     setState(() {
-      widget.isConnectedUsb = isConnected;
+      widget.isConnected = isConnected;
     });
-  }
-
-  Future<void> configPrintImage({
-    required List<Uint8List> images,
-    required List<ProductBarcodeModel> products,
-    required TypePrintEnum typePrint,
-  }) async {
-    final isPrintSigle = typePrint == TypePrintEnum.singleLabel;
-
-    final List<Map<String, dynamic>> productList = [];
-    for (int i = 0; i < products.length; i++) {
-      final product = products[i];
-      final imageBytes = images[i];
-      final model = BarcodeImageModel(
-        imageData: imageBytes,
-        quantity: product.quantity.toInt(),
-        y: isPrintSigle ? 20 : 5,
-        width: isPrintSigle ? null : 70,
-        height: isPrintSigle ? null : 25,
-      );
-      productList.add(model.toMap());
-    }
-    await PrinterLabel.printImage(productList: productList);
   }
 
   Future<void> configPrintMultiLabel({
     required List<Uint8List> images,
   }) async {
-    final model = BarcodeImageModel(
-      y: 5,
-      x: 10,
-      images: images,
-      width: 70,
-      height: 25,
+    const LabelPerRow labelPerRow = LabelPerRow.one;
+
+    await getListProd(
+      labelPerRow: labelPerRow,
     );
-    await PrinterLabel.printMultiLabel(barcodeImageModel: model);
+    if (images.isNotEmpty) {
+      final model = BarcodeImageModel(
+        images: images,
+        labelPerRow: labelPerRow,
+      );
+      await PrinterLabel.printLabel(barcodeImageModel: model);
+    }
+  }
+
+  Future<void> connectLan() async {
+    final input = textEditingController.text.replaceAll(',', '.');
+    final bool connect = await PrinterLabel.connectLan(
+      ipAddress: input,
+    );
+    setState(() {
+      widget.isConnected = connect;
+    });
+    focusNode.unfocus();
+    checkConnectPrint();
   }
 
   @override
@@ -125,32 +146,54 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text("Printer label"),
       ),
-      body: SingleChildScrollView(
-        child: Column(
+      body: SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           children: [
-            const Padding(padding: EdgeInsets.all(10)),
+            padding(),
             _buildButtonConnect(),
+            padding(),
+            TextField(
+              controller: textEditingController,
+              focusNode: focusNode,
+              decoration: const InputDecoration(
+                hintText: 'Enter IP',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+              ),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ), // nếu IP, nhập số và dấu .
+            ),
+            padding(),
+            ElevatedButton(
+              onPressed: isEnable ? () async => await connectLan() : null,
+              child: const Text(
+                "Connect Lan",
+              ),
+            ),
             const Padding(padding: EdgeInsets.all(10)),
             const Text("Print single label"),
             Card(
               elevation: 2,
               child: BarcodeView(
                 product: products.first,
-                typePrintEnum: TypePrintEnum.singleLabel,
+                labelColor: Colors.white,
               ),
             ),
-            const Padding(padding: EdgeInsets.all(10)),
-            _buildPrintBarcode(),
-            const Padding(padding: EdgeInsets.all(10)),
-            _printImage(
-              typePrintEnum: TypePrintEnum.singleLabel,
-            ),
-            _printMultilLabel(),
+            padding(),
             _viewListImage(),
+            padding(),
+            _buildPrintBarcode(),
+            padding(),
+            _printMultilLabel(),
             ElevatedButton(
               onPressed: () async {
-                await getListProd();
-
+                await getListProd(
+                  labelPerRow: LabelPerRow.one,
+                );
                 await PrinterLabel.printThermal(
                     printThermalModel: PrintThermalModel(
                   image: productImages.first,
@@ -166,59 +209,13 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget _viewListImage() {
-    return ElevatedButton(
-      onPressed: () async {
-        await getListProd(typePrintEnum: TypePrintEnum.doubleLabel);
-        Navigator.push(
-          // ignore: use_build_context_synchronously
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                ImageDisplayScreen(imageBytesList: productImages),
-          ),
-        );
-      },
-      child: Text(
-        "View list( ${products.map(
-              (e) => e.quantity.toDouble(),
-            ).reduce(
-              (value, element) => value + element,
-            )})",
-      ),
-    );
-  }
-
-  Widget _printImage({
-    required TypePrintEnum typePrintEnum,
-  }) {
-    return ElevatedButton(
-      onPressed: () async {
-        await getListProd(
-          typePrintEnum: typePrintEnum,
-        );
-        await configPrintImage(
-          products: products,
-          images: productImages,
-          typePrint: typePrintEnum,
-        );
-      },
-      child: Text(
-        "Print ${typePrintEnum.name} (${products.map(
-              (e) => e.quantity.toInt(),
-            ).reduce(
-              (value, element) => value + element,
-            )}) product",
-      ),
-    );
+  Widget padding() {
+    return const Padding(padding: EdgeInsets.all(10));
   }
 
   Widget _printMultilLabel() {
     return ElevatedButton(
       onPressed: () async {
-        await getListProd(
-          typePrintEnum: TypePrintEnum.doubleLabel,
-        );
         await configPrintMultiLabel(
           images: productImages,
         );
@@ -239,19 +236,43 @@ class _MyHomePageState extends State<MyHomePage> {
       children: [
         const Padding(padding: EdgeInsets.all(10)),
         InkWell(
-          onTap: () async {
-            await checkConnectPrint();
-          },
+          onTap: () async => await checkConnectPrint(),
           child: Container(
             padding: const EdgeInsets.all(8),
-            color: widget.isConnectedUsb ? Colors.green : Colors.red,
+            color: widget.isConnected ? Colors.green : Colors.red,
             child: Text(
-              widget.isConnectedUsb ? "Connect success" : "Connect",
+              widget.isConnected ? "Connect success" : "Connect",
               style: const TextStyle(color: Colors.white),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _viewListImage() {
+    return ElevatedButton(
+      onPressed: () async {
+        addProducts();
+        await getListProd(
+          labelPerRow: LabelPerRow.two,
+        );
+        Navigator.push(
+          // ignore: use_build_context_synchronously
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                ImageDisplayScreen(imageBytesList: productImages),
+          ),
+        );
+      },
+      child: Text(
+        "View list( ${products.map(
+              (e) => e.quantity.toDouble(),
+            ).reduce(
+              (value, element) => value + element,
+            )})",
+      ),
     );
   }
 

@@ -8,7 +8,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class PrinterThermal {
-    fun printImage(call: MethodCall, curConnect: IDeviceConnection, result: MethodChannel.Result) {
+    fun printTiket(call: MethodCall, curConnect: IDeviceConnection, result: MethodChannel.Result) {
         val printer = POSPrinter(curConnect)
 
         try {

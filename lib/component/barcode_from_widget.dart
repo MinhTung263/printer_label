@@ -2,83 +2,74 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:screenshot/screenshot.dart';
+import '../enums/label_per_row_enum.dart';
 import '../src.dart';
 
 Future<List<Uint8List>> captureProductListAsImages(
   List<ProductBarcodeModel> products,
   BuildContext context, {
-  TypePrintEnum? typePrintEnum,
-  int itemsPerRow = 2,
+  LabelPerRow labelPerRow = LabelPerRow.two,
   double spacer = 60,
+  Dimensions? dimensions ,
   Size? targetSize,
 }) async {
+  dimensions = labelPerRow == LabelPerRow.one
+      ? Dimensions.large
+      : Dimensions.defaultDimens;
   final screenshotController = ScreenshotController();
   final constraints = BoxConstraints.tightFor();
-  if (typePrintEnum == TypePrintEnum.singleLabel) {
-    final List<Uint8List> images = [];
-    for (var product in products) {
-      final productWidget = BarcodeView(
-        product: product,
-        typePrintEnum: typePrintEnum,
-      );
-      final imageBytes = await screenshotController.captureFromWidget(
-        productWidget,
-        context: context,
-        targetSize: targetSize ?? const Size(360, 200),
-      );
-      images.add(imageBytes);
+
+  final int itemsPerRow = labelPerRow.count;
+  final List<Uint8List> images = [];
+  final List<ProductBarcodeModel> expandedProducts = [];
+  for (var product in products) {
+    for (int i = 0; i < product.quantity; i++) {
+      expandedProducts.add(product);
     }
-    return images;
-  } else {
-    final List<Uint8List> images = [];
-    final List<ProductBarcodeModel> expandedProducts = [];
-    for (var product in products) {
-      for (int i = 0; i < product.quantity; i++) {
-        expandedProducts.add(product);
-      }
-    }
-    final List<List<ProductBarcodeModel>> groupedProducts = [];
-
-    for (int i = 0; i < expandedProducts.length; i++) {
-      if (i % itemsPerRow == 0) {
-        groupedProducts.add([]);
-      }
-      groupedProducts.last.add(expandedProducts[i]);
-    }
-
-    for (var row in groupedProducts) {
-      final List<Widget> productWidgets = [];
-      for (int i = 0; i < row.length; i++) {
-        productWidgets.add(
-          BarcodeView(
-            product: row[i],
-            typePrintEnum: typePrintEnum,
-          ),
-        );
-
-        if (i < row.length - 1) {
-          productWidgets.add(SizedBox(width: spacer));
-        }
-      }
-      final itemsToAdd = itemsPerRow - row.length;
-      for (int i = 0; i < itemsToAdd; i++) {
-        productWidgets.add(SizedBox(
-          width: (typePrintEnum?.width ?? 0) + spacer,
-          height: typePrintEnum?.height,
-        ));
-      }
-      final rowWidget = Row(
-        children: productWidgets,
-      );
-
-      final imageBytes = await screenshotController.captureFromLongWidget(
-        rowWidget,
-        context: context,
-        constraints: constraints,
-      );
-
-      images.add(imageBytes);
-    }
-    return images;
   }
+  final List<List<ProductBarcodeModel>> groupedProducts = [];
+
+  for (int i = 0; i < expandedProducts.length; i++) {
+    if (i % itemsPerRow == 0) {
+      groupedProducts.add([]);
+    }
+    groupedProducts.last.add(expandedProducts[i]);
+  }
+
+  for (var row in groupedProducts) {
+    final List<Widget> productWidgets = [];
+    for (int i = 0; i < row.length; i++) {
+      productWidgets.add(
+        BarcodeView(
+          product: row[i],
+          dimensions: dimensions,
+        ),
+      );
+
+      if (i < row.length - 1) {
+        productWidgets.add(SizedBox(width: spacer));
+      }
+    }
+    final itemsToAdd = itemsPerRow - row.length;
+    for (int i = 0; i < itemsToAdd; i++) {
+      productWidgets.add(
+        SizedBox(
+          width: dimensions.width + (spacer),
+          height: dimensions.height,
+        ),
+      );
+    }
+    final rowWidget = Row(
+      children: productWidgets,
+    );
+
+    final imageBytes = await screenshotController.captureFromLongWidget(
+      rowWidget,
+      context: context,
+      constraints: constraints,
+    );
+
+    images.add(imageBytes);
+  }
+  return images;
 }

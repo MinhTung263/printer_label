@@ -27,11 +27,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required String ipAddress,
   });
 
-  Future<bool> printImage({
-    required List<Map<String, dynamic>> productList,
-  });
-
-  Future<void> printMultiLabel({
+  Future<void> printLabel({
     required BarcodeImageModel imageModel,
   });
 

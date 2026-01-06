@@ -5,19 +5,21 @@ import 'package:intl/intl.dart';
 import '../src.dart';
 
 class BarcodeView extends StatelessWidget {
-  const BarcodeView({
+  BarcodeView({
     super.key,
     required this.product,
-    this.typePrintEnum,
+    this.dimensions = Dimensions.defaultDimens,
+    this.labelColor,
   });
   final ProductBarcodeModel product;
-  final TypePrintEnum? typePrintEnum;
+  final Dimensions dimensions;
+  final Color? labelColor;
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
-      width: typePrintEnum?.width,
-      height: typePrintEnum?.height,
+      color: labelColor ?? Colors.blue,
+      width: dimensions.width,
+      height: dimensions.height,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -32,8 +34,8 @@ class BarcodeView extends StatelessWidget {
           BarcodeWidget(
             barcode: Barcode.code93(), // Loại mã vạch (có thể thay đổi)
             data: product.barcode,
-            width: typePrintEnum?.width,
-            height: typePrintEnum?.barcodeHeight,
+            width: dimensions.width,
+            height: dimensions.barcodeHeight,
             drawText: true, // Hiển thị mã số dưới mã vạch
             style: const TextStyle(fontSize: 18),
           ),
@@ -59,7 +61,7 @@ class BarcodeView extends StatelessWidget {
     return Text(
       text,
       style: TextStyle(
-        fontSize: (typePrintEnum?.fontSize ?? 20) + (addFontSize ?? 0),
+        fontSize: dimensions.fontSize + (addFontSize ?? 0),
         fontWeight: fontWeight,
         overflow: TextOverflow.ellipsis,
       ),
