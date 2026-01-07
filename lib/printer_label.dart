@@ -16,9 +16,15 @@ class PrinterLabel {
   }
 
   static Future<void> printLabel({
-    required BarcodeImageModel barcodeImageModel,
+    required LabelModel barcodeImageModel,
   }) async {
-    return await _platform.printLabel(imageModel: barcodeImageModel);
+    return await _platform.printLabel(labelModel: barcodeImageModel);
+  }
+
+  static Future<void> printPrintImage({
+    required ImageModel model,
+  }) async {
+    return await _platform.printImage(imageModel: model);
   }
 
   static Future<void> printBarcode({

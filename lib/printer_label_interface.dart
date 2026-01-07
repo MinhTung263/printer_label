@@ -28,7 +28,11 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   });
 
   Future<void> printLabel({
-    required BarcodeImageModel imageModel,
+    required LabelModel labelModel,
+  });
+
+  Future<void> printImage({
+    required ImageModel imageModel,
   });
 
   Future<void> printBarcode({

@@ -30,9 +30,16 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Future<void> printLabel({
-    required BarcodeImageModel imageModel,
+    required LabelModel labelModel,
   }) async {
-    await _channel.invokeMethod('print_label', imageModel.toMap());
+    await _channel.invokeMethod('print_label', labelModel.toLabel());
+  }
+
+  @override
+  Future<void> printImage({
+    required ImageModel imageModel,
+  }) async {
+    await _channel.invokeMethod('print_image', imageModel.toJson());
   }
 
   @override

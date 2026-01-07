@@ -51,7 +51,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             if let args = call.arguments as? [String: Any] {
                 printLabel(args: args,result: result)
             } else {
-                print("Invalid arguments for print_multi_label")
+                print("Invalid arguments for print_label")
+            }
+        case "print_image":
+            if let args = call.arguments as? [String: Any] {
+                printImage(args: args,result: result)
+            } else {
+                print("Invalid arguments for print_image")
             }
         default:
             result(FlutterMethodNotImplemented)
@@ -93,6 +99,42 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         result(true)
     }
 
+    func printImage(args: [String: Any], result: @escaping FlutterResult) {
+        guard let imageData = args["image"] as? FlutterStandardTypedData else {
+            result(false)
+            return
+        }
+        let x = args["x"] as? Int ?? 0
+        let y = args["y"] as? Int ?? 0
+        let width = args["width"] as? Int ?? 100
+        let height = args["height"] as? Int ?? 20
+
+        guard let cgImage = imageFromFlutter(imageData)?.cgImage else {
+            result(false)
+            return
+        }
+
+        let printer = PTCommandTSPL()
+        printer.encoding = String.Encoding.utf8.rawValue
+
+        printer.setPrintAreaSizeWithWidth(width, height: height)
+        printer.setGapWithDistance(1, offset: 0)
+        printer.setCLS()
+
+        printer.addBitmap(
+            withXPos: x,
+            yPos: y,
+            mode: .OVERWRITE,
+            image: cgImage,
+            bitmapMode: .binary,
+            compress: .none
+        )
+
+        printer.print(withSets: 1, copies: 1)
+        sendToPrinter(printer.cmdData as Data)
+
+        result(true)
+    }
 
 
     func imageFromFlutter(_ data: FlutterStandardTypedData) -> UIImage? {

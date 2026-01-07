@@ -1,8 +1,9 @@
+import 'package:example/select_size.dart';
+import 'package:example/select_type_label.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:printer_label/enums/label_per_row_enum.dart';
+import 'package:printer_label/enums/enum.src.dart';
 import 'package:printer_label/src.dart';
-
 import 'preview_image_printer.dart';
 
 void main() {
@@ -41,10 +42,11 @@ class _MyHomePageState extends State<MyHomePage> {
   List<Uint8List> productImages = [];
 
   final TextEditingController textEditingController =
-      TextEditingController(text: "192.168.1.46");
+      TextEditingController(text: "192.168.1.38");
   FocusNode focusNode = FocusNode();
 
   final List<ProductBarcodeModel> products = [];
+  LabelPerRow _selectedRow = LabelPerRow.one;
 
   @override
   void initState() {
@@ -104,18 +106,14 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  Future<void> configPrintMultiLabel({
-    required List<Uint8List> images,
-  }) async {
-    const LabelPerRow labelPerRow = LabelPerRow.three;
-
+  Future<void> printMultiLabel() async {
     await getListProd(
-      labelPerRow: labelPerRow,
+      labelPerRow: _selectedRow,
     );
-    if (images.isNotEmpty) {
-      final model = BarcodeImageModel(
-        images: images,
-        labelPerRow: labelPerRow,
+    if (productImages.isNotEmpty) {
+      final model = LabelModel(
+        images: productImages,
+        labelPerRow: _selectedRow,
       );
       await PrinterLabel.printLabel(barcodeImageModel: model);
     }
@@ -130,6 +128,23 @@ class _MyHomePageState extends State<MyHomePage> {
       widget.isConnected = connect;
     });
     focusNode.unfocus();
+  }
+
+  Future<void> printOrderCupSticker(
+    CupStickerSize size,
+  ) async {
+    final imageBytes = await loadImageFromAssets(
+      'assets/images/temp2.png',
+    );
+    CupStickerPrinter.print(
+      imageBytesList: [imageBytes],
+      size: size,
+    );
+  }
+
+  Future<Uint8List> loadImageFromAssets(String path) async {
+    final byteData = await rootBundle.load(path);
+    return byteData.buffer.asUint8List();
   }
 
   @override
@@ -177,11 +192,12 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             padding(),
-            _viewListImage(),
-            padding(),
             _buildPrintBarcode(),
             padding(),
-            _printMultilLabel(),
+            _buildPrintMultilLabel(),
+            padding(),
+            _viewListImage(),
+            padding(),
             ElevatedButton(
               onPressed: () async {
                 await getListProd(
@@ -196,6 +212,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 "Print thermal",
               ),
             ),
+            padding(),
+            _printCupSticket(),
+            padding(),
+            padding(),
           ],
         ),
       ),
@@ -206,37 +226,45 @@ class _MyHomePageState extends State<MyHomePage> {
     return const Padding(padding: EdgeInsets.all(10));
   }
 
-  Widget _printMultilLabel() {
-    return ElevatedButton(
-      onPressed: () async {
-        await configPrintMultiLabel(
-          images: productImages,
-        );
-      },
-      child: Text(
-        "Print multi label (${products.map(
-              (e) => e.quantity.toInt(),
-            ).reduce(
-              (value, element) => value + element,
-            )}) product",
-      ),
+  Widget _buildPrintMultilLabel() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceAround,
+      children: [
+        LabelPerRowSelector(
+          initialValue: LabelPerRow.one,
+          onChanged: (label) {
+            setState(() {
+              _selectedRow = label;
+            });
+          },
+        ),
+        ElevatedButton(
+          onPressed: printMultiLabel,
+          child: const Text(
+            "Print multi label",
+          ),
+        )
+      ],
+    );
+  }
+
+  Widget _printCupSticket() {
+    return CupStickerSizeSelector(
+      onPrint: printOrderCupSticker,
     );
   }
 
   Widget _buildButtonConnect() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Padding(padding: EdgeInsets.all(10)),
-        InkWell(
-          onTap: () async => await checkConnectPrint(),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            color: widget.isConnected ? Colors.green : Colors.red,
-            child: Text(
-              widget.isConnected ? "Connect success" : "Connect",
-              style: const TextStyle(color: Colors.white),
-            ),
+        const Text("Connect Status"),
+        Container(
+          padding: const EdgeInsets.all(8),
+          color: widget.isConnected ? Colors.green : Colors.red,
+          child: Text(
+            widget.isConnected ? "Connect success" : "Connect false",
+            style: const TextStyle(color: Colors.white),
           ),
         ),
       ],
@@ -248,7 +276,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onPressed: () async {
         addProducts();
         await getListProd(
-          labelPerRow: products.length == 1 ? LabelPerRow.one : LabelPerRow.two,
+          labelPerRow: _selectedRow,
         );
         Navigator.push(
           // ignore: use_build_context_synchronously
