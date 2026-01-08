@@ -13,6 +13,13 @@ class CupStickerSize {
 
   /// ===== DEFAULT MARKET SIZES =====
 
+  /// 40 x 30 mm – tem rất nhỏ (nắp / ly mini)
+  static const s40x30 = CupStickerSize(
+    key: '40x30',
+    widthMm: 40,
+    heightMm: 30,
+  );
+
   /// 50 x 30 mm – ly nhỏ
   static const s50x30 = CupStickerSize(
     key: '50x30',
@@ -43,6 +50,7 @@ class CupStickerSize {
 
   /// Danh sách size mặc định package cung cấp
   static const List<CupStickerSize> defaults = [
+    s40x30,
     s50x30,
     s60x40,
     s70x50,

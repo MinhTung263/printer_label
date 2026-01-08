@@ -18,7 +18,10 @@ class ImageDisplayScreen extends StatelessWidget {
           children: imageBytesList.map((imageBytes) {
             return Padding(
               padding: const EdgeInsets.all(8.0),
-              child: Image.memory(imageBytes), // Display each image
+              child: Image.memory(
+                imageBytes,
+                filterQuality: FilterQuality.high,
+              ), // Display each image
             );
           }).toList(),
         ),

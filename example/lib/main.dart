@@ -2,7 +2,6 @@ import 'package:example/select_size.dart';
 import 'package:example/select_type_label.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:printer_label/enums/enum.src.dart';
 import 'package:printer_label/src.dart';
 import 'preview_image_printer.dart';
 
@@ -46,7 +45,7 @@ class _MyHomePageState extends State<MyHomePage> {
   FocusNode focusNode = FocusNode();
 
   final List<ProductBarcodeModel> products = [];
-  LabelPerRow _selectedRow = LabelPerRow.one;
+  LabelPerRow _selectedRow = LabelPerRow.single;
 
   @override
   void initState() {
@@ -89,7 +88,7 @@ class _MyHomePageState extends State<MyHomePage> {
     required LabelPerRow labelPerRow,
     Dimensions? dimensions,
   }) async {
-    final list = await captureProductListAsImages(
+    final list = await captureImages(
       products,
       context,
       labelPerRow: labelPerRow,
@@ -128,18 +127,6 @@ class _MyHomePageState extends State<MyHomePage> {
       widget.isConnected = connect;
     });
     focusNode.unfocus();
-  }
-
-  Future<void> printOrderCupSticker(
-    CupStickerSize size,
-  ) async {
-    final imageBytes = await loadImageFromAssets(
-      'assets/images/temp2.png',
-    );
-    CupStickerPrinter.print(
-      imageBytesList: [imageBytes],
-      size: size,
-    );
   }
 
   Future<Uint8List> loadImageFromAssets(String path) async {
@@ -198,10 +185,12 @@ class _MyHomePageState extends State<MyHomePage> {
             padding(),
             _viewListImage(),
             padding(),
+            _viewCupSticker(),
+            padding(),
             ElevatedButton(
               onPressed: () async {
                 await getListProd(
-                  labelPerRow: LabelPerRow.one,
+                  labelPerRow: LabelPerRow.single,
                 );
                 await PrinterLabel.printThermal(
                     printThermalModel: PrintThermalModel(
@@ -231,7 +220,7 @@ class _MyHomePageState extends State<MyHomePage> {
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: [
         LabelPerRowSelector(
-          initialValue: LabelPerRow.one,
+          initialValue: LabelPerRow.single,
           onChanged: (label) {
             setState(() {
               _selectedRow = label;
@@ -250,7 +239,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Widget _printCupSticket() {
     return CupStickerSizeSelector(
-      onPrint: printOrderCupSticker,
+      onPrint: (select) =>
+          CupStickerPrintExample.printOrderCupSticker(select, context: context),
     );
   }
 
@@ -293,6 +283,40 @@ class _MyHomePageState extends State<MyHomePage> {
             ).reduce(
               (value, element) => value + element,
             )})",
+      ),
+    );
+  }
+
+  Widget _viewCupSticker() {
+    return ElevatedButton(
+      onPressed: () async {
+        final image = await captureFromWidget(
+          PreviewCupSticker(
+            data: PreviewLabelModel(
+              code: "1213",
+              productName: "Trà sữa",
+              price: "27.000 đ",
+              companyName: "Printer Label",
+              note: "Test print",
+              labelIndex: 1,
+              billDate: "01/01/2026",
+              totalLabels: 1,
+              toppings: ["Đá", "Đường"],
+            ),
+          ),
+          context: context,
+        );
+
+        Navigator.push(
+          // ignore: use_build_context_synchronously
+          context,
+          MaterialPageRoute(
+            builder: (context) => ImageDisplayScreen(imageBytesList: [image]),
+          ),
+        );
+      },
+      child: const Text(
+        "View cup sticker",
       ),
     );
   }

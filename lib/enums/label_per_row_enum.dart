@@ -5,14 +5,14 @@ class LabelPerRow {
   const LabelPerRow._internal(this.name, this._config);
 
   // Các instance giống enum
-  static const one = LabelPerRow._internal(
-      'one', _LabelConfig(x: 20, y: 0, width: 40, height: 25));
-  static const two = LabelPerRow._internal(
-      'two', _LabelConfig(x: 60, y: 0, width: 80, height: 20));
-  static const three = LabelPerRow._internal(
-      'three', _LabelConfig(x: 0, y: 0, width: 100, height: 20));
+  static const single = LabelPerRow._internal(
+      'single', _LabelConfig(x: 20, y: 0, width: 40, height: 25));
+  static const doubleLabels = LabelPerRow._internal(
+      'double', _LabelConfig(x: 60, y: 0, width: 80, height: 20));
+  static const triple = LabelPerRow._internal(
+      'triple', _LabelConfig(x: 0, y: 0, width: 100, height: 20));
 
-  static const values = [one, two, three];
+  static const values = [single, doubleLabels, triple];
 
   // Lấy thông tin
   int? get x => _config.x;
@@ -23,9 +23,9 @@ class LabelPerRow {
   int get count => values.indexOf(this) + 1;
 
   String get title => switch (name) {
-        'one' => 'Print 1 tem / row',
-        'two' => 'Print 2 tem / row',
-        'three' => 'Print 3 tem / row',
+        'single' => 'Print 1 tem / row',
+        'double' => 'Print 2 tem / row',
+        'triple' => 'Print 3 tem / row',
         _ => '',
       };
 

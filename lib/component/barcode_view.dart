@@ -1,7 +1,5 @@
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-
 import '../src.dart';
 
 class BarcodeView extends StatelessWidget {
@@ -17,7 +15,7 @@ class BarcodeView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: labelColor ?? Colors.blue,
+      color: labelColor ?? Colors.white,
       width: dimensions.width,
       height: dimensions.height,
       child: Column(
@@ -40,17 +38,21 @@ class BarcodeView extends StatelessWidget {
             style: const TextStyle(fontSize: 18),
           ),
           _buildText(
-            NumberFormat.currency(
-                  locale: 'vi_VN',
-                  symbol: '',
-                ).format(product.price) +
-                "VNĐ",
+            formatVND(product.price),
             fontWeight: FontWeight.bold,
             addFontSize: 5,
           ),
         ],
       ),
     );
+  }
+
+  String formatVND(num price) {
+    return price.toInt().toString().replaceAllMapped(
+              RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+              (m) => '${m[1]}.',
+            ) +
+        ' VNĐ';
   }
 
   Widget _buildText(

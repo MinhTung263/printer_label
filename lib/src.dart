@@ -5,4 +5,5 @@ export 'enums/enum.src.dart';
 export 'printer_label_interface.dart';
 export 'printer_label.dart';
 export 'utils/image_resize.dart';
-export 'service/cup_sticker_printer.dart';
+export 'service/service.src.dart';
+export 'print_example/cup_sticker_example.dart';
