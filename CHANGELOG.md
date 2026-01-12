@@ -1,3 +1,5 @@
+## [2.0.3] - 2026-01-12
+- Bug fixes and minor improvements
 ## [v2.0.2] - 2026/01/12
 - Fixed issue where printing two labels in one row did not work correctly
 ## [v2.0.1] - 2026/01/08
