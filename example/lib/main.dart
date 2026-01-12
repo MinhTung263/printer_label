@@ -41,7 +41,7 @@ class _MyHomePageState extends State<MyHomePage> {
   List<Uint8List> productImages = [];
 
   final TextEditingController textEditingController =
-      TextEditingController(text: "192.168.1.38");
+      TextEditingController(text: "192.168.1.35");
   FocusNode focusNode = FocusNode();
 
   final List<ProductBarcodeModel> products = [];
@@ -57,18 +57,18 @@ class _MyHomePageState extends State<MyHomePage> {
   void addProducts() {
     products.clear();
     products.addAll([
-      // ProductBarcodeModel(
-      //   barcode: "83868888",
-      //   name: "iPhone 17 Pro Max",
-      //   price: 28990000,
-      //   quantity: 2,
-      // ),
       ProductBarcodeModel(
-        barcode: "56782123931231",
-        name: "iPad Pro",
-        price: 34980000,
-        quantity: 3,
+        barcode: "83868888",
+        name: "iPhone 17 Pro Max",
+        price: 28990000,
+        quantity: 5,
       ),
+      // ProductBarcodeModel(
+      //   barcode: "56782123931231",
+      //   name: "iPad Pro",
+      //   price: 34980000,
+      //   quantity: 5,
+      // ),
       // ProductBarcodeModel(
       //   barcode: "56789345233",
       //   name: "Apple Pencil",
@@ -88,11 +88,20 @@ class _MyHomePageState extends State<MyHomePage> {
     required LabelPerRow labelPerRow,
     Dimensions? dimensions,
   }) async {
-    final list = await captureImages(
+    final list = await LabelFromWidget.captureImages<ProductBarcodeModel>(
       products,
       context,
       labelPerRow: labelPerRow,
-      dimensions: dimensions,
+      itemBuilder: (ProductBarcodeModel product, Dimensions dimensions) {
+        return BarcodeView<ProductBarcodeModel>(
+          data: product,
+          dimensions: dimensions,
+          nameBuilder: (p) => p.name,
+          barcodeBuilder: (p) => p.barcode,
+          priceBuilder: (p) => p.price,
+        );
+      },
+      quantity: (p) => p.quantity,
     );
     productImages.clear();
     productImages.addAll(list);
@@ -173,9 +182,11 @@ class _MyHomePageState extends State<MyHomePage> {
             const Text("Print single label"),
             Card(
               elevation: 2,
-              child: BarcodeView(
-                product: products.first,
-                labelColor: Colors.white,
+              child: BarcodeView<ProductBarcodeModel>(
+                data: products.first,
+                nameBuilder: (p) => p.name,
+                barcodeBuilder: (p) => p.barcode,
+                priceBuilder: (p) => p.price,
               ),
             ),
             padding(),
@@ -290,7 +301,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget _viewCupSticker() {
     return ElevatedButton(
       onPressed: () async {
-        final image = await captureFromWidget(
+        final image = await LabelFromWidget.captureFromWidget(
           PreviewCupSticker(
             data: PreviewLabelModel(
               code: "1213",

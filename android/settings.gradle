@@ -1,13 +1,25 @@
 pluginManagement {
-    def flutterSdkPath = {
-        def properties = new Properties()
-        file("local.properties").withInputStream { properties.load(it) }
-        def flutterSdkPath = properties.getProperty("flutter.sdk")
-        assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-        return flutterSdkPath
-    }()
+    def flutterSdkPath = null
 
-    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+    def localProperties = new Properties()
+    def localPropertiesFile = new File(rootDir, "local.properties")
+
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.withInputStream { stream ->
+            localProperties.load(stream)
+        }
+        flutterSdkPath = localProperties.getProperty("flutter.sdk")
+    }
+
+    if (flutterSdkPath == null || flutterSdkPath.trim().isEmpty()) {
+        throw new GradleException(
+                "flutter.sdk not set in android/local.properties.\n" +
+                        "For FVM, set:\n" +
+                        "flutter.sdk=../.fvm/flutter_sdk"
+        )
+    }
+
+    includeBuild("${flutterSdkPath}/packages/flutter_tools/gradle")
 
     repositories {
         google()

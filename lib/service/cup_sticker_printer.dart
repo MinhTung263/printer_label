@@ -46,7 +46,7 @@ class CupStickerPrinter {
     final images = <Uint8List>[];
 
     for (final widget in widgets) {
-      final bytes = await captureFromWidget(
+      final bytes = await LabelFromWidget.captureFromWidget(
         widget,
         context: context,
       );

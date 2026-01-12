@@ -1,17 +1,31 @@
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:flutter/material.dart';
-import '../src.dart';
 
-class BarcodeView extends StatelessWidget {
-  BarcodeView({
+import '../enums/type_print_enum.dart';
+
+class BarcodeView<T> extends StatelessWidget {
+  const BarcodeView({
     super.key,
-    required this.product,
-    this.dimensions = Dimensions.defaultDimens,
+    required this.data,
+    Dimensions? dimensions,
+    required this.nameBuilder,
+    required this.barcodeBuilder,
+    required this.priceBuilder,
     this.labelColor,
-  });
-  final ProductBarcodeModel product;
+    this.title = 'Printer Label',
+  }) : dimensions = dimensions ?? Dimensions.defaultDimens;
+
+  final T data;
   final Dimensions dimensions;
   final Color? labelColor;
+
+  /// Builders
+  final String Function(T data) nameBuilder;
+  final String Function(T data) barcodeBuilder;
+  final double Function(T data) priceBuilder;
+
+  final String title;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -22,23 +36,21 @@ class BarcodeView extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          _buildText(title),
           _buildText(
-            "EasyPos",
-          ),
-          _buildText(
-            product.name,
+            nameBuilder(data),
             fontWeight: FontWeight.bold,
           ),
           BarcodeWidget(
-            barcode: Barcode.code93(), // Loại mã vạch (có thể thay đổi)
-            data: product.barcode,
+            barcode: Barcode.code93(),
+            data: barcodeBuilder(data),
             width: dimensions.width,
             height: dimensions.barcodeHeight,
-            drawText: true, // Hiển thị mã số dưới mã vạch
+            drawText: true,
             style: const TextStyle(fontSize: 18),
           ),
           _buildText(
-            formatVND(product.price),
+            formatVND(priceBuilder(data)),
             fontWeight: FontWeight.bold,
             addFontSize: 5,
           ),
@@ -47,7 +59,7 @@ class BarcodeView extends StatelessWidget {
     );
   }
 
-  String formatVND(num price) {
+  String formatVND(double price) {
     return price.toInt().toString().replaceAllMapped(
               RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
               (m) => '${m[1]}.',
@@ -62,6 +74,7 @@ class BarcodeView extends StatelessWidget {
   }) {
     return Text(
       text,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(
         fontSize: dimensions.fontSize + (addFontSize ?? 0),
         fontWeight: fontWeight,

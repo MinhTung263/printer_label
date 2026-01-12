@@ -1,21 +1,23 @@
 group 'com.printer.printer_label'
 version '1.0'
+
 buildscript {
     ext.kotlin_version = '1.8.22'
     repositories {
         google()
-        jcenter()
+        mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.6.0'
+        classpath 'com.android.tools.build:gradle:8.6.1'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
+
 allprojects {
     repositories {
-        maven { url "https://jitpack.io" }
         google()
-        jcenter()
+        mavenCentral()
+        maven { url "https://jitpack.io" }
         flatDir {
             dirs 'libs'
         }
@@ -26,27 +28,26 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-     if (project.android.hasProperty("namespace")) {
     namespace 'com.printer.printer_label'
-    }
-    compileSdk 34
+    compileSdk 35
+
     defaultConfig {
-        minSdkVersion 21
+        minSdk 21
     }
+
     kotlinOptions {
         jvmTarget = '1.8'
     }
-    lintOptions {
+
+    lint {
         disable 'InvalidPackage'
     }
-
 }
-
 
 dependencies {
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4"
     implementation "io.reactivex.rxjava3:rxjava:3.1.5"
     implementation files('libs/printer-lib-3.2.0/classes.jar')
+    implementation "androidx.annotation:annotation:1.9.1"
     testImplementation 'junit:junit:4.13.2'
-
 }

@@ -8,7 +8,7 @@ class LabelPerRow {
   static const single = LabelPerRow._internal(
       'single', _LabelConfig(x: 20, y: 0, width: 40, height: 25));
   static const doubleLabels = LabelPerRow._internal(
-      'double', _LabelConfig(x: 60, y: 0, width: 80, height: 20));
+      'double', _LabelConfig(x: 40, y: 0, width: 80, height: 25));
   static const triple = LabelPerRow._internal(
       'triple', _LabelConfig(x: 0, y: 0, width: 100, height: 20));
 
@@ -20,7 +20,12 @@ class LabelPerRow {
   int? get width => _config.width;
   int? get height => _config.height;
 
-  int get count => values.indexOf(this) + 1;
+  int get count => switch (name) {
+        'single' => 1,
+        'double' => 2,
+        'triple' => 3,
+        _ => 1,
+      };
 
   String get title => switch (name) {
         'single' => 'Print 1 tem / row',
