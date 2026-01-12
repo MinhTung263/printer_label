@@ -84,27 +84,33 @@ class _MyHomePageState extends State<MyHomePage> {
     ]);
   }
 
-  Future<void> getListProd({
+  Widget _buildBarcodeLabel(
+    ProductBarcodeModel product,
+    Dimensions dimensions,
+  ) {
+    return BarcodeView<ProductBarcodeModel>(
+      data: product,
+      dimensions: dimensions,
+      nameBuilder: (p) => p.name,
+      barcodeBuilder: (p) => p.barcode,
+      priceBuilder: (p) => p.price,
+    );
+  }
+
+  Future<void> generateLabelImages({
     required LabelPerRow labelPerRow,
-    Dimensions? dimensions,
   }) async {
-    final list = await LabelFromWidget.captureImages<ProductBarcodeModel>(
+    final images = await LabelFromWidget.captureImages<ProductBarcodeModel>(
       products,
       context,
       labelPerRow: labelPerRow,
-      itemBuilder: (ProductBarcodeModel product, Dimensions dimensions) {
-        return BarcodeView<ProductBarcodeModel>(
-          data: product,
-          dimensions: dimensions,
-          nameBuilder: (p) => p.name,
-          barcodeBuilder: (p) => p.barcode,
-          priceBuilder: (p) => p.price,
-        );
-      },
+      itemBuilder: _buildBarcodeLabel,
       quantity: (p) => p.quantity,
     );
-    productImages.clear();
-    productImages.addAll(list);
+
+    productImages
+      ..clear()
+      ..addAll(images);
   }
 
   Future<void> checkConnectPrint() async {
@@ -114,17 +120,14 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  Future<void> printMultiLabel() async {
-    await getListProd(
+  Future<void> printLabels() async {
+    await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
+      items: products,
+      context: context,
       labelPerRow: _selectedRow,
+      itemBuilder: _buildBarcodeLabel,
+      quantity: (p) => p.quantity,
     );
-    if (productImages.isNotEmpty) {
-      final model = LabelModel(
-        images: productImages,
-        labelPerRow: _selectedRow,
-      );
-      await PrinterLabel.printLabel(barcodeImageModel: model);
-    }
   }
 
   Future<void> connectLan() async {
@@ -200,7 +203,7 @@ class _MyHomePageState extends State<MyHomePage> {
             padding(),
             ElevatedButton(
               onPressed: () async {
-                await getListProd(
+                await generateLabelImages(
                   labelPerRow: LabelPerRow.single,
                 );
                 await PrinterLabel.printThermal(
@@ -239,7 +242,7 @@ class _MyHomePageState extends State<MyHomePage> {
           },
         ),
         ElevatedButton(
-          onPressed: printMultiLabel,
+          onPressed: printLabels,
           child: const Text(
             "Print multi label",
           ),
@@ -276,7 +279,7 @@ class _MyHomePageState extends State<MyHomePage> {
     return ElevatedButton(
       onPressed: () async {
         addProducts();
-        await getListProd(
+        await generateLabelImages(
           labelPerRow: _selectedRow,
         );
         Navigator.push(
