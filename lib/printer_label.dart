@@ -11,6 +11,10 @@ class PrinterLabel {
     return Platform.isAndroid && await _platform.checkConnect();
   }
 
+  static Future<bool> disconectPrinter() async {
+    return await _platform.disconectPrinter();
+  }
+
   static Future<bool> connectLan({required String ipAddress}) async {
     return await _platform.connectLan(ipAddress: ipAddress);
   }
@@ -33,9 +37,9 @@ class PrinterLabel {
     return await _platform.printBarcode(printBarcodeModel: printBarcodeModel);
   }
 
-  static Future<void> printThermal({
+  static Future<void> printESC({
     required PrintThermalModel printThermalModel,
   }) async {
-    return await _platform.printThermal(printThermalModel: printThermalModel);
+    return await _platform.printESC(printThermalModel: printThermalModel);
   }
 }

@@ -1,15 +1,15 @@
-enum PaperSize {
+enum TicketSize {
   mm58,
   mm80,
 }
 
-extension PaperSizeValue on PaperSize {
+extension PaperSizeValue on TicketSize {
   int get value {
     switch (this) {
-      case PaperSize.mm58:
-        return 58;
-      case PaperSize.mm80:
-        return 80;
+      case TicketSize.mm58:
+        return 384; // khổ in 58mm
+      case TicketSize.mm80:
+        return 576; // khổ in 80mm
     }
   }
 }

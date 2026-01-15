@@ -57,6 +57,10 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 result.success(curConnect?.isConnect() ?: false)
             }
 
+            "disconnect" -> {
+                disconnectPrinter(result)
+            }
+
             "connect_lan" -> {
                 val ipAddress = call.argument<String>("ip_address")
                 if (ipAddress.isNullOrEmpty()) {
@@ -86,8 +90,20 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
+    private fun disconnectPrinter(result: MethodChannel.Result) {
+        try {
+            curConnect?.close()
+            curConnect = null
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("DISCONNECT_ERROR", e.message, null)
+        }
+    }
+
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        curConnect?.close()
+        curConnect = null
         binding.applicationContext.unregisterReceiver(usbReceiver)
     }
 

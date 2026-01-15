@@ -23,6 +23,8 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   Future<bool> checkConnect();
 
+  Future<bool> disconectPrinter();
+
   Future<bool> connectLan({
     required String ipAddress,
   });
@@ -39,7 +41,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required BarcodeModel printBarcodeModel,
   });
 
-  Future<void> printThermal({
+  Future<void> printESC({
     required PrintThermalModel printThermalModel,
   });
 }

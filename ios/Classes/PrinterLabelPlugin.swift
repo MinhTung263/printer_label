@@ -1,32 +1,43 @@
 import Flutter
-import UIKit
 import PrinterSDK
+import UIKit
+
 public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     var result: FlutterResult?
 
     private var channel: FlutterMethodChannel?
     private var printer = PTPrinter()
-    
+
     private let escPrinter: ESCPosPrinter
-        override init() {
-            self.escPrinter = ESCPosPrinter()
-            super.init()
-            self.escPrinter.plugin = self 
-        }
+    override init() {
+        self.escPrinter = ESCPosPrinter()
+        super.init()
+        self.escPrinter.plugin = self
+    }
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = PrinterLabelPlugin()
-        instance.channel = FlutterMethodChannel(name: "flutter_printer_label", binaryMessenger: registrar.messenger())
+        instance.channel = FlutterMethodChannel(
+            name: "flutter_printer_label",
+            binaryMessenger: registrar.messenger()
+        )
 
-        registrar.addMethodCallDelegate(instance, channel:instance.channel!)
+        registrar.addMethodCallDelegate(instance, channel: instance.channel!)
     }
 
-    public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    public func handle(
+        _ call: FlutterMethodCall,
+        result: @escaping FlutterResult
+    ) {
 
         switch call.method {
-            
+
+        case "disconnect":
+            disconnectPrinter(result: result)
+
         case "connect_lan":
             guard let args = call.arguments as? [String: Any],
-                  let ip = args["ip_address"] as? String, !ip.isEmpty else {
+                let ip = args["ip_address"] as? String, !ip.isEmpty
+            else {
                 result(false)
                 return
             }
@@ -55,13 +66,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             dispatcher?.connect(printer)
         case "print_label":
             if let args = call.arguments as? [String: Any] {
-                printLabel(args: args,result: result)
+                printLabel(args: args, result: result)
             } else {
                 print("Invalid arguments for print_label")
             }
         case "print_image":
             if let args = call.arguments as? [String: Any] {
-                printImage(args: args,result: result)
+                printImage(args: args, result: result)
             } else {
                 print("Invalid arguments for print_image")
             }
@@ -75,27 +86,47 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             result(FlutterMethodNotImplemented)
         }
     }
-    func printLabel(args: [String: Any],result: @escaping FlutterResult) {
-        guard let images = args["images"] as? [FlutterStandardTypedData], !images.isEmpty else {
+
+    private func disconnectPrinter(result: @escaping FlutterResult) {
+        let dispatcher = PTDispatcher.share()
+
+        // Kiểm tra đã connect hay chưa
+        if dispatcher?.printerConnected != nil {
+            dispatcher?.disconnect()
+            result(true)
+        } else {
+            // Chưa connect
+            result(false)
+        }
+    }
+    func printLabel(args: [String: Any], result: @escaping FlutterResult) {
+        guard let images = args["images"] as? [FlutterStandardTypedData],
+            !images.isEmpty
+        else {
             print("No images")
             result(false)
             return
         }
-   
+
         let sizeMap = args["size"] as? [String: Any]
         let labelWidthMM: Int = sizeMap?["width"] as? Int ?? 100
         let labelHeightMM: Int = sizeMap?["height"] as? Int ?? 20
-        let startX     = args["x"] as? Int ?? 0
-        let startY     = args["y"] as? Int ?? 0
+        let startX = args["x"] as? Int ?? 0
+        let startY = args["y"] as? Int ?? 0
 
         for imageData in images {
             let printer = PTCommandTSPL()
             printer.encoding = String.Encoding.utf8.rawValue
-            printer.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
+            printer.setPrintAreaSizeWithWidth(
+                labelWidthMM,
+                height: labelHeightMM
+            )
             printer.setGapWithDistance(1, offset: 0)
             printer.setCLS()
 
-            guard let cgImage = imageFromFlutter(imageData)?.cgImage else { continue }
+            guard let cgImage = imageFromFlutter(imageData)?.cgImage else {
+                continue
+            }
 
             printer.addBitmap(
                 withXPos: startX,
@@ -148,7 +179,6 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         result(true)
     }
 
-
     func imageFromFlutter(_ data: FlutterStandardTypedData) -> UIImage? {
         return UIImage(data: data.data)
     }
@@ -165,6 +195,5 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
         PTDispatcher.share()?.send(sendData)
     }
-    
-}
 
+}

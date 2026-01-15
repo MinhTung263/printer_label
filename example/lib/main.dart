@@ -176,7 +176,20 @@ class _MyHomePageState extends State<MyHomePage> {
                 "Connect Lan",
               ),
             ),
-            const Padding(padding: EdgeInsets.all(10)),
+            padding(),
+            ElevatedButton(
+              onPressed: () async {
+                final disconnect = await PrinterLabel.disconectPrinter();
+
+                setState(() {
+                  widget.isConnected = !disconnect;
+                });
+              },
+              child: const Text(
+                "Disconnect printer",
+              ),
+            ),
+            padding(),
             const Text("Print single label"),
             Card(
               elevation: 2,

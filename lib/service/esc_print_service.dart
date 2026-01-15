@@ -9,7 +9,7 @@ class ESCPrintService {
   Future<void> print({
     required PrintThermalModel model,
   }) async {
-    await PrinterLabel.printThermal(
+    await PrinterLabel.printESC(
       printThermalModel: model,
     );
   }
@@ -17,7 +17,7 @@ class ESCPrintService {
   Future<void> printExample() async {
     final image =
         await loadImageFromAssets("packages/printer_label/images/ticket.png");
-    await PrinterLabel.printThermal(
+    await PrinterLabel.printESC(
       printThermalModel: PrintThermalModel(image: image),
     );
   }

@@ -9,6 +9,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     return await _channel.invokeMethod('checkConnect');
   }
 
+  Future<bool> disconectPrinter() async {
+    return await _channel.invokeMethod('disconnect');
+  }
+
   Future<bool> connectLan({
     required String ipAddress,
   }) async {
@@ -43,7 +47,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<void> printThermal({
+  Future<void> printESC({
     required PrintThermalModel printThermalModel,
   }) async {
     try {
