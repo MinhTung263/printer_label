@@ -41,7 +41,7 @@ class _MyHomePageState extends State<MyHomePage> {
   List<Uint8List> productImages = [];
 
   final TextEditingController textEditingController =
-      TextEditingController(text: "192.168.1.35");
+      TextEditingController(text: "192.168.1.56");
   FocusNode focusNode = FocusNode();
 
   final List<ProductBarcodeModel> products = [];

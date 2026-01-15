@@ -84,7 +84,6 @@ final class ESCPosPrinter {
         esc.initCommandQueue()
         esc.appendZeroData()
         esc.setJustification(1)
-
         esc.appendRasterImage(
             cgImage,
             mode: .dithering,
@@ -93,7 +92,7 @@ final class ESCPosPrinter {
         )
 
         esc.printAndLineFeed()
-        esc.setFullCut()
+        esc.setFullCutWithDistance(1)
 
         guard let printData = esc.getCommandData() else {
             result(
