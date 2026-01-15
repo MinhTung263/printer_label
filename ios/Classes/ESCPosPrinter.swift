@@ -93,7 +93,6 @@ final class ESCPosPrinter {
         )
 
         esc.printAndLineFeed()
-        esc.printAndLineFeed()
         esc.setFullCut()
 
         guard let printData = esc.getCommandData() else {
