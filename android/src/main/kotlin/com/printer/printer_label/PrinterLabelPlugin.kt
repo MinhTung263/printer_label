@@ -71,8 +71,9 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 printBarcode(call, result)
 
             }
+
             "print_label" -> {
-                printLabel(call)
+                printLabel(call, result)
             }
 
             "print_image_esc" -> {
@@ -262,31 +263,49 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
         printer.text(textX, textY, font, rotation, sizeX, sizeY, textData)
     }
-    private fun printLabel(call: MethodCall) {
-        val images: List<ByteArray>? = call.argument<List<ByteArray>>("images")
-        val printer = TSPLPrinter(curConnect)
-        images?.forEach { imageData ->
-            val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
-            if (bitmap != null) {
-                val size = call.argument<Map<String, Int>>("size")
-                val (sizeWidth, sizeHeight) = extractSizeImage(size)
-                val width = 900
-                val x = call.argument<Int>("x") ?: 0
-                val y = call.argument<Int>("y") ?: 0
-                printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
-                    .cls()
-                    .bitmap(
-                        x,
-                        y,
-                        TSPLConst.BMP_MODE_OVERWRITE,
-                        width,
-                        bitmap,
-                        AlgorithmType.Threshold
-                    )
-                    .print(1)
+
+    private fun printLabel(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val images: List<ByteArray>? = call.argument<List<ByteArray>>("images")
+            if (images.isNullOrEmpty()) {
+                result.success(false)
+                return
             }
+
+            val printer = TSPLPrinter(curConnect)
+
+            images.forEach { imageData ->
+                val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+                if (bitmap != null) {
+                    val size = call.argument<Map<String, Int>>("size")
+                    val (sizeWidth, sizeHeight) = extractSizeImage(size)
+
+                    val x = call.argument<Int>("x") ?: 0
+                    val y = call.argument<Int>("y") ?: 0
+                    val width = 900
+
+                    printer
+                        .sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
+                        .cls()
+                        .bitmap(
+                            x,
+                            y,
+                            TSPLConst.BMP_MODE_OVERWRITE,
+                            width,
+                            bitmap,
+                            AlgorithmType.Threshold
+                        )
+                        .print(1)
+                }
+            }
+
+            result.success(true)
+
+        } catch (e: Exception) {
+            result.error("PRINT_ERROR", e.message, null)
         }
     }
+
 
     companion object {
         private const val ACTION_USB_PERMISSION = "com.example.USB_PERMISSION"
