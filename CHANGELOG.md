@@ -1,3 +1,5 @@
+## [2.0.6] - 2026-01-15
+- Bug fixes and minor improvements
 ## [2.0.5] - 2026-01-15
 - Bug fixes and minor improvements
 ## [2.0.4] - 2026-01-15
