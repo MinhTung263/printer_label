@@ -48,7 +48,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }) async {
     try {
       await _channel.invokeMethod(
-        'print_thermal',
+        'print_image_esc',
         printThermalModel.toJson(),
       );
     } catch (e) {

@@ -141,11 +141,6 @@ class _MyHomePageState extends State<MyHomePage> {
     focusNode.unfocus();
   }
 
-  Future<Uint8List> loadImageFromAssets(String path) async {
-    final byteData = await rootBundle.load(path);
-    return byteData.buffer.asUint8List();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -203,16 +198,10 @@ class _MyHomePageState extends State<MyHomePage> {
             padding(),
             ElevatedButton(
               onPressed: () async {
-                await generateLabelImages(
-                  labelPerRow: LabelPerRow.single,
-                );
-                await PrinterLabel.printThermal(
-                    printThermalModel: PrintThermalModel(
-                  image: productImages.first,
-                ));
+                await ESCPrintService.instance.printExample();
               },
               child: const Text(
-                "Print thermal",
+                "Print ESC",
               ),
             ),
             padding(),

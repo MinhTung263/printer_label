@@ -8,7 +8,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class PrinterThermal {
-    fun printTiket(call: MethodCall, curConnect: IDeviceConnection, result: MethodChannel.Result) {
+    fun printImageESC(call: MethodCall, curConnect: IDeviceConnection, result: MethodChannel.Result) {
         val printer = POSPrinter(curConnect)
 
         try {
@@ -23,7 +23,7 @@ class PrinterThermal {
             val bitmap = BitmapFactory.decodeByteArray(image, 0, image.size)
             val printResult =
                 printer.initializePrinter()
-                    .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, size ?: 384)
+                    .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, size ?: 576)
                     .feedLine()
                     .cutHalfAndFeed(1)
             result.success(printResult)

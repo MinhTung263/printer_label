@@ -6,7 +6,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     private var channel: FlutterMethodChannel?
     private var printer = PTPrinter()
-
+    
+    private let escPrinter: ESCPosPrinter
+        override init() {
+            self.escPrinter = ESCPosPrinter()
+            super.init()
+            self.escPrinter.plugin = self 
+        }
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = PrinterLabelPlugin()
         instance.channel = FlutterMethodChannel(name: "flutter_printer_label", binaryMessenger: registrar.messenger())
@@ -59,6 +65,12 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             } else {
                 print("Invalid arguments for print_image")
             }
+        case "print_image_esc":
+            escPrinter.printImageESC(
+                call: call,
+                result: result
+            )
+
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -153,5 +165,6 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
         PTDispatcher.share()?.send(sendData)
     }
-   
+    
 }
+
