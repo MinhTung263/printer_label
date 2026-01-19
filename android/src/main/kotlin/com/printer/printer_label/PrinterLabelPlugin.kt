@@ -32,10 +32,11 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var channel: MethodChannel
     private var CHANNEL = "flutter_printer_label"
     public var mContext: Context? = null
-    private var curConnect: IDeviceConnection? = null
+    var curConnect: IDeviceConnection? = null
+    private var pendingConnectResult: MethodChannel.Result? = null
+    private var pendingConnectType: String? = null
     private lateinit var usbReceiver: UsbConnectionReceiver
     private var printThermal = PrinterThermal()
-    private var connectResult: MethodChannel.Result? = null
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL)
         channel.setMethodCallHandler(this)
@@ -67,8 +68,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     result.success(false)
                     return
                 }
-                connectResult = result
-                connectNet(ipAddress)
+                connectNet(ipAddress,result)
             }
 
             "print_barcode" -> {
@@ -108,35 +108,36 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private val connectListener = IConnectListener { code, connInfo, msg ->
+        val type = pendingConnectType ?: "UNKNOWN"
         when (code) {
             POSConnect.CONNECT_SUCCESS -> {
-                toast("CONNECT_SUCCESS")
-                connectResult?.success(true)
+                pendingConnectResult?.success(true)
+                pendingConnectResult = null
+                toast("Kết nối ${type} thành công!")
             }
 
             POSConnect.CONNECT_FAIL -> {
-                toast("CONNECT_FAIL")
-                connectResult?.success(false)
+                toast("Kết nối ${type} thất bại!")
+                pendingConnectResult?.success(false)
+                pendingConnectResult = null
             }
 
             POSConnect.CONNECT_INTERRUPT -> {
-                toast("CONNECT_INTERRUPT")
-                connectResult?.success(false)
+                toast("Kết nối ${type} bị gián đoạn!")
+                pendingConnectResult?.success(false)
+                pendingConnectResult = null
             }
 
             POSConnect.SEND_FAIL -> {
                 toast("SEND_FAIL")
-                connectResult?.success(false)
             }
 
             POSConnect.USB_DETACHED -> {
                 toast("USB_DETACHED")
-                connectResult?.success(false)
             }
 
             POSConnect.USB_ATTACHED -> {
                 toast("USB_ATTACHED")
-                connectResult?.success(false)
             }
         }
     }
@@ -180,16 +181,26 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
 
     fun connectUSB(pathName: String) {
+        pendingConnectType = "USB"
         curConnect?.close()
         curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
         curConnect?.connect(pathName, connectListener)
     }
 
-    private fun connectNet(ipAddress: String) {
-        curConnect?.close()
-        curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
-        curConnect?.connect(ipAddress, connectListener)
+    private fun connectNet(ipAddress: String, result: MethodChannel.Result) {
+        try {
+            pendingConnectResult = result
+            pendingConnectType = "LAN"
+            curConnect?.close()
+            curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
+            curConnect?.connect(ipAddress, connectListener)
+
+        } catch (e: Exception) {
+            pendingConnectResult?.error("CONNECT_ERROR", e.message, null)
+            pendingConnectResult = null
+        }
     }
+
 
     private fun connectBt(macAddress: String) {
         curConnect?.close()
@@ -282,6 +293,11 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     private fun printLabel(call: MethodCall, result: MethodChannel.Result) {
         try {
+            val type = call.argument<String>("type")
+            if (type != "TSPL") {
+                result.success(false)
+                return
+            }
             val images: List<ByteArray>? = call.argument<List<ByteArray>>("images")
             if (images.isNullOrEmpty()) {
                 result.success(false)

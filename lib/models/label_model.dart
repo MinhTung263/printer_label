@@ -18,6 +18,7 @@ class LabelModel {
     final label = labelPerRow ?? LabelPerRow.single;
     final map = <String, dynamic>{
       'images': images,
+      'type': 'TSPL',
       'quantity': quantity,
       'x': label.x,
       'y': label.y,

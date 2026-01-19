@@ -15,6 +15,7 @@ class PrintThermalModel {
     return {
       'image': image,
       'size': size.value,
+      'type': 'ESC',
     };
   }
 }

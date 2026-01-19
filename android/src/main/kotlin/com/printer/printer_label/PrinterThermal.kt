@@ -10,7 +10,11 @@ import io.flutter.plugin.common.MethodChannel
 class PrinterThermal {
     fun printImageESC(call: MethodCall, curConnect: IDeviceConnection, result: MethodChannel.Result) {
         val printer = POSPrinter(curConnect)
-
+        val type = call.argument<String>("type")
+        if (type != "ESC") {
+            result.success(false)
+            return
+        }
         try {
             val image: ByteArray? = call.argument<ByteArray>("image")
             val size: Int? = call.argument<Int>("size")
