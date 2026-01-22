@@ -1,3 +1,5 @@
+## [2.0.8] - 2026-01-22
+- Fixed app crash when connecting to printer on Android 6
 ## [2.0.7] - 2026-01-19
 - Fixed app crash when connecting to printer on Android
 ## [2.0.6] - 2026-01-15
