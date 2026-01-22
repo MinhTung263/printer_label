@@ -8,8 +8,8 @@ import android.hardware.usb.UsbManager
 import io.flutter.plugin.common.MethodChannel
 
 class UsbConnectionReceiver(
-    private val methodChannel: MethodChannel,
-    private val printerLabelPlugin: PrinterLabelPlugin
+        private val methodChannel: MethodChannel,
+        private val printerLabelPlugin: PrinterLabelPlugin
 ) : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action: String = intent.action ?: return
@@ -18,8 +18,6 @@ class UsbConnectionReceiver(
             if (device != null) {
                 printerLabelPlugin.checkAndRequestUsbPermission(context)
             }
-        } else if (UsbManager.ACTION_USB_DEVICE_DETACHED == action) {
-
-        }
+        } else if (UsbManager.ACTION_USB_DEVICE_DETACHED == action) {}
     }
 }

@@ -20,8 +20,6 @@ import io.flutter.plugin.common.MethodChannel.Result
 import net.posprinter.IConnectListener
 import net.posprinter.IDeviceConnection
 import net.posprinter.POSConnect
-import net.posprinter.POSConst
-import net.posprinter.POSPrinter
 import net.posprinter.TSPLConst
 import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
@@ -37,7 +35,9 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private var pendingConnectType: String? = null
     private lateinit var usbReceiver: UsbConnectionReceiver
     private var printThermal = PrinterThermal()
-    override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+    override fun onAttachedToEngine(
+            @NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding
+    ) {
         channel = MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL)
         channel.setMethodCallHandler(this)
         mContext = flutterPluginBinding.getApplicationContext()
@@ -53,37 +53,29 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
         when (call.method) {
             "getPlatformVersion" -> result.success("Android ${android.os.Build.VERSION.RELEASE}")
-
             "checkConnect" -> {
                 result.success(curConnect?.isConnect() ?: false)
             }
-
             "disconnect" -> {
                 disconnectPrinter(result)
             }
-
             "connect_lan" -> {
                 val ipAddress = call.argument<String>("ip_address")
                 if (ipAddress.isNullOrEmpty()) {
                     result.success(false)
                     return
                 }
-                connectNet(ipAddress,result)
+                connectNet(ipAddress, result)
             }
-
             "print_barcode" -> {
                 printBarcode(call, result)
-
             }
-
             "print_label" -> {
                 printLabel(call, result)
             }
-
             "print_image_esc" -> {
                 printThermal.printImageESC(call, curConnect!!, result)
             }
-
             else -> {
                 result.notImplemented()
             }
@@ -104,40 +96,57 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         channel.setMethodCallHandler(null)
         curConnect?.close()
         curConnect = null
-        binding.applicationContext.unregisterReceiver(usbReceiver)
+        // binding.applicationContext.unregisterReceiver(usbReceiver)
+        try {
+            binding.applicationContext.unregisterReceiver(usbReceiver)
+        } catch (_: Exception) {}
     }
 
-    private val connectListener = IConnectListener { code, connInfo, msg ->
-        val type = pendingConnectType ?: "UNKNOWN"
+    private val connectListener = IConnectListener { code, _, _ ->
+
+        // Lưu lại type tại thời điểm callback
+        val type = pendingConnectType
+
         when (code) {
             POSConnect.CONNECT_SUCCESS -> {
-                pendingConnectResult?.success(true)
-                pendingConnectResult = null
-                toast("Kết nối ${type} thành công!")
-            }
+                // Chỉ accept nếu đang chờ connect
+                if (type != null) {
+                    pendingConnectResult?.success(true)
+                    toast("Kết nối $type thành công!")
+                }
 
-            POSConnect.CONNECT_FAIL -> {
-                toast("Kết nối ${type} thất bại!")
+                // Clear trạng thái chờ
+                pendingConnectResult = null
+                pendingConnectType = null
+            }
+            POSConnect.CONNECT_FAIL, POSConnect.CONNECT_INTERRUPT -> {
+
+                // Đóng và xoá connection hiện tại
+                try {
+                    curConnect?.close()
+                } catch (_: Exception) {} finally {
+                    curConnect = null
+                }
+
                 pendingConnectResult?.success(false)
-                pendingConnectResult = null
-            }
+                toast("Kết nối ${type ?: "UNKNOWN"} thất bại hoặc bị gián đoạn")
 
-            POSConnect.CONNECT_INTERRUPT -> {
-                toast("Kết nối ${type} bị gián đoạn!")
-                pendingConnectResult?.success(false)
                 pendingConnectResult = null
+                pendingConnectType = null
             }
-
             POSConnect.SEND_FAIL -> {
                 toast("SEND_FAIL")
             }
-
             POSConnect.USB_DETACHED -> {
-                toast("USB_DETACHED")
+                try {
+                    curConnect?.close()
+                } catch (_: Exception) {} finally {
+                    curConnect = null
+                }
+                toast("USB bị ngắt kết nối")
             }
-
             POSConnect.USB_ATTACHED -> {
-                toast("USB_ATTACHED")
+                toast("USB được gắn")
             }
         }
     }
@@ -146,61 +155,172 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
     }
 
+    // @TargetApi(Build.VERSION_CODES.O)
+    // fun checkAndRequestUsbPermission(context: Context) {
+    //     val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+    //     val deviceList = usbManager.deviceList
+
+    //     if (deviceList.isEmpty()) {
+    //         return
+    //     }
+
+    //     val usbDevice = deviceList.values.firstOrNull() ?: return
+
+    //     if (usbManager.hasPermission(usbDevice)) {
+    //         connectUSB(usbDevice.deviceName)
+    //     } else {
+    //         val permissionIntent =
+    //                 PendingIntent.getBroadcast(
+    //                         context,
+    //                         0,
+    //                         Intent(ACTION_USB_PERMISSION),
+    //                         PendingIntent.FLAG_UPDATE_CURRENT
+    //                 )
+    //         val usbReceiver =
+    //                 object : BroadcastReceiver() {
+    //                     override fun onReceive(context: Context?, intent: Intent?) {
+    //                         if (intent?.action == ACTION_USB_PERMISSION) {
+    //                             if (usbManager.hasPermission(usbDevice)) {
+    //                                 connectUSB(usbDevice.deviceName)
+    //                             }
+    //                             context?.unregisterReceiver(this)
+    //                         }
+    //                     }
+    //                 }
+    //         val filter = IntentFilter(ACTION_USB_PERMISSION)
+    //         // context.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
+    //         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    //             context.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
+    //         } else {
+    //             context.registerReceiver(usbReceiver, filter)
+    //         }
+
+    //         usbManager.requestPermission(usbDevice, permissionIntent)
+    //     }
+    // }
+
     @TargetApi(Build.VERSION_CODES.O)
     fun checkAndRequestUsbPermission(context: Context) {
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
         val deviceList = usbManager.deviceList
 
-        if (deviceList.isEmpty()) {
-            return
-        }
+        if (deviceList.isEmpty()) return
 
         val usbDevice = deviceList.values.firstOrNull() ?: return
 
         if (usbManager.hasPermission(usbDevice)) {
             connectUSB(usbDevice.deviceName)
         } else {
-            val permissionIntent = PendingIntent.getBroadcast(
-                context, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE
-            )
-            val usbReceiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context?, intent: Intent?) {
-                    if (intent?.action == ACTION_USB_PERMISSION) {
-                        if (usbManager.hasPermission(usbDevice)) {
-                            connectUSB(usbDevice.deviceName)
+            val permissionIntent =
+                    PendingIntent.getBroadcast(
+                            context,
+                            0,
+                            Intent(ACTION_USB_PERMISSION),
+                            PendingIntent.FLAG_UPDATE_CURRENT // ✅ FIX
+                    )
+
+            val usbReceiver =
+                    object : BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            if (intent?.action == ACTION_USB_PERMISSION) {
+                                if (usbManager.hasPermission(usbDevice)) {
+                                    connectUSB(usbDevice.deviceName)
+                                }
+                                try {
+                                    context?.unregisterReceiver(this) // ✅ FIX
+                                } catch (_: Exception) {}
+                            }
                         }
-                        context?.unregisterReceiver(this)
                     }
-                }
-            }
+
             val filter = IntentFilter(ACTION_USB_PERMISSION)
-            context.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(
+                        usbReceiver,
+                        filter,
+                        Context.RECEIVER_EXPORTED // ✅ chỉ Android 13+
+                )
+            } else {
+                context.registerReceiver(usbReceiver, filter)
+            }
+
             usbManager.requestPermission(usbDevice, permissionIntent)
         }
     }
 
+    // fun connectUSB(pathName: String) {
+    //     pendingConnectType = "USB"
+    //     curConnect?.close()
+    //     curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
+    //     curConnect?.connect(pathName, connectListener)
+    // }
 
     fun connectUSB(pathName: String) {
-        pendingConnectType = "USB"
-        curConnect?.close()
-        curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
-        curConnect?.connect(pathName, connectListener)
+        try {
+            // 1️⃣ Đánh dấu loại connect đang chờ
+            pendingConnectType = "USB"
+            pendingConnectResult = null
+
+            // 2️⃣ Đóng sạch connection cũ
+            try {
+                curConnect?.close()
+            } catch (_: Exception) {} finally {
+                curConnect = null
+            }
+
+            // 3️⃣ Tạo device mới
+            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
+            curConnect = device
+
+            // 4️⃣ Connect
+            device?.connect(pathName, connectListener)
+        } catch (e: Exception) {
+            curConnect = null
+            pendingConnectType = null
+        }
     }
+
+    // private fun connectNet(ipAddress: String, result: MethodChannel.Result) {
+    //     try {
+    //         pendingConnectResult = result
+    //         pendingConnectType = "LAN"
+    //         curConnect?.close()
+    //         curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
+    //         curConnect?.connect(ipAddress, connectListener)
+
+    //     } catch (e: Exception) {
+    //         pendingConnectResult?.error("CONNECT_ERROR", e.message, null)
+    //         pendingConnectResult = null
+    //     }
+    // }
 
     private fun connectNet(ipAddress: String, result: MethodChannel.Result) {
         try {
-            pendingConnectResult = result
+            // 1️⃣ Đánh dấu trạng thái
             pendingConnectType = "LAN"
-            curConnect?.close()
-            curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
-            curConnect?.connect(ipAddress, connectListener)
+            pendingConnectResult = result
 
+            // 2️⃣ Đóng sạch connection cũ
+            try {
+                curConnect?.close()
+            } catch (_: Exception) {} finally {
+                curConnect = null
+            }
+
+            // 3️⃣ Tạo device mới
+            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
+            curConnect = device
+
+            // 4️⃣ Connect
+            device?.connect(ipAddress, connectListener)
         } catch (e: Exception) {
+            curConnect = null
+            pendingConnectType = null
             pendingConnectResult?.error("CONNECT_ERROR", e.message, null)
             pendingConnectResult = null
         }
     }
-
 
     private fun connectBt(macAddress: String) {
         curConnect?.close()
@@ -219,7 +339,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         curConnect!!.connect("$port,$boudrate", connectListener)
     }
 
-
     private fun printBarcode(call: MethodCall, result: MethodChannel.Result) {
         val size = call.argument<Map<String, Double>>("size")
         val gap = call.argument<Map<String, Double>>("gap")
@@ -233,18 +352,13 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         printer.sizeMm(sizeWidth, sizeHeight)
         printer.gapMm(gapWidth, gapHeight)
         printer.cls()
-        barcode?.let {
-            processBarcode(it, printer)
-        }
+        barcode?.let { processBarcode(it, printer) }
 
         // Process text
-        textList?.forEach { text ->
-            processText(text, printer)
-        }
+        textList?.forEach { text -> processText(text, printer) }
 
         printer.print(quantity)
         result.success("Printed Successfully")
-
     }
 
     // Function to extract size from the map
@@ -274,8 +388,15 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val barcodeHeight = barcode["height"] as? Int ?: 100
         val barcodeContent = barcode["barcodeContent"] as? String ?: ""
         printer.barcode(
-            barcodeX, barcodeY, barcodeType, barcodeHeight, TSPLConst.READABLE_CENTER,
-            TSPLConst.ROTATION_0, 2, 2, barcodeContent
+                barcodeX,
+                barcodeY,
+                barcodeType,
+                barcodeHeight,
+                TSPLConst.READABLE_CENTER,
+                TSPLConst.ROTATION_0,
+                2,
+                2,
+                barcodeContent
         )
     }
 
@@ -316,31 +437,27 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     val y = call.argument<Int>("y") ?: 0
                     val width = 900
 
-                    printer
-                        .sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
-                        .cls()
-                        .bitmap(
-                            x,
-                            y,
-                            TSPLConst.BMP_MODE_OVERWRITE,
-                            width,
-                            bitmap,
-                            AlgorithmType.Threshold
-                        )
-                        .print(1)
+                    printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
+                            .cls()
+                            .bitmap(
+                                    x,
+                                    y,
+                                    TSPLConst.BMP_MODE_OVERWRITE,
+                                    width,
+                                    bitmap,
+                                    AlgorithmType.Threshold
+                            )
+                            .print(1)
                 }
             }
 
             result.success(true)
-
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
         }
     }
 
-
     companion object {
         private const val ACTION_USB_PERMISSION = "com.example.USB_PERMISSION"
     }
 }
-
