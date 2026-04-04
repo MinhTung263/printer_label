@@ -50,7 +50,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         flutterPluginBinding.applicationContext.registerReceiver(usbReceiver, filter)
-        // checkAndRequestUsbPermission(mContext!!)
         registerUsbPermissionReceiver()
     }
 
@@ -158,62 +157,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     private fun toast(str: String) {
         Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
-    }
-
-    @TargetApi(Build.VERSION_CODES.O)
-    fun checkAndRequestUsbPermission(context: Context) {
-        val appContext = context.applicationContext
-        val usbManager = appContext.getSystemService(Context.USB_SERVICE) as UsbManager
-        val deviceList = usbManager.deviceList
-
-        if (deviceList.isEmpty()) return
-
-        val usbDevice = deviceList.values.firstOrNull() ?: return
-
-        if (usbManager.hasPermission(usbDevice)) {
-            connectUSB(usbDevice.deviceName)
-            return
-        }
-
-        val flags =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-                } else {
-                    PendingIntent.FLAG_UPDATE_CURRENT
-                }
-
-        val permissionIntent =
-                PendingIntent.getBroadcast(
-                        appContext,
-                        0,
-                        Intent(ACTION_USB_PERMISSION)
-                                .setPackage(appContext.packageName), // 🔴 FIX CHÍ MẠNG
-                        flags
-                )
-
-        val usbReceiver =
-                object : BroadcastReceiver() {
-                    override fun onReceive(context: Context?, intent: Intent?) {
-                        if (intent?.action == ACTION_USB_PERMISSION) {
-                            if (usbManager.hasPermission(usbDevice)) {
-                                connectUSB(usbDevice.deviceName)
-                            }
-                            try {
-                                appContext.unregisterReceiver(this)
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-
-        val filter = IntentFilter(ACTION_USB_PERMISSION)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(usbReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            appContext.registerReceiver(usbReceiver, filter)
-        }
-
-        usbManager.requestPermission(usbDevice, permissionIntent)
     }
 
     fun connectUSB(pathName: String) {
