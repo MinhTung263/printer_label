@@ -7,8 +7,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.BitmapFactory
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.annotation.RequiresApi
@@ -46,7 +50,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         flutterPluginBinding.applicationContext.registerReceiver(usbReceiver, filter)
-        checkAndRequestUsbPermission(mContext!!)
+        // checkAndRequestUsbPermission(mContext!!)
+        registerUsbPermissionReceiver()
     }
 
     @RequiresApi(Build.VERSION_CODES.HONEYCOMB_MR1)
@@ -398,7 +403,135 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
+    private val usbManager: UsbManager by lazy {
+        mContext!!.getSystemService(Context.USB_SERVICE) as UsbManager
+    }
+
+    private val permissionReceiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    if (intent?.action != ACTION_USB_PERMISSION) return
+
+                    val device: UsbDevice? = getUsbDeviceFromIntent(intent)
+                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+
+                    if (granted && device != null) {
+                        toast("Đã cấp quyền USB cho thiết bị")
+                        tryConnectWithDelay(device, 0)
+                    } else {
+                        toast("Người dùng từ chối quyền USB")
+                        pendingConnectResult?.success(false)
+                        clearPending()
+                    }
+                }
+            }
+
+    // Hàm helper lấy UsbDevice an toàn (fix lỗi getParcelableExtra)
+    private fun getUsbDeviceFromIntent(intent: Intent): UsbDevice? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION") intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        }
+    }
+
+    // Gọi hàm này trong onAttachedToEngine() — ngay sau khi register usbReceiver
+    private fun registerUsbPermissionReceiver() {
+        val filter = IntentFilter(ACTION_USB_PERMISSION)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 13+
+            mContext?.registerReceiver(permissionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            mContext?.registerReceiver(permissionReceiver, filter)
+        }
+    }
+
+    // Gọi từ UsbConnectionReceiver khi USB được gắn
+    fun handleUsbDeviceAttached(device: UsbDevice) {
+        toast("USB được gắn: ${device.deviceName}")
+
+        if (usbManager.hasPermission(device)) {
+            // Đã có quyền → connect ngay với delay
+            tryConnectWithDelay(device, 0)
+        } else {
+            // Tạo PendingIntent tương thích Android 12+
+            val flags =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
+                        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    } else {
+                        PendingIntent.FLAG_UPDATE_CURRENT
+                    }
+
+            val permissionIntent =
+                    PendingIntent.getBroadcast(
+                            mContext!!,
+                            0,
+                            Intent(ACTION_USB_PERMISSION).apply {
+                                setPackage(
+                                        mContext!!.packageName
+                                ) // Rất quan trọng trên Android 12+
+                            },
+                            flags
+                    )
+
+            usbManager.requestPermission(device, permissionIntent)
+        }
+    }
+
+    fun handleUsbDeviceDetached() {
+        try {
+            curConnect?.close()
+        } catch (_: Exception) {}
+        curConnect = null
+        toast("USB bị ngắt kết nối")
+    }
+
+    // Connect có delay + retry (rất quan trọng cho Android < 12)
+    private fun tryConnectWithDelay(device: UsbDevice, attempt: Int) {
+        if (attempt > 3) {
+            toast("Kết nối USB thất bại sau nhiều lần thử")
+            pendingConnectResult?.success(false)
+            clearPending()
+            return
+        }
+
+        Handler(Looper.getMainLooper())
+                .postDelayed(
+                        {
+                            try {
+                                pendingConnectType = "USB"
+
+                                // Đóng connection cũ
+                                curConnect?.close()
+                                curConnect = null
+
+                                val posDevice = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
+                                curConnect = posDevice
+
+                                val pathName = device.deviceName
+
+                                if (pathName.isNullOrEmpty()) {
+                                    toast("Không lấy được đường dẫn USB")
+                                    clearPending()
+                                    return@postDelayed
+                                }
+
+                                posDevice?.connect(pathName, connectListener)
+                            } catch (e: Exception) {
+                                Log.e("USB_CONNECT", "Attempt $attempt failed", e)
+                                tryConnectWithDelay(device, attempt + 1)
+                            }
+                        },
+                        if (attempt == 0) 1200L else 800L
+                )
+    }
+
+    private fun clearPending() {
+        pendingConnectResult = null
+        pendingConnectType = null
+    }
+
     companion object {
-        private const val ACTION_USB_PERMISSION = "com.example.USB_PERMISSION"
+        private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"
     }
 }
