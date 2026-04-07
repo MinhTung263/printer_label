@@ -4,6 +4,8 @@ import 'src.dart';
 
 class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   final MethodChannel _channel = MethodChannel('flutter_printer_label');
+  final EventChannel _scanChannel =
+      const EventChannel('flutter_printer_label/bt_scan');
 
   Future<bool> checkConnect() async {
     return await _channel.invokeMethod('checkConnect');
@@ -58,5 +60,28 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     } catch (e) {
       print("Error printing thermal: $e");
     }
+  }
+
+  @override
+  Future<bool> connectBluetooth({
+    required String macAddress,
+  }) async {
+    return await _channel.invokeMethod('connect_bt', {
+      "mac_address": macAddress,
+    });
+  }
+
+  @override
+  Future<List<BluetoothDeviceModel>> getBluetoothDevices() async {
+    final result = await _channel.invokeMethod('get_bluetooth_devices');
+    return List<Map<dynamic, dynamic>>.from(result)
+        .map((e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  @override
+  Stream<BluetoothDeviceModel> get bluetoothScanStream {
+    return _scanChannel.receiveBroadcastStream().map(
+        (e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)));
   }
 }

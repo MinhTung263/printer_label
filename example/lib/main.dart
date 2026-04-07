@@ -1,3 +1,4 @@
+import 'package:example/printer_screen.dart';
 import 'package:example/select_size.dart';
 import 'package:example/select_type_label.dart';
 import 'package:flutter/material.dart';
@@ -61,7 +62,7 @@ class _MyHomePageState extends State<MyHomePage> {
         barcode: "83868888",
         name: "iPhone 17 Pro Max",
         price: 28990000,
-        quantity: 5,
+        quantity: 1,
       ),
       // ProductBarcodeModel(
       //   barcode: "56782123931231",
@@ -219,6 +220,21 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             padding(),
             _printCupSticket(),
+            padding(),
+            padding(),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const PrinterScreen(),
+                  ),
+                );
+              },
+              child: const Text(
+                "Print Bluetooth",
+              ),
+            ),
             padding(),
             padding(),
           ],

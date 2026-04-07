@@ -44,4 +44,12 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   Future<void> printESC({
     required PrintThermalModel printThermalModel,
   });
+
+  Future<bool> connectBluetooth({
+    required String macAddress,
+  });
+
+  Future<List<BluetoothDeviceModel>> getBluetoothDevices();
+
+  Stream<BluetoothDeviceModel> get bluetoothScanStream;
 }

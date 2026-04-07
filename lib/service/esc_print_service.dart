@@ -18,7 +18,7 @@ class ESCPrintService {
     final image =
         await loadImageFromAssets("packages/printer_label/images/ticket.png");
     await PrinterLabel.printESC(
-      printThermalModel: PrintThermalModel(image: image),
+      printThermalModel: PrintThermalModel(image: image, size: TicketSize.mm58),
     );
   }
 

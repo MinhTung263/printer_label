@@ -27,23 +27,34 @@ import net.posprinter.POSConnect
 import net.posprinter.TSPLConst
 import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import io.flutter.plugin.common.EventChannel
 
 /** SamplePluginFlutterPlugin */
 class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     private lateinit var channel: MethodChannel
+    private lateinit var scanEventChannel: EventChannel
     private var CHANNEL = "flutter_printer_label"
+    private val SCAN_CHANNEL = "flutter_printer_label/bt_scan"
     public var mContext: Context? = null
     var curConnect: IDeviceConnection? = null
     private var pendingConnectResult: MethodChannel.Result? = null
     private var pendingConnectType: String? = null
     private lateinit var usbReceiver: UsbConnectionReceiver
     private var printThermal = PrinterThermal()
+    private var scanEventSink: EventChannel.EventSink? = null
+    private var btScanReceiver: BroadcastReceiver? = null
+
     override fun onAttachedToEngine(
             @NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding
     ) {
         channel = MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL)
         channel.setMethodCallHandler(this)
+        scanEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, SCAN_CHANNEL)
+        scanEventChannel.setStreamHandler(btScanStreamHandler)
         mContext = flutterPluginBinding.getApplicationContext()
         POSConnect.init(mContext)
         usbReceiver = UsbConnectionReceiver(channel, this)
@@ -70,6 +81,18 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     return
                 }
                 connectNet(ipAddress, result)
+            }
+            "connect_bt" -> {
+                val macAddress = call.argument<String>("mac_address")
+                if (macAddress.isNullOrEmpty()) {
+                    result.success(false)
+                    return
+                }
+                // Gọi hàm connectBt và truyền result để trả về cho Flutter
+                connectBt(macAddress, result)
+            }
+            "get_bluetooth_devices" -> {
+                getBluetoothDevices(result)
             }
             "print_barcode" -> {
                 printBarcode(call, result)
@@ -98,12 +121,78 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        scanEventChannel.setStreamHandler(null)
+        stopBluetoothScan()
         curConnect?.close()
         curConnect = null
-        // binding.applicationContext.unregisterReceiver(usbReceiver)
         try {
             binding.applicationContext.unregisterReceiver(usbReceiver)
         } catch (_: Exception) {}
+    }
+
+    private val btScanStreamHandler = object : EventChannel.StreamHandler {
+        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+            scanEventSink = events
+            startBluetoothScan()
+        }
+        override fun onCancel(arguments: Any?) {
+            stopBluetoothScan()
+            scanEventSink = null
+        }
+    }
+
+    private fun startBluetoothScan() {
+        val adapter = getBluetoothAdapter() ?: return
+        if (!adapter.isEnabled) {
+            scanEventSink?.error("BT_OFF", "Bluetooth is not enabled", null)
+            return
+        }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    BluetoothDevice.ACTION_FOUND -> {
+                        val device: BluetoothDevice? =
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                            } else {
+                                @Suppress("DEPRECATION")
+                                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                            }
+                        device?.let {
+                            try {
+                                val map = mapOf("name" to (it.name ?: "Unknown"), "mac" to it.address)
+                                Handler(Looper.getMainLooper()).post {
+                                    scanEventSink?.success(map)
+                                }
+                            } catch (_: SecurityException) {}
+                        }
+                    }
+                    BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
+                        Handler(Looper.getMainLooper()).post {
+                            scanEventSink?.endOfStream()
+                        }
+                        stopBluetoothScan()
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter(BluetoothDevice.ACTION_FOUND).apply {
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+        }
+        mContext?.registerReceiver(receiver, filter)
+        btScanReceiver = receiver
+        try {
+            if (adapter.isDiscovering) adapter.cancelDiscovery()
+            adapter.startDiscovery()
+        } catch (_: SecurityException) {
+            scanEventSink?.error("BT_PERMISSION", "Missing BLUETOOTH_SCAN permission", null)
+        }
+    }
+
+    private fun stopBluetoothScan() {
+        try { getBluetoothAdapter()?.cancelDiscovery() } catch (_: Exception) {}
+        try { btScanReceiver?.let { mContext?.unregisterReceiver(it) } } catch (_: Exception) {}
+        btScanReceiver = null
     }
 
     private val connectListener = IConnectListener { code, _, _ ->
@@ -211,11 +300,90 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    private fun connectBt(macAddress: String) {
-        curConnect?.close()
-        curConnect = POSConnect.createDevice(POSConnect.DEVICE_TYPE_BLUETOOTH)
-        curConnect!!.connect(macAddress, connectListener)
+    private fun getBluetoothAdapter(): BluetoothAdapter? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            (mContext?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+        } else {
+            @Suppress("DEPRECATION")
+            BluetoothAdapter.getDefaultAdapter()
+        }
     }
+
+    private fun getBluetoothDevices(result: MethodChannel.Result) {
+        try {
+            val adapter = getBluetoothAdapter()
+            if (adapter == null || !adapter.isEnabled) {
+                result.error("BT_OFF", "Bluetooth is not enabled", null)
+                return
+            }
+            val list = adapter.bondedDevices.map {
+                mapOf(
+                    "name" to (it.name ?: "Unknown"),
+                    "mac" to it.address
+                )
+            }
+            result.success(list)
+        } catch (e: SecurityException) {
+            result.error("BT_PERMISSION", "Missing BLUETOOTH_CONNECT permission", null)
+        } catch (e: Exception) {
+            result.error("BT_ERROR", e.message, null)
+        }
+    }
+
+    private fun connectBt(macAddress: String, result: MethodChannel.Result) {
+        try {
+            // 1. Validate MAC
+            if (macAddress.isEmpty()) {
+                result.error("INVALID_MAC", "Mac address is empty", null)
+                return
+            }
+
+            val adapter = getBluetoothAdapter()
+            if (adapter == null || !adapter.isEnabled) {
+                result.error("BT_OFF", "Bluetooth is not enabled", null)
+                return
+            }
+
+            // 2. Bắt buộc dừng scan trước khi connect — discovery làm nhiễu kết nối BT Classic
+            stopBluetoothScan()
+
+            // 3. Lưu trạng thái pending
+            pendingConnectType = "Bluetooth"
+            pendingConnectResult = result
+
+            // 4. Đóng kết nối cũ (nếu có)
+            try {
+                curConnect?.close()
+            } catch (_: Exception) {
+            } finally {
+                curConnect = null
+            }
+
+            // 5. Tạo device từ SDK
+            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_BLUETOOTH)
+
+            if (device == null) {
+                pendingConnectResult?.error("CREATE_DEVICE_FAIL", "Cannot create device", null)
+                pendingConnectResult = null
+                return
+            }
+
+            curConnect = device
+
+            // 6. Connect
+            device.connect(macAddress, connectListener)
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+
+            curConnect = null
+            pendingConnectType = null
+
+            pendingConnectResult?.error("CONNECT_ERROR", e.message, null)
+            pendingConnectResult = null
+        }
+    }
+
 
     private fun connectMAC(macAddress: String) {
         curConnect?.close()

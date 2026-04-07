@@ -42,4 +42,17 @@ class PrinterLabel {
   }) async {
     return await _platform.printESC(printThermalModel: printThermalModel);
   }
+
+  static Future<bool> connectBluetooth({
+    required String macAddress,
+  }) async {
+    return await _platform.connectBluetooth(macAddress: macAddress);
+  }
+
+  static Future<List<BluetoothDeviceModel>> getBluetoothDevices() async {
+    return await _platform.getBluetoothDevices();
+  }
+
+  static Stream<BluetoothDeviceModel> get bluetoothScanStream =>
+      _platform.bluetoothScanStream;
 }
