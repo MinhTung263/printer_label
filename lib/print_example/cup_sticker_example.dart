@@ -10,6 +10,7 @@ class CupStickerPrintExample {
   static Future<void> printOrderCupSticker(
     CupStickerSize size, {
     BuildContext? context,
+    required String deviceId,
   }) async {
     final List<PreviewLabelModel> dataList = [
       PreviewLabelModel(
@@ -54,6 +55,7 @@ class CupStickerPrintExample {
       widgets: stickerWidgets,
       size: size,
       context: context,
+      deviceId: deviceId,
     );
   }
 }

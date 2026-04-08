@@ -12,6 +12,7 @@ class LabelPrintService {
     required List<T> items,
     required BuildContext context,
     required LabelPerRow labelPerRow,
+    required String deviceId,
 
     /// build widget label
     required Widget Function(T item, Dimensions dimensions) itemBuilder,
@@ -34,6 +35,6 @@ class LabelPrintService {
       labelPerRow: labelPerRow,
     );
 
-    await PrinterLabel.printLabel(barcodeImageModel: model);
+    await PrinterLabel.printLabel(deviceId: deviceId, barcodeImageModel: model);
   }
 }

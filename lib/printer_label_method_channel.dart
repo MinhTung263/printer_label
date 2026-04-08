@@ -7,12 +7,21 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   final EventChannel _scanChannel =
       const EventChannel('flutter_printer_label/bt_scan');
 
-  Future<bool> checkConnect() async {
-    return await _channel.invokeMethod('checkConnect');
+  Future<bool> checkConnect({String? deviceId}) async {
+    return await _channel.invokeMethod('checkConnect', {
+      "device_id": deviceId,
+    });
   }
 
-  Future<bool> disconectPrinter() async {
-    return await _channel.invokeMethod('disconnect');
+  Future<Map<String, bool>> getAllConnections() async {
+    final result = await _channel.invokeMethod('checkConnect');
+    return Map<String, bool>.from(result);
+  }
+
+  Future<bool> disconectPrinter({String? deviceId}) async {
+    return await _channel.invokeMethod('disconnect', {
+      "device_id": deviceId,
+    });
   }
 
   Future<bool> connectLan({
@@ -36,9 +45,12 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Future<void> printLabel({
+    required String deviceId,
     required LabelModel labelModel,
   }) async {
-    await _channel.invokeMethod('print_label', labelModel.toLabel());
+    final data = labelModel.toLabel();
+    data["device_id"] = deviceId;
+    await _channel.invokeMethod('print_label', data);
   }
 
   @override
@@ -81,7 +93,8 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Stream<BluetoothDeviceModel> get bluetoothScanStream {
-    return _scanChannel.receiveBroadcastStream().map(
-        (e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)));
+    return _scanChannel
+        .receiveBroadcastStream()
+        .map((e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)));
   }
 }

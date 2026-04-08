@@ -8,6 +8,7 @@ class CupStickerPrinter {
   const CupStickerPrinter._();
 
   static Future<void> printSticker({
+    required String deviceId,
     required List<Uint8List> imageBytesList,
     required CupStickerSize size,
   }) async {
@@ -32,6 +33,7 @@ class CupStickerPrinter {
       ),
     );
     await PrinterLabel.printLabel(
+      deviceId: deviceId,
       barcodeImageModel: model,
     );
   }
@@ -42,6 +44,7 @@ class CupStickerPrinter {
     required CupStickerSize size,
     int? widthOffsetMm,
     double? paddingMm,
+    required String deviceId,
   }) async {
     final images = <Uint8List>[];
 
@@ -74,6 +77,7 @@ class CupStickerPrinter {
     );
 
     await PrinterLabel.printLabel(
+      deviceId: deviceId,
       barcodeImageModel: model,
     );
   }

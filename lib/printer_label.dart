@@ -20,9 +20,11 @@ class PrinterLabel {
   }
 
   static Future<void> printLabel({
+    required String deviceId,
     required LabelModel barcodeImageModel,
   }) async {
-    return await _platform.printLabel(labelModel: barcodeImageModel);
+    return await _platform.printLabel(
+        deviceId: deviceId, labelModel: barcodeImageModel);
   }
 
   static Future<void> printPrintImage({

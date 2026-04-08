@@ -125,6 +125,7 @@ class _MyHomePageState extends State<MyHomePage> {
     await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
       items: products,
       context: context,
+      deviceId: textEditingController.text,
       labelPerRow: _selectedRow,
       itemBuilder: _buildBarcodeLabel,
       quantity: (p) => p.quantity,
@@ -219,7 +220,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             padding(),
-            _printCupSticket(),
+            _printCupSticket(deviceId: textEditingController.text),
             padding(),
             padding(),
             ElevatedButton(
@@ -269,10 +270,13 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget _printCupSticket() {
+  Widget _printCupSticket({required String deviceId}) {
     return CupStickerSizeSelector(
-      onPrint: (select) =>
-          CupStickerPrintExample.printOrderCupSticker(select, context: context),
+      onPrint: (select) => CupStickerPrintExample.printOrderCupSticker(
+        select,
+        context: context,
+        deviceId: textEditingController.text,
+      ),
     );
   }
 

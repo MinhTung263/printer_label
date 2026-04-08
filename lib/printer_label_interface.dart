@@ -21,15 +21,18 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   Future<String?> get platformVersion;
 
-  Future<bool> checkConnect();
+  Future<bool> checkConnect({String? deviceId});
 
-  Future<bool> disconectPrinter();
+  Future<Map<String, bool>> getAllConnections();
+
+  Future<bool> disconectPrinter({String? deviceId});
 
   Future<bool> connectLan({
     required String ipAddress,
   });
 
   Future<void> printLabel({
+    required String deviceId,
     required LabelModel labelModel,
   });
 
