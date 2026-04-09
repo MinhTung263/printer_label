@@ -5,19 +5,36 @@ import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.os.Build
 import io.flutter.plugin.common.MethodChannel
 
 class UsbConnectionReceiver(
-        private val methodChannel: MethodChannel,
-        private val printerLabelPlugin: PrinterLabelPlugin
+    private val methodChannel: MethodChannel,
+    private val printerLabelPlugin: PrinterLabelPlugin
 ) : BroadcastReceiver() {
+
     override fun onReceive(context: Context, intent: Intent) {
-        val action: String = intent.action ?: return
-        if (UsbManager.ACTION_USB_DEVICE_ATTACHED == action) {
-            val device: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-            if (device != null) {
-                printerLabelPlugin.checkAndRequestUsbPermission(context)
+        val action = intent.action ?: return
+
+        when (action) {
+            UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                val device: UsbDevice? =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(
+                            UsbManager.EXTRA_DEVICE,
+                            UsbDevice::class.java
+                        )
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                    }
+
+                device?.let { printerLabelPlugin.handleUsbDeviceAttached(it) }
             }
-        } else if (UsbManager.ACTION_USB_DEVICE_DETACHED == action) {}
+
+            UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                printerLabelPlugin.handleUsbDeviceDetached()
+            }
+        }
     }
 }
