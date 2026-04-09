@@ -40,7 +40,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var usbReceiver: UsbConnectionReceiver
     private var printThermal = PrinterThermal()
     override fun onAttachedToEngine(
-            @NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding
+        @NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding
     ) {
         channel = MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL)
         channel.setMethodCallHandler(this)
@@ -60,9 +60,11 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             "checkConnect" -> {
                 result.success(curConnect?.isConnect() ?: false)
             }
+
             "disconnect" -> {
                 disconnectPrinter(result)
             }
+
             "connect_lan" -> {
                 val ipAddress = call.argument<String>("ip_address")
                 if (ipAddress.isNullOrEmpty()) {
@@ -71,15 +73,19 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 }
                 connectNet(ipAddress, result)
             }
+
             "print_barcode" -> {
                 printBarcode(call, result)
             }
+
             "print_label" -> {
                 printLabel(call, result)
             }
+
             "print_image_esc" -> {
                 printThermal.printImageESC(call, curConnect!!, result)
             }
+
             else -> {
                 result.notImplemented()
             }
@@ -103,7 +109,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         // binding.applicationContext.unregisterReceiver(usbReceiver)
         try {
             binding.applicationContext.unregisterReceiver(usbReceiver)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     private val connectListener = IConnectListener { code, _, _ ->
@@ -123,12 +130,14 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 pendingConnectResult = null
                 pendingConnectType = null
             }
+
             POSConnect.CONNECT_FAIL, POSConnect.CONNECT_INTERRUPT -> {
 
                 // Đóng và xoá connection hiện tại
                 try {
                     curConnect?.close()
-                } catch (_: Exception) {} finally {
+                } catch (_: Exception) {
+                } finally {
                     curConnect = null
                 }
 
@@ -138,17 +147,21 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 pendingConnectResult = null
                 pendingConnectType = null
             }
+
             POSConnect.SEND_FAIL -> {
                 toast("SEND_FAIL")
             }
+
             POSConnect.USB_DETACHED -> {
                 try {
                     curConnect?.close()
-                } catch (_: Exception) {} finally {
+                } catch (_: Exception) {
+                } finally {
                     curConnect = null
                 }
                 toast("USB bị ngắt kết nối")
             }
+
             POSConnect.USB_ATTACHED -> {
                 toast("USB được gắn")
             }
@@ -168,7 +181,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             // 2️⃣ Đóng sạch connection cũ
             try {
                 curConnect?.close()
-            } catch (_: Exception) {} finally {
+            } catch (_: Exception) {
+            } finally {
                 curConnect = null
             }
 
@@ -193,7 +207,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             // 2️⃣ Đóng sạch connection cũ
             try {
                 curConnect?.close()
-            } catch (_: Exception) {} finally {
+            } catch (_: Exception) {
+            } finally {
                 curConnect = null
             }
 
@@ -277,15 +292,15 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val barcodeHeight = barcode["height"] as? Int ?: 100
         val barcodeContent = barcode["barcodeContent"] as? String ?: ""
         printer.barcode(
-                barcodeX,
-                barcodeY,
-                barcodeType,
-                barcodeHeight,
-                TSPLConst.READABLE_CENTER,
-                TSPLConst.ROTATION_0,
-                2,
-                2,
-                barcodeContent
+            barcodeX,
+            barcodeY,
+            barcodeType,
+            barcodeHeight,
+            TSPLConst.READABLE_CENTER,
+            TSPLConst.ROTATION_0,
+            2,
+            2,
+            barcodeContent
         )
     }
 
@@ -327,16 +342,16 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     val width = 900
 
                     printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
-                            .cls()
-                            .bitmap(
-                                    x,
-                                    y,
-                                    TSPLConst.BMP_MODE_OVERWRITE,
-                                    width,
-                                    bitmap,
-                                    AlgorithmType.Threshold
-                            )
-                            .print(1)
+                        .cls()
+                        .bitmap(
+                            x,
+                            y,
+                            TSPLConst.BMP_MODE_OVERWRITE,
+                            width,
+                            bitmap,
+                            AlgorithmType.Threshold
+                        )
+                        .print(1)
                 }
             }
 
@@ -351,23 +366,23 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private val permissionReceiver =
-            object : BroadcastReceiver() {
-                override fun onReceive(context: Context?, intent: Intent?) {
-                    if (intent?.action != ACTION_USB_PERMISSION) return
+        object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action != ACTION_USB_PERMISSION) return
 
-                    val device: UsbDevice? = getUsbDeviceFromIntent(intent)
-                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                val device: UsbDevice? = getUsbDeviceFromIntent(intent)
+                val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
 
-                    if (granted && device != null) {
-                        toast("Đã cấp quyền USB cho thiết bị")
-                        tryConnectWithDelay(device, 0)
-                    } else {
-                        toast("Người dùng từ chối quyền USB")
-                        pendingConnectResult?.success(false)
-                        clearPending()
-                    }
+                if (granted && device != null) {
+                    toast("Đã cấp quyền USB cho thiết bị")
+                    tryConnectWithDelay(device, 0)
+                } else {
+                    toast("Người dùng từ chối quyền USB")
+                    pendingConnectResult?.success(false)
+                    clearPending()
                 }
             }
+        }
 
     // Hàm helper lấy UsbDevice an toàn (fix lỗi getParcelableExtra)
     private fun getUsbDeviceFromIntent(intent: Intent): UsbDevice? {
@@ -399,23 +414,23 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         } else {
             // Tạo PendingIntent tương thích Android 12+
             val flags =
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
-                        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                    } else {
-                        PendingIntent.FLAG_UPDATE_CURRENT
-                    }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
+                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
 
             val permissionIntent =
-                    PendingIntent.getBroadcast(
-                            mContext!!,
-                            0,
-                            Intent(ACTION_USB_PERMISSION).apply {
-                                setPackage(
-                                        mContext!!.packageName
-                                ) // Rất quan trọng trên Android 12+
-                            },
-                            flags
-                    )
+                PendingIntent.getBroadcast(
+                    mContext!!,
+                    0,
+                    Intent(ACTION_USB_PERMISSION).apply {
+                        setPackage(
+                            mContext!!.packageName
+                        ) // Rất quan trọng trên Android 12+
+                    },
+                    flags
+                )
 
             usbManager.requestPermission(device, permissionIntent)
         }
@@ -424,7 +439,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     fun handleUsbDeviceDetached() {
         try {
             curConnect?.close()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
         curConnect = null
         toast("USB bị ngắt kết nối")
     }
@@ -439,34 +455,34 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
 
         Handler(Looper.getMainLooper())
-                .postDelayed(
-                        {
-                            try {
-                                pendingConnectType = "USB"
+            .postDelayed(
+                {
+                    try {
+                        pendingConnectType = "USB"
 
-                                // Đóng connection cũ
-                                curConnect?.close()
-                                curConnect = null
+                        // Đóng connection cũ
+                        curConnect?.close()
+                        curConnect = null
 
-                                val posDevice = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
-                                curConnect = posDevice
+                        val posDevice = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
+                        curConnect = posDevice
 
-                                val pathName = device.deviceName
+                        val pathName = device.deviceName
 
-                                if (pathName.isNullOrEmpty()) {
-                                    toast("Không lấy được đường dẫn USB")
-                                    clearPending()
-                                    return@postDelayed
-                                }
+                        if (pathName.isNullOrEmpty()) {
+                            toast("Không lấy được đường dẫn USB")
+                            clearPending()
+                            return@postDelayed
+                        }
 
-                                posDevice?.connect(pathName, connectListener)
-                            } catch (e: Exception) {
-                                Log.e("USB_CONNECT", "Attempt $attempt failed", e)
-                                tryConnectWithDelay(device, attempt + 1)
-                            }
-                        },
-                        if (attempt == 0) 1200L else 800L
-                )
+                        posDevice?.connect(pathName, connectListener)
+                    } catch (e: Exception) {
+                        Log.e("USB_CONNECT", "Attempt $attempt failed", e)
+                        tryConnectWithDelay(device, attempt + 1)
+                    }
+                },
+                if (attempt == 0) 1200L else 800L
+            )
     }
 
     private fun clearPending() {
