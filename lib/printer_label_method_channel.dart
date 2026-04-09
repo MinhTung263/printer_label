@@ -6,24 +6,31 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   final MethodChannel _channel = MethodChannel('flutter_printer_label');
   final EventChannel _scanChannel =
       const EventChannel('flutter_printer_label/bt_scan');
+  final EventChannel _usbChannel =
+      const EventChannel('flutter_printer_label/usb_events');
 
+  @override
   Future<bool> checkConnect({String? deviceId}) async {
+    if (deviceId == null) return false;
     return await _channel.invokeMethod('checkConnect', {
       "device_id": deviceId,
     });
   }
 
+  @override
   Future<Map<String, bool>> getAllConnections() async {
     final result = await _channel.invokeMethod('checkConnect');
     return Map<String, bool>.from(result);
   }
 
+  @override
   Future<bool> disconectPrinter({String? deviceId}) async {
     return await _channel.invokeMethod('disconnect', {
       "device_id": deviceId,
     });
   }
 
+  @override
   Future<bool> connectLan({
     required String ipAddress,
   }) async {
@@ -32,15 +39,20 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     });
   }
 
+  @override
   Future<String?> get platformVersion async {
     final String? version = await _channel.invokeMethod('getPlatformVersion');
     return version;
   }
 
+  @override
   Future<void> printBarcode({
+    required String deviceId,
     required BarcodeModel printBarcodeModel,
   }) async {
-    await _channel.invokeMethod('print_barcode', printBarcodeModel.toMap());
+    final data = printBarcodeModel.toMap();
+    data["device_id"] = deviceId;
+    await _channel.invokeMethod('print_barcode', data);
   }
 
   @override
@@ -55,19 +67,25 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Future<void> printImage({
+    required String deviceId,
     required ImageModel imageModel,
   }) async {
-    await _channel.invokeMethod('print_image', imageModel.toJson());
+    final data = imageModel.toJson();
+    data["device_id"] = deviceId;
+    await _channel.invokeMethod('print_image', data);
   }
 
   @override
   Future<void> printESC({
+    required String deviceId,
     required PrintThermalModel printThermalModel,
   }) async {
+    final data = printThermalModel.toJson();
+    data["device_id"] = deviceId;
     try {
       await _channel.invokeMethod(
         'print_image_esc',
-        printThermalModel.toJson(),
+        data,
       );
     } catch (e) {
       print("Error printing thermal: $e");
@@ -96,5 +114,18 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     return _scanChannel
         .receiveBroadcastStream()
         .map((e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)));
+  }
+
+  /// Phát sự kiện khi USB được cắm vào (connected=true) hoặc rút ra (connected=false).
+  /// `deviceId` là USB device path — dùng làm device_id khi gọi các lệnh print.
+  @override
+  Stream<UsbConnectionEvent> get usbDeviceStream {
+    return _usbChannel.receiveBroadcastStream().map((e) {
+      final map = Map<String, dynamic>.from(e as Map);
+      return UsbConnectionEvent(
+        deviceId: map['device_id'] as String,
+        connected: map['connected'] as bool,
+      );
+    });
   }
 }

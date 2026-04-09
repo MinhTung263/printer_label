@@ -37,14 +37,17 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   });
 
   Future<void> printImage({
+    required String deviceId,
     required ImageModel imageModel,
   });
 
   Future<void> printBarcode({
+    required String deviceId,
     required BarcodeModel printBarcodeModel,
   });
 
   Future<void> printESC({
+    required String deviceId,
     required PrintThermalModel printThermalModel,
   });
 
@@ -55,4 +58,6 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   Future<List<BluetoothDeviceModel>> getBluetoothDevices();
 
   Stream<BluetoothDeviceModel> get bluetoothScanStream;
+
+  Stream<UsbConnectionEvent> get usbDeviceStream;
 }

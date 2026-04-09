@@ -117,6 +117,17 @@ class _PrinterScreenState extends State<PrinterScreen> {
     ));
   }
 
+  Future<void> printSample() async {
+    if (_devices.isEmpty) return;
+    for (var model in _devices) {
+      final ok = await PrinterLabel.connectBluetooth(macAddress: model.mac);
+      if (!mounted) return;
+      if (ok) {
+        await ESCPrintService.instance.printExample(deviceId: model.mac);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -139,7 +150,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
       ),
       floatingActionButton: ElevatedButton(
           onPressed: () async {
-            await ESCPrintService.instance.printExample();
+            await printSample();
           },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

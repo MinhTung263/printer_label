@@ -51,7 +51,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    checkConnectPrint();
+    checkConnectPrint(deviceId: textEditingController.text);
     addProducts();
   }
 
@@ -114,8 +114,8 @@ class _MyHomePageState extends State<MyHomePage> {
       ..addAll(images);
   }
 
-  Future<void> checkConnectPrint() async {
-    final isConnected = await PrinterLabel.checkConnect();
+  Future<void> checkConnectPrint({required String deviceId}) async {
+    final isConnected = await PrinterLabel.checkConnect(deviceId: deviceId);
     setState(() {
       widget.isConnected = isConnected;
     });
@@ -203,7 +203,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             padding(),
-            _buildPrintBarcode(),
+            _buildPrintBarcode(deviceId: textEditingController.text),
             padding(),
             _buildPrintMultilLabel(),
             padding(),
@@ -213,7 +213,8 @@ class _MyHomePageState extends State<MyHomePage> {
             padding(),
             ElevatedButton(
               onPressed: () async {
-                await ESCPrintService.instance.printExample();
+                await ESCPrintService.instance
+                    .printExample(deviceId: textEditingController.text);
               },
               child: const Text(
                 "Print ESC",
@@ -357,7 +358,7 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  Widget _buildPrintBarcode() {
+  Widget _buildPrintBarcode({required String deviceId}) {
     return ElevatedButton(
       onPressed: () async {
         final List<TextData> textData = [
@@ -382,7 +383,8 @@ class _MyHomePageState extends State<MyHomePage> {
           textData: textData,
           quantity: 1,
         );
-        await PrinterLabel.printBarcode(printBarcodeModel: printBarcodeModel);
+        await PrinterLabel.printBarcode(
+            deviceId: deviceId, printBarcodeModel: printBarcodeModel);
       },
       child: const Text(
         "Print barcode",

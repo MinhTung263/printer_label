@@ -4,3 +4,4 @@ export 'label_model.dart';
 export 'product_barcode_model.dart';
 export 'print_thermal.dart';
 export 'image_model.dart';
+export 'usb_connection_event.dart';

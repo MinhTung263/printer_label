@@ -37,9 +37,12 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     private lateinit var channel: MethodChannel
     private lateinit var scanEventChannel: EventChannel
+    private lateinit var usbEventChannel: EventChannel
     private var CHANNEL = "flutter_printer_label"
     private val SCAN_CHANNEL = "flutter_printer_label/bt_scan"
+    private val USB_CHANNEL = "flutter_printer_label/usb_events"
     var mContext: Context? = null
+    private var usbEventSink: EventChannel.EventSink? = null
 
     // ─── Multi-connection store ───────────────────────────────────────────────
     // Key   = device id: MAC address | IP address | USB device path
@@ -66,6 +69,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         channel.setMethodCallHandler(this)
         scanEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, SCAN_CHANNEL)
         scanEventChannel.setStreamHandler(btScanStreamHandler)
+        usbEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, USB_CHANNEL)
+        usbEventChannel.setStreamHandler(usbEventStreamHandler)
         mContext = flutterPluginBinding.getApplicationContext()
         POSConnect.init(mContext)
         usbReceiver = UsbConnectionReceiver(channel, this)
@@ -77,6 +82,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         scanEventChannel.setStreamHandler(null)
+        usbEventChannel.setStreamHandler(null)
         stopBluetoothScan()
         connections.values.forEach { runCatching { it.close() } }
         connections.clear()
@@ -178,6 +184,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 POSConnect.CONNECT_SUCCESS -> {
                     pending?.result?.success(true)
                     toast("Kết nối ${pending?.type ?: deviceId} thành công!")
+                    if (pending?.type == "USB") emitUsbEvent(deviceId, true)
                     pendingConnects.remove(deviceId)
                 }
                 POSConnect.CONNECT_FAIL, POSConnect.CONNECT_INTERRUPT -> {
@@ -191,6 +198,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 POSConnect.USB_DETACHED -> {
                     runCatching { connections[deviceId]?.close() }
                     connections.remove(deviceId)
+                    emitUsbEvent(deviceId, false)
                     toast("USB bị ngắt kết nối [$deviceId]")
                 }
                 POSConnect.USB_ATTACHED -> toast("USB được gắn [$deviceId]")
@@ -347,6 +355,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         val deviceId = device?.deviceName ?: return
         runCatching { connections[deviceId]?.close() }
         connections.remove(deviceId)
+        emitUsbEvent(deviceId, false)
         toast("USB bị ngắt kết nối [$deviceId]")
     }
 
@@ -377,6 +386,24 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 tryConnectWithDelay(device, attempt + 1)
             }
         }, if (attempt == 0) 1200L else 800L)
+    }
+
+    // ─── USB event stream ─────────────────────────────────────────────────────
+
+    private val usbEventStreamHandler = object : EventChannel.StreamHandler {
+        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+            usbEventSink = events
+        }
+        override fun onCancel(arguments: Any?) {
+            usbEventSink = null
+        }
+    }
+
+    /** Emit USB connect/disconnect events to Flutter. */
+    private fun emitUsbEvent(deviceId: String, connected: Boolean) {
+        Handler(Looper.getMainLooper()).post {
+            usbEventSink?.success(mapOf("device_id" to deviceId, "connected" to connected))
+        }
     }
 
     // ─── Bluetooth scan ───────────────────────────────────────────────────────
