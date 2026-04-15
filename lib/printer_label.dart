@@ -12,48 +12,72 @@ class PrinterLabel {
         await _platform.checkConnect(deviceId: deviceId);
   }
 
-  static Future<bool> disconectPrinter() async {
-    return await _platform.disconectPrinter();
+  static Future<bool> disconectPrinter({String? deviceId}) async {
+    return await _platform.disconectPrinter(deviceId: deviceId);
   }
 
   static Future<bool> connectLan({required String ipAddress}) async {
     return await _platform.connectLan(ipAddress: ipAddress);
   }
 
+  /// In label tới thiết bị chỉ định:
+  ///  - [connectionType] = "USB" | "LAN" | "BT"  (ưu tiên)
+  ///  - [deviceId] = path/MAC/IP cụ thể
+  ///  - Cả hai null → dùng connection active đầu tiên
   static Future<void> printLabel({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required LabelModel barcodeImageModel,
   }) async {
     return await _platform.printLabel(
-        deviceId: deviceId, labelModel: barcodeImageModel);
+      deviceId: deviceId,
+      connectionType: connectionType,
+      labelModel: barcodeImageModel,
+    );
   }
 
   static Future<void> printPrintImage({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required ImageModel model,
   }) async {
-    return await _platform.printImage(deviceId: deviceId, imageModel: model);
+    return await _platform.printImage(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      imageModel: model,
+    );
   }
 
   static Future<void> printBarcode({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required BarcodeModel printBarcodeModel,
   }) async {
     return await _platform.printBarcode(
-        deviceId: deviceId, printBarcodeModel: printBarcodeModel);
+      deviceId: deviceId,
+      connectionType: connectionType,
+      printBarcodeModel: printBarcodeModel,
+    );
   }
 
   static Future<void> printESC({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required PrintThermalModel printThermalModel,
   }) async {
     return await _platform.printESC(
-        deviceId: deviceId, printThermalModel: printThermalModel);
+      deviceId: deviceId,
+      connectionType: connectionType,
+      printThermalModel: printThermalModel,
+    );
   }
 
-  static Future<bool> connectBluetooth({
-    required String macAddress,
-  }) async {
+  /// In cùng payload tới tất cả thiết bị đang active (USB + LAN + BT cùng lúc).
+  static Future<void> printAll({required LabelModel labelModel}) async {
+    return await _platform.printAll(labelModel: labelModel);
+  }
+
+  static Future<bool> connectBluetooth({required String macAddress}) async {
     return await _platform.connectBluetooth(macAddress: macAddress);
   }
 
@@ -64,8 +88,6 @@ class PrinterLabel {
   static Stream<BluetoothDeviceModel> get bluetoothScanStream =>
       _platform.bluetoothScanStream;
 
-  /// Stream nhận sự kiện USB cắm vào/rút ra.
-  /// Lắng nghe stream này để lấy `deviceId` và dùng khi gọi printLabel/printESC/v.v.
   static Stream<UsbConnectionEvent> get usbDeviceStream =>
       _platform.usbDeviceStream;
 }

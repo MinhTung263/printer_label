@@ -9,9 +9,6 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   static PrinterLabelPlatform _instance = MethodChannelPrinterLabel();
 
-  /// The default instance of [PrinterLabelPlatform] to use.
-  ///
-  /// Defaults to [PrinterLabelPlatform].
   static PrinterLabelPlatform get instance => _instance;
 
   static set instance(PrinterLabelPlatform instance) {
@@ -27,33 +24,39 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   Future<bool> disconectPrinter({String? deviceId});
 
-  Future<bool> connectLan({
-    required String ipAddress,
-  });
+  Future<bool> connectLan({required String ipAddress});
 
+  /// [connectionType] = "USB" | "LAN" | "BT" — nếu cung cấp sẽ tìm connection theo loại.
+  /// [deviceId] — dùng khi muốn chỉ định thiết bị cụ thể.
+  /// Nếu cả hai đều null, lấy connection active đầu tiên.
   Future<void> printLabel({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required LabelModel labelModel,
   });
 
   Future<void> printImage({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required ImageModel imageModel,
   });
 
   Future<void> printBarcode({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required BarcodeModel printBarcodeModel,
   });
 
   Future<void> printESC({
-    required String deviceId,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required PrintThermalModel printThermalModel,
   });
 
-  Future<bool> connectBluetooth({
-    required String macAddress,
-  });
+  /// In cùng payload [labelModel] tới tất cả thiết bị đang active.
+  Future<void> printAll({required LabelModel labelModel});
+
+  Future<bool> connectBluetooth({required String macAddress});
 
   Future<List<BluetoothDeviceModel>> getBluetoothDevices();
 

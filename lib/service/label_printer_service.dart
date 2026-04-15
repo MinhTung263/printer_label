@@ -8,16 +8,18 @@ import 'service.src.dart';
 class LabelPrintService {
   LabelPrintService._();
   static final LabelPrintService instance = LabelPrintService._();
+
   Future<void> printLabels<T>({
     required List<T> items,
     required BuildContext context,
     required LabelPerRow labelPerRow,
-    required String deviceId,
 
-    /// build widget label
+    /// Chỉ định theo loại kết nối: "USB" | "LAN" | "BT"
+    PrinterConnectionType? connectionType,
+
+    /// Hoặc chỉ định thiết bị cụ thể theo id
+    String? deviceId,
     required Widget Function(T item, Dimensions dimensions) itemBuilder,
-
-    /// số lượng label của mỗi item
     required int Function(T item) quantity,
   }) async {
     final images = await LabelFromWidget.captureImages<T>(
@@ -35,6 +37,10 @@ class LabelPrintService {
       labelPerRow: labelPerRow,
     );
 
-    await PrinterLabel.printLabel(deviceId: deviceId, barcodeImageModel: model);
+    await PrinterLabel.printLabel(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      barcodeImageModel: model,
+    );
   }
 }
