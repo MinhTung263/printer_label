@@ -92,7 +92,7 @@ class _MyHomePageState extends State<MyHomePage> {
         if (event.connected) {
           if (_connectedDevices.any((d) => d.id == event.deviceId)) return;
           _connectedDevices.add(_ConnectedDevice(
-            id: event.deviceId,
+            id: event.deviceId, // already prefixed "USB:/dev/bus/..."
             label: 'USB: ${event.deviceId.split('/').last}',
             type: 'USB',
           ));
@@ -128,9 +128,10 @@ class _MyHomePageState extends State<MyHomePage> {
         onConnected: (device) {
           if (!mounted) return;
           setState(() {
-            _connectedDevices.removeWhere((d) => d.id == device.mac);
+            final id = DeviceId.bluetooth(device.mac);
+            _connectedDevices.removeWhere((d) => d.id == id);
             _connectedDevices.add(_ConnectedDevice(
-              id: device.mac,
+              id: id,
               label: '${device.name} (BT)',
               type: 'BT',
             ));
@@ -264,7 +265,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> checkConnectPrint({required String deviceId}) async {
-    final isConnected = await PrinterLabel.checkConnect(deviceId: deviceId);
+    final isConnected =
+        await PrinterLabel.checkConnect(deviceId: DeviceId.lan(deviceId));
     setState(() {
       widget.isConnected = isConnected;
     });
@@ -274,7 +276,7 @@ class _MyHomePageState extends State<MyHomePage> {
     await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
       items: products,
       context: context,
-      deviceId: textEditingController.text,
+      deviceId: DeviceId.lan(textEditingController.text),
       labelPerRow: _selectedRow,
       itemBuilder: _buildBarcodeLabel,
       quantity: (p) => p.quantity,
@@ -288,9 +290,10 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       widget.isConnected = ok;
       if (ok) {
-        _connectedDevices.removeWhere((d) => d.id == input);
+        final id = DeviceId.lan(input);
+        _connectedDevices.removeWhere((d) => d.id == id);
         _connectedDevices.add(_ConnectedDevice(
-          id: input,
+          id: id,
           label: 'LAN: $input',
           type: 'LAN',
         ));
@@ -363,7 +366,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             padding(),
-            _buildPrintBarcode(deviceId: textEditingController.text),
+            _buildPrintBarcode(deviceId: DeviceId.lan(textEditingController.text)),
             padding(),
             _buildPrintMultilLabel(),
             padding(),
@@ -373,15 +376,14 @@ class _MyHomePageState extends State<MyHomePage> {
             padding(),
             ElevatedButton(
               onPressed: () async {
-                await ESCPrintService.instance
-                    .printExample(deviceId: textEditingController.text);
+                await ESCPrintService.instance.printExample(
+                  deviceId: DeviceId.lan(textEditingController.text),
+                );
               },
-              child: const Text(
-                "Print ESC",
-              ),
+              child: const Text("Print ESC"),
             ),
             padding(),
-            _printCupSticket(deviceId: textEditingController.text),
+            _printCupSticket(deviceId: DeviceId.lan(textEditingController.text)),
             padding(),
             padding(),
             ElevatedButton(
@@ -603,7 +605,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onPrint: (select) => CupStickerPrintExample.printOrderCupSticker(
         select,
         context: context,
-        deviceId: textEditingController.text,
+        deviceId: DeviceId.lan(textEditingController.text),
       ),
     );
   }

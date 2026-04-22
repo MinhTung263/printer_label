@@ -87,7 +87,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }) async {
     final data = printThermalModel.toJson();
     if (deviceId != null) data["device_id"] = deviceId;
-    if (connectionType != null) data["connection_type"] = connectionType;
+    if (connectionType != null) data["connection_type"] = connectionType.value;
     try {
       await _channel.invokeMethod(PrinterMethod.printImageEsc.value, data);
     } catch (e) {

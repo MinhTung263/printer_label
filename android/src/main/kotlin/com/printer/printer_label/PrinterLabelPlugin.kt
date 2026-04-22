@@ -60,6 +60,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     private val pendingConnects = mutableMapOf<String, PendingConnect>()
 
+    @Volatile private var isDetached = false
+
     private lateinit var usbReceiver: UsbConnectionReceiver
     private var printThermal = PrinterThermal()
     private var scanEventSink: EventChannel.EventSink? = null
@@ -74,6 +76,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         scanEventChannel.setStreamHandler(btScanStreamHandler)
         usbEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, USB_CHANNEL)
         usbEventChannel.setStreamHandler(usbEventStreamHandler)
+        isDetached = false
         mContext = flutterPluginBinding.applicationContext
         POSConnect.init(mContext)
         usbReceiver = UsbConnectionReceiver(channel, this)
@@ -84,6 +87,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+        isDetached = true
         channel.setMethodCallHandler(null)
         scanEventChannel.setStreamHandler(null)
         usbEventChannel.setStreamHandler(null)
@@ -91,7 +95,9 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         connections.values.forEach { runCatching { it.close() } }
         connections.clear()
         connectionTypes.clear()
+        pendingConnects.clear()
         runCatching { binding.applicationContext.unregisterReceiver(usbReceiver) }
+        runCatching { binding.applicationContext.unregisterReceiver(permissionReceiver) }
     }
 
     // ─── Method dispatch ──────────────────────────────────────────────────────
@@ -171,8 +177,17 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 }
                 when (call.argument<String>("type")) {
                     "TSPL" -> targetConns.forEach { conn -> printLabel(call, conn, NoOpResult) }
-                    "ESC"  -> targetConns.forEach { conn -> printThermal.printImageESC(call, conn, NoOpResult) }
-                    else   -> { result.error("UNKNOWN_TYPE", "Unknown print type", null); return }
+                    "ESC" -> targetConns.forEach { conn ->
+                        printThermal.printImageESC(
+                            call,
+                            conn,
+                            NoOpResult
+                        )
+                    }
+
+                    else -> {
+                        result.error("UNKNOWN_TYPE", "Unknown print type", null); return
+                    }
                 }
                 result.success(true)
             }
@@ -187,30 +202,15 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private fun resolveConn(call: MethodCall, result: Result): IDeviceConnection? {
         val deviceId = call.argument<String>("device_id")
 
-        // In ra để debug xem trong Map thực sự có gì
-        val allKeys = connections.keys.joinToString(", ")
-        Log.d("PRINTER_LOG", "Danh sách Key hiện có: [$allKeys]")
-
-        // Ưu tiên 1: Tìm theo ID nếu Flutter có gửi lên
-        if (!deviceId.isNullOrEmpty() && connections.containsKey(deviceId)) {
+        if (!deviceId.isNullOrEmpty()) {
             val conn = connections[deviceId]
             if (conn != null && conn.isConnect) return conn
         }
 
-        // Ưu tiên 2: Tìm bất kỳ thiết bị nào đang trạng thái isConnect = true
         val activeConn = connections.values.firstOrNull { it.isConnect }
-        if (activeConn != null) {
-            Log.d("PRINTER_LOG", "Dùng kết nối dự phòng (Active)")
-            return activeConn
-        }
+        if (activeConn != null) return activeConn
 
-        // Ưu tiên 3: Lấy bừa phần tử cuối cùng trong Map (Dành cho trường hợp isConnect báo sai)
-        if (connections.isNotEmpty()) {
-            Log.d("PRINTER_LOG", "Dùng kết nối cuối cùng trong Map (Bất chấp trạng thái)")
-            return connections.values.last()
-        }
-
-        toast("Không tìm thấy bất kỳ kết nối nào trong bộ nhớ!")
+        result.error("NO_CONNECTION", "No active connection found", null)
         return null
     }
 
@@ -282,8 +282,22 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
 
+    private fun rawId(deviceId: String): String = deviceId.substringAfter(':')
+
+    private fun scheduleConnectTimeout(deviceId: String) {
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (isDetached || !pendingConnects.containsKey(deviceId)) return@postDelayed
+            runCatching { connections[deviceId]?.close() }
+            connections.remove(deviceId)
+            connectionTypes.remove(deviceId)
+            pendingConnects[deviceId]?.result?.success(false)
+            pendingConnects.remove(deviceId)
+            toast("Kết nối $deviceId hết thời gian chờ")
+        }, CONNECT_TIMEOUT_MS)
+    }
+
     private fun connectNet(ipAddress: String, result: Result) {
-        val deviceId = ipAddress
+        val deviceId = "LAN:$ipAddress"
         try {
             pendingConnects[deviceId] = PendingConnect(result, ConnectionType.LAN, deviceId)
             runCatching { connections[deviceId]?.close() }
@@ -295,6 +309,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             connections[deviceId] = device
             connectionTypes[deviceId] = ConnectionType.LAN
             device.connect(ipAddress, makeConnectListener(deviceId))
+            scheduleConnectTimeout(deviceId)
         } catch (e: Exception) {
             connections.remove(deviceId)
             connectionTypes.remove(deviceId)
@@ -304,7 +319,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private fun connectBt(macAddress: String, result: Result) {
-        val deviceId = macAddress
+        val deviceId = "BT:$macAddress"
         try {
             if (macAddress.isEmpty()) {
                 result.error("INVALID_MAC", "Mac address is empty", null); return
@@ -327,7 +342,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
             connections[deviceId] = device
             connectionTypes[deviceId] = ConnectionType.BT
-            device.connect(macAddress, makeConnectListener(deviceId))
+            device.connect(rawId(deviceId), makeConnectListener(deviceId))
+            scheduleConnectTimeout(deviceId)
         } catch (e: Exception) {
             e.printStackTrace()
             connections.remove(deviceId)
@@ -353,7 +369,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 tryConnectWithDelay(device, 0)
             } else {
                 toast("Người dùng từ chối quyền USB")
-                val deviceId = device?.deviceName ?: return
+                val deviceId = "USB:${device?.deviceName ?: return}"
                 pendingConnects[deviceId]?.result?.success(false)
                 pendingConnects.remove(deviceId)
             }
@@ -387,28 +403,35 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 flags
             )
             usbManager.requestPermission(device, permIntent)
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!isDetached && usbManager.hasPermission(device) &&
+                    connections["USB:${device.deviceName}"]?.isConnect != true) {
+                    tryConnectWithDelay(device, 0)
+                }
+            }, 500L)
         }
     }
 
     fun handleUsbDeviceDetached(device: UsbDevice?) {
-        val deviceId = device?.deviceName ?: return
+        val deviceId = "USB:${device?.deviceName ?: return}"
         runCatching { connections[deviceId]?.close() }
         connections.remove(deviceId)
+        connectionTypes.remove(deviceId)
         emitUsbEvent(deviceId, false)
         toast("USB bị ngắt kết nối [$deviceId]")
     }
 
     private fun tryConnectWithDelay(device: UsbDevice, attempt: Int) {
+        val deviceId = "USB:${device.deviceName}"
         if (attempt > 3) {
             toast("Kết nối USB thất bại sau nhiều lần thử")
-            val deviceId = device.deviceName
             pendingConnects[deviceId]?.result?.success(false)
             pendingConnects.remove(deviceId)
             return
         }
         Handler(Looper.getMainLooper()).postDelayed({
+            if (isDetached) return@postDelayed
             try {
-                val deviceId = device.deviceName
                 runCatching { connections[deviceId]?.close() }
                 val posDevice = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB) ?: run {
                     Log.e("USB_CONNECT", "createDevice returned null (attempt $attempt)")
@@ -421,7 +444,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     pendingConnects[deviceId] =
                         PendingConnect(NoOpResult, ConnectionType.USB, deviceId)
                 }
-                posDevice.connect(deviceId, makeConnectListener(deviceId))
+                posDevice.connect(rawId(deviceId), makeConnectListener(deviceId))
             } catch (e: Exception) {
                 Log.e("USB_CONNECT", "Attempt $attempt failed", e)
                 tryConnectWithDelay(device, attempt + 1)
@@ -648,6 +671,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     companion object {
         private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"
+        private const val CONNECT_TIMEOUT_MS = 10_000L
 
         /** A no-op Result used for fire-and-forget connects (e.g. USB auto-attach). */
         private val NoOpResult = object : Result {

@@ -12,6 +12,12 @@ class PrinterLabel {
         await _platform.checkConnect(deviceId: deviceId);
   }
 
+  /// Trả về map { deviceId → isConnected } của tất cả thiết bị trong store.
+  static Future<Map<String, bool>> getAllConnections() async {
+    if (!Platform.isAndroid) return {};
+    return await _platform.getAllConnections();
+  }
+
   static Future<bool> disconectPrinter({String? deviceId}) async {
     return await _platform.disconectPrinter(deviceId: deviceId);
   }
