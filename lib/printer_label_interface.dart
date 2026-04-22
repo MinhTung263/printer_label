@@ -53,8 +53,15 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required PrintThermalModel printThermalModel,
   });
 
-  /// In cùng payload [labelModel] tới tất cả thiết bị đang active.
-  Future<void> printAll({required LabelModel labelModel});
+  /// In tới tất cả thiết bị đang active.
+  /// - [labelModel] → TSPL label print
+  /// - [escModel]   → ESC thermal print
+  /// - [connectionType] → nếu có, chỉ in tới các thiết bị thuộc loại đó (LAN / BT / USB)
+  Future<void> printAll({
+    LabelModel? labelModel,
+    PrintThermalModel? escModel,
+    PrinterConnectionType? connectionType,
+  });
 
   Future<bool> connectBluetooth({required String macAddress});
 

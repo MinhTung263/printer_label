@@ -96,8 +96,20 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<void> printAll({required LabelModel labelModel}) async {
-    final data = labelModel.toJson();
+  Future<void> printAll({
+    LabelModel? labelModel,
+    PrintThermalModel? escModel,
+    PrinterConnectionType? connectionType,
+  }) async {
+    final Map<String, dynamic> data;
+    if (escModel != null) {
+      data = escModel.toJson();
+    } else if (labelModel != null) {
+      data = labelModel.toJson();
+    } else {
+      return;
+    }
+    if (connectionType != null) data["connection_type"] = connectionType.value;
     await _channel.invokeMethod(PrinterMethod.printAll.value, data);
   }
 

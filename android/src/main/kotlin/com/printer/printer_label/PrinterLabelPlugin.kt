@@ -150,6 +150,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
 
             "print_label" -> {
+                toast("[print_label] nhận lệnh in")
                 val conn = resolveConn(call, result) ?: return
                 printLabel(call, conn, result)
             }
@@ -159,13 +160,20 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 printThermal.printImageESC(call, conn, result)
             }
 
-            // In tất cả thiết bị đang active — dùng cùng payload với print_label
             "print_all" -> {
-                val activeConns = getActiveConnections()
-                if (activeConns.isEmpty()) {
+                val connectionTypeStr = call.argument<String>("connection_type")
+                val filterType = connectionTypeStr?.let { str ->
+                    ConnectionType.values().find { it.displayName() == str }
+                }
+                val targetConns = getFilteredConnections(filterType)
+                if (targetConns.isEmpty()) {
                     result.error("NO_ACTIVE", "No active connections", null); return
                 }
-                activeConns.forEach { conn -> printLabel(call, conn, NoOpResult) }
+                when (call.argument<String>("type")) {
+                    "TSPL" -> targetConns.forEach { conn -> printLabel(call, conn, NoOpResult) }
+                    "ESC"  -> targetConns.forEach { conn -> printThermal.printImageESC(call, conn, NoOpResult) }
+                    else   -> { result.error("UNKNOWN_TYPE", "Unknown print type", null); return }
+                }
                 result.success(true)
             }
 
@@ -177,38 +185,33 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     // ─── Connection helpers ───────────────────────────────────────────────────
 
     private fun resolveConn(call: MethodCall, result: Result): IDeviceConnection? {
-        val connTypeStr = call.argument<String>("connection_type")
         val deviceId = call.argument<String>("device_id")
-        val connType = connTypeStr?.let {
-            runCatching { ConnectionType.valueOf(it.uppercase()) }.getOrNull()
-        }
-        toast(deviceId.toString())
-        val conn = when {
-            connType != null -> connections.entries
-                .firstOrNull { connectionTypes[it.key] == connType && it.value.isConnect }?.value
 
-            deviceId != null -> connections[deviceId]?.takeIf { it.isConnect }
-            else -> connections.values.firstOrNull { it.isConnect }
+        // In ra để debug xem trong Map thực sự có gì
+        val allKeys = connections.keys.joinToString(", ")
+        Log.d("PRINTER_LOG", "Danh sách Key hiện có: [$allKeys]")
+
+        // Ưu tiên 1: Tìm theo ID nếu Flutter có gửi lên
+        if (!deviceId.isNullOrEmpty() && connections.containsKey(deviceId)) {
+            val conn = connections[deviceId]
+            if (conn != null && conn.isConnect) return conn
         }
 
-        return conn ?: run {
-            toast("No active connection${connType?.let { " for type: $it" } ?: ""}")
-            result.error(
-                "NOT_CONNECTED",
-                "No active connection${connType?.let { " for type: $it" } ?: ""}",
-                null)
-            null
+        // Ưu tiên 2: Tìm bất kỳ thiết bị nào đang trạng thái isConnect = true
+        val activeConn = connections.values.firstOrNull { it.isConnect }
+        if (activeConn != null) {
+            Log.d("PRINTER_LOG", "Dùng kết nối dự phòng (Active)")
+            return activeConn
         }
-    }
 
-    /** Tìm connection theo deviceId cụ thể. */
-    private fun requireConnection(deviceId: String, result: Result): IDeviceConnection? {
-        val conn = connections[deviceId]
-        if (conn == null || !conn.isConnect) {
-            result.error("NOT_CONNECTED", "No active connection for device: $deviceId", null)
-            return null
+        // Ưu tiên 3: Lấy bừa phần tử cuối cùng trong Map (Dành cho trường hợp isConnect báo sai)
+        if (connections.isNotEmpty()) {
+            Log.d("PRINTER_LOG", "Dùng kết nối cuối cùng trong Map (Bất chấp trạng thái)")
+            return connections.values.last()
         }
-        return conn
+
+        toast("Không tìm thấy bất kỳ kết nối nào trong bộ nhớ!")
+        return null
     }
 
     /** Build a per-device IConnectListener so parallel connects don't race. */
@@ -245,14 +248,16 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
         }
 
-    private fun getActiveConnections(): List<IDeviceConnection> {
-        val activeList = connections.values.filter { it.isConnect }
-        if (activeList.isEmpty()) {
-            Log.w("PRINTER_LOG", "Không có thiết bị nào đang kết nối để in.")
-        }
-        toast(activeList.size.toString())
-        return activeList
-    }
+    private fun getFilteredConnections(type: ConnectionType? = null): List<IDeviceConnection> =
+        connections.entries
+            .filter { (id, conn) ->
+                conn.isConnect && (type == null || connectionTypes[id] == type)
+            }
+            .map { it.value }
+            .also { list ->
+                if (list.isEmpty())
+                    Log.w("PRINTER_LOG", "Không có thiết bị phù hợp để in (filter=$type).")
+            }
 
     private fun disconnectPrinter(deviceId: String, result: Result) {
         try {
@@ -276,26 +281,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    // ─── Connect implementations ──────────────────────────────────────────────
-
-    fun connectUSB(pathName: String) {
-        val deviceId = pathName
-        try {
-            pendingConnects[deviceId] = PendingConnect(NoOpResult, ConnectionType.USB, deviceId)
-            runCatching { connections[deviceId]?.close() }
-            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB) ?: run {
-                pendingConnects.remove(deviceId); return
-            }
-            connections[deviceId] = device
-            connectionTypes[deviceId] = ConnectionType.USB
-            device.connect(pathName, makeConnectListener(deviceId))
-        } catch (e: Exception) {
-            connections.remove(deviceId)
-            connectionTypes.remove(deviceId)
-            pendingConnects.remove(deviceId)
-            Log.e("USB_CONNECT", "connectUSB failed", e)
-        }
-    }
 
     private fun connectNet(ipAddress: String, result: Result) {
         val deviceId = ipAddress
@@ -396,7 +381,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
                 PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             else PendingIntent.FLAG_UPDATE_CURRENT
-
             val permIntent = PendingIntent.getBroadcast(
                 mContext!!, 0,
                 Intent(ACTION_USB_PERMISSION).apply { setPackage(mContext!!.packageName) },
@@ -426,12 +410,14 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             try {
                 val deviceId = device.deviceName
                 runCatching { connections[deviceId]?.close() }
-                val posDevice =
-                    POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB)
+                val posDevice = POSConnect.createDevice(POSConnect.DEVICE_TYPE_USB) ?: run {
+                    Log.e("USB_CONNECT", "createDevice returned null (attempt $attempt)")
+                    tryConnectWithDelay(device, attempt + 1)
+                    return@postDelayed
+                }
                 connections[deviceId] = posDevice
                 connectionTypes[deviceId] = ConnectionType.USB
                 if (pendingConnects[deviceId] == null) {
-                    // Fire-and-forget from attach event — register a dummy pending so listener fires toast
                     pendingConnects[deviceId] =
                         PendingConnect(NoOpResult, ConnectionType.USB, deviceId)
                 }

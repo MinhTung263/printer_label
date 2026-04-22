@@ -14,6 +14,10 @@ class PrinterScreen extends StatefulWidget {
 
 class _PrinterScreenState extends State<PrinterScreen> {
   final List<BluetoothDeviceModel> _devices = [];
+
+  /// MACs của các thiết bị đang được kết nối thành công
+  final Set<String> _connectedMacs = {};
+
   StreamSubscription<BluetoothDeviceModel>? _scanSubscription;
   bool _isScanning = false;
   String? _errorMessage;
@@ -32,15 +36,11 @@ class _PrinterScreenState extends State<PrinterScreen> {
 
   Future<bool> _requestPermissions() async {
     if (!Platform.isAndroid) return true;
-
-    // locationWhenInUse bắt buộc trên Android < 12 để startDiscovery() trả kết quả
-    // Trên Android 12+ hệ thống tự bỏ qua nếu không cần
     final statuses = await [
       Permission.bluetoothConnect,
       Permission.bluetoothScan,
       Permission.locationWhenInUse,
     ].request();
-
     return statuses.values.every((s) => s.isGranted);
   }
 
@@ -51,9 +51,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
           _errorMessage = "Cần cấp đầy đủ quyền Bluetooth để quét thiết bị");
       return;
     }
-    // Load paired devices trước để hiển thị ngay
     await _loadPairedDevices();
-    // Sau đó scan để tìm thêm
     _startScan();
   }
 
@@ -73,7 +71,6 @@ class _PrinterScreenState extends State<PrinterScreen> {
       _isScanning = true;
       _errorMessage = null;
     });
-
     _scanSubscription = PrinterLabel.bluetoothScanStream.listen(
       (device) {
         if (_devices.any((d) => d.mac == device.mac)) return;
@@ -96,6 +93,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
     _cancelScan();
     setState(() {
       _devices.clear();
+      _connectedMacs.clear();
       _isScanning = false;
       _errorMessage = null;
     });
@@ -105,11 +103,18 @@ class _PrinterScreenState extends State<PrinterScreen> {
 
   Future<void> _connectDevice(BluetoothDeviceModel device) async {
     _cancelScan();
-    // Đợi cancelDiscovery() hoàn tất trước khi connect
     await Future.delayed(const Duration(milliseconds: 500));
 
     final ok = await PrinterLabel.connectBluetooth(macAddress: device.mac);
     if (!mounted) return;
+
+    setState(() {
+      if (ok) {
+        _connectedMacs.add(device.mac);
+      } else {
+        _connectedMacs.remove(device.mac);
+      }
+    });
 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok ? "Đã kết nối: ${device.name}" : "Kết nối thất bại"),
@@ -117,22 +122,39 @@ class _PrinterScreenState extends State<PrinterScreen> {
     ));
   }
 
-  Future<void> printSample() async {
-    if (_devices.isEmpty) return;
-    for (var model in _devices) {
-      final ok = await PrinterLabel.connectBluetooth(macAddress: model.mac);
-      if (!mounted) return;
-      if (ok) {
-        await ESCPrintService.instance.printExample(deviceId: model.mac);
+  /// In thử đến tất cả thiết bị đang connected (dùng deviceId để chính xác)
+  Future<void> _printSample() async {
+    if (_connectedMacs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Chưa kết nối thiết bị nào. Nhấn vào thiết bị để kết nối."),
+      ));
+      return;
+    }
+
+    for (final mac in _connectedMacs) {
+      try {
+        await ESCPrintService.instance.printExample(deviceId: mac);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Lỗi in $mac: $e"),
+          backgroundColor: Colors.red,
+        ));
       }
     }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("Đã gửi lệnh in"),
+      backgroundColor: Colors.green,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Chọn máy in"),
+        title: const Text("Chọn máy in Bluetooth"),
         actions: [
           if (_isScanning)
             const Padding(
@@ -148,22 +170,13 @@ class _PrinterScreenState extends State<PrinterScreen> {
             IconButton(icon: const Icon(Icons.refresh), onPressed: _refresh),
         ],
       ),
-      floatingActionButton: ElevatedButton(
-          onPressed: () async {
-            await printSample();
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: const Text(
-              "In thử đê",
-              style: TextStyle(
-                color: Colors.blue,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          )),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: _connectedMacs.isNotEmpty
+          ? FloatingActionButton.extended(
+              onPressed: _printSample,
+              icon: const Icon(Icons.print),
+              label: Text("In thử (${_connectedMacs.length})"),
+            )
+          : null,
       body: _errorMessage != null
           ? Center(
               child: Column(
@@ -190,7 +203,8 @@ class _PrinterScreenState extends State<PrinterScreen> {
                         const Text("Không tìm thấy thiết bị nào"),
                         const SizedBox(height: 12),
                         ElevatedButton(
-                            onPressed: _refresh, child: const Text("Quét lại")),
+                            onPressed: _refresh,
+                            child: const Text("Quét lại")),
                       ]
                     ],
                   ),
@@ -199,10 +213,18 @@ class _PrinterScreenState extends State<PrinterScreen> {
                   itemCount: _devices.length,
                   itemBuilder: (_, i) {
                     final d = _devices[i];
+                    final isConnected = _connectedMacs.contains(d.mac);
                     return ListTile(
-                      leading: const Icon(Icons.bluetooth),
+                      leading: Icon(
+                        Icons.bluetooth,
+                        color: isConnected ? Colors.blue : Colors.grey,
+                      ),
                       title: Text(d.name),
                       subtitle: Text(d.mac),
+                      trailing: isConnected
+                          ? const Icon(Icons.check_circle,
+                              color: Colors.green, size: 20)
+                          : null,
                       onTap: () => _connectDevice(d),
                     );
                   },

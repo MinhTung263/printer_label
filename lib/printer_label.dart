@@ -72,9 +72,19 @@ class PrinterLabel {
     );
   }
 
-  /// In cùng payload tới tất cả thiết bị đang active (USB + LAN + BT cùng lúc).
-  static Future<void> printAll({required LabelModel labelModel}) async {
-    return await _platform.printAll(labelModel: labelModel);
+  /// In tới tất cả thiết bị đang active.
+  /// Truyền [labelModel] để in TSPL, [escModel] để in ESC.
+  /// [connectionType] lọc theo loại kết nối (LAN / BT / USB); null = tất cả.
+  static Future<void> printAll({
+    LabelModel? labelModel,
+    PrintThermalModel? escModel,
+    PrinterConnectionType? connectionType,
+  }) async {
+    return await _platform.printAll(
+      labelModel: labelModel,
+      escModel: escModel,
+      connectionType: connectionType,
+    );
   }
 
   static Future<bool> connectBluetooth({required String macAddress}) async {
