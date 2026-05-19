@@ -1,3 +1,4 @@
+import CoreBluetooth
 import Flutter
 import PrinterSDK
 import UIKit
@@ -9,26 +10,34 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     private var printer = PTPrinter()
 
     private let escPrinter: ESCPosPrinter
+    private let btScanner = BluetoothScanner()
+
     override init() {
         self.escPrinter = ESCPosPrinter()
         super.init()
         self.escPrinter.plugin = self
     }
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = PrinterLabelPlugin()
+
         instance.channel = FlutterMethodChannel(
             name: "flutter_printer_label",
             binaryMessenger: registrar.messenger()
         )
-
         registrar.addMethodCallDelegate(instance, channel: instance.channel!)
+
+        let eventChannel = FlutterEventChannel(
+            name: "flutter_printer_label/bt_scan",
+            binaryMessenger: registrar.messenger()
+        )
+        eventChannel.setStreamHandler(instance.btScanner)
     }
 
     public func handle(
         _ call: FlutterMethodCall,
         result: @escaping FlutterResult
     ) {
-
         switch call.method {
 
         case "disconnect":
@@ -48,12 +57,10 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
             let dispatcher = PTDispatcher.share()
 
-            // 1. Nếu đã connect trước đó, disconnect trước
             if dispatcher?.printerConnected != nil {
                 dispatcher?.disconnect()
             }
 
-            // 2. Thiết lập callback
             dispatcher?.whenConnectSuccess {
                 result(true)
             }
@@ -62,8 +69,49 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 result(false)
             }
 
-            // 3. Connect lại
             dispatcher?.connect(printer)
+
+        case "connect_bt":
+            guard let args = call.arguments as? [String: Any],
+                let uuid = args["mac_address"] as? String, !uuid.isEmpty
+            else {
+                result(false)
+                return
+            }
+
+            guard let pt = btScanner.printer(forUUID: uuid) else {
+                result(
+                    FlutterError(
+                        code: "BT_NOT_FOUND",
+                        message: "Thiết bị chưa được scan. Hãy scan trước.",
+                        details: nil
+                    )
+                )
+                return
+            }
+
+            let dispatcher = PTDispatcher.share()
+
+            if dispatcher?.printerConnected != nil {
+                dispatcher?.disconnect()
+            }
+
+            btScanner.stopScan()
+
+            dispatcher?.whenConnectSuccess {
+                result(true)
+            }
+
+            dispatcher?.whenConnectFailureWithErrorBlock { _ in
+                result(false)
+            }
+
+            dispatcher?.connect(pt)
+
+        case "get_bluetooth_devices":
+            let devices = btScanner.discoveredDevices()
+            result(devices)
+
         case "print_label":
             if let args = call.arguments as? [String: Any] {
                 printLabel(args: args, result: result)
@@ -90,15 +138,14 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     private func disconnectPrinter(result: @escaping FlutterResult) {
         let dispatcher = PTDispatcher.share()
 
-        // Kiểm tra đã connect hay chưa
         if dispatcher?.printerConnected != nil {
             dispatcher?.disconnect()
             result(true)
         } else {
-            // Chưa connect
             result(false)
         }
     }
+
     func printLabel(args: [String: Any], result: @escaping FlutterResult) {
         guard let images = args["images"] as? [FlutterStandardTypedData],
             !images.isEmpty
@@ -182,6 +229,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     func imageFromFlutter(_ data: FlutterStandardTypedData) -> UIImage? {
         return UIImage(data: data.data)
     }
+
     func sendToPrinter(_ data: Any) {
         let sendData: Data
         if let mutableData = data as? NSMutableData {
@@ -195,5 +243,4 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
         PTDispatcher.share()?.send(sendData)
     }
-
 }

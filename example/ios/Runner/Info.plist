@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Ứng dụng cần quyền truy cập Bluetooth để kết nối với thiết bị.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Cần Bluetooth để kết nối máy in</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_printer._tcp</string>

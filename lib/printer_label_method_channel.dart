@@ -81,7 +81,8 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Stream<BluetoothDeviceModel> get bluetoothScanStream {
-    return _scanChannel.receiveBroadcastStream().map(
-        (e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)));
+    return _scanChannel
+        .receiveBroadcastStream()
+        .map((e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)));
   }
 }
