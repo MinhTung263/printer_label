@@ -12,7 +12,6 @@ class PrinterLabel {
         await _platform.checkConnect(deviceId: deviceId);
   }
 
-  /// Trả về map { deviceId → isConnected } của tất cả thiết bị trong store.
   static Future<Map<String, bool>> getAllConnections() async {
     if (!Platform.isAndroid) return {};
     return await _platform.getAllConnections();
@@ -26,10 +25,6 @@ class PrinterLabel {
     return await _platform.connectLan(ipAddress: ipAddress);
   }
 
-  /// In label tới thiết bị chỉ định:
-  ///  - [connectionType] = "USB" | "LAN" | "BT"  (ưu tiên)
-  ///  - [deviceId] = path/MAC/IP cụ thể
-  ///  - Cả hai null → dùng connection active đầu tiên
   static Future<void> printLabel({
     String? deviceId,
     PrinterConnectionType? connectionType,
@@ -78,9 +73,6 @@ class PrinterLabel {
     );
   }
 
-  /// In tới tất cả thiết bị đang active.
-  /// Truyền [labelModel] để in TSPL, [escModel] để in ESC.
-  /// [connectionType] lọc theo loại kết nối (LAN / BT / USB); null = tất cả.
   static Future<void> printAll({
     LabelModel? labelModel,
     PrintThermalModel? escModel,
@@ -93,6 +85,23 @@ class PrinterLabel {
     );
   }
 
+  // MARK: - Bluetooth
+  /// iOS: khởi động BLE scan. Devices sẽ được emit qua [bluetoothScanStream].
+  /// Phải gọi trước khi listen stream trên iOS.
+  /// Android: no-op — Android tự scan khi enumerate devices.
+  static Future<bool> startBluetoothScan() async {
+    if (!Platform.isIOS) return false;
+    return await _platform.startBluetoothScan();
+  }
+
+  static Future<bool> stopBluetoothScan() async {
+    if (!Platform.isIOS) return false;
+    return await _platform.stopBluetoothScan();
+  }
+
+  /// Connect tới printer.
+  /// - iOS: [macAddress] là UUID identifier từ [BluetoothDeviceModel.identifier]
+  /// - Android: [macAddress] là MAC address thực
   static Future<bool> connectBluetooth({required String macAddress}) async {
     return await _platform.connectBluetooth(macAddress: macAddress);
   }
@@ -101,6 +110,9 @@ class PrinterLabel {
     return await _platform.getBluetoothDevices();
   }
 
+  /// Stream BLE devices được discover.
+  /// iOS: emit liên tục trong khi scan đang chạy.
+  /// Gọi [startBluetoothScan] trước khi subscribe trên iOS.
   static Stream<BluetoothDeviceModel> get bluetoothScanStream =>
       _platform.bluetoothScanStream;
 

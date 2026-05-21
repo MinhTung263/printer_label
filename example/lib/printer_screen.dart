@@ -66,7 +66,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
     } catch (_) {}
   }
 
-  void _startScan() {
+  void _startScan() async {
     setState(() {
       _isScanning = true;
       _errorMessage = null;

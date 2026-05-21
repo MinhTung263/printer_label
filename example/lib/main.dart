@@ -366,7 +366,8 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             padding(),
-            _buildPrintBarcode(deviceId: DeviceId.lan(textEditingController.text)),
+            _buildPrintBarcode(
+                deviceId: DeviceId.lan(textEditingController.text)),
             padding(),
             _buildPrintMultilLabel(),
             padding(),
@@ -383,7 +384,8 @@ class _MyHomePageState extends State<MyHomePage> {
               child: const Text("Print ESC"),
             ),
             padding(),
-            _printCupSticket(deviceId: DeviceId.lan(textEditingController.text)),
+            _printCupSticket(
+                deviceId: DeviceId.lan(textEditingController.text)),
             padding(),
             padding(),
             ElevatedButton(
@@ -747,6 +749,9 @@ class _BtPickerState extends State<_BtPicker> {
   @override
   void dispose() {
     _scanSub?.cancel();
+    if (Platform.isIOS) {
+      PrinterLabel.stopBluetoothScan();
+    }
     super.dispose();
   }
 
@@ -762,7 +767,7 @@ class _BtPickerState extends State<_BtPicker> {
     } catch (_) {}
   }
 
-  void _startScan() {
+  void _startScan() async {
     setState(() => _scanning = true);
     _scanSub = PrinterLabel.bluetoothScanStream.listen(
       (d) {
@@ -774,6 +779,9 @@ class _BtPickerState extends State<_BtPicker> {
       onDone: () => mounted ? setState(() => _scanning = false) : null,
       onError: (_) => mounted ? setState(() => _scanning = false) : null,
     );
+    if (Platform.isIOS) {
+      await PrinterLabel.startBluetoothScan();
+    }
   }
 
   Future<void> _connect(BluetoothDeviceModel device) async {

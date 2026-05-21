@@ -37,6 +37,16 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<bool> startBluetoothScan() async {
+    return await _channel.invokeMethod(PrinterMethod.scanBt.value) ?? false;
+  }
+
+  @override
+  Future<bool> stopBluetoothScan() async {
+    return await _channel.invokeMethod(PrinterMethod.stopScanBt.value) ?? false;
+  }
+
+  @override
   Future<String?> get platformVersion async {
     final String? version =
         await _channel.invokeMethod(PrinterMethod.getPlatformVersion.value);
@@ -91,7 +101,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     try {
       await _channel.invokeMethod(PrinterMethod.printImageEsc.value, data);
     } catch (e) {
-      print("Error printing thermal: $e");
+      print("Error printing ESC: $e");
     }
   }
 
@@ -116,6 +126,8 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   @override
   Future<bool> connectBluetooth({required String macAddress}) async {
     return await _channel.invokeMethod(PrinterMethod.connectBt.value, {
+      // iOS: macAddress là UUID identifier từ CBPeripheral
+      // Android: macAddress là MAC address thực
       "mac_address": macAddress,
     });
   }

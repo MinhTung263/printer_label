@@ -26,9 +26,12 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   Future<bool> connectLan({required String ipAddress});
 
-  /// [connectionType] = "USB" | "LAN" | "BT" — nếu cung cấp sẽ tìm connection theo loại.
-  /// [deviceId] — dùng khi muốn chỉ định thiết bị cụ thể.
-  /// Nếu cả hai đều null, lấy connection active đầu tiên.
+  /// iOS: bắt đầu scan BLE — devices stream qua [bluetoothScanStream]
+  /// Android: no-op (Android tự scan)
+  Future<bool> startBluetoothScan();
+
+  Future<bool> stopBluetoothScan();
+
   Future<void> printLabel({
     String? deviceId,
     PrinterConnectionType? connectionType,
@@ -53,20 +56,21 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required PrintThermalModel printThermalModel,
   });
 
-  /// In tới tất cả thiết bị đang active.
-  /// - [labelModel] → TSPL label print
-  /// - [escModel]   → ESC thermal print
-  /// - [connectionType] → nếu có, chỉ in tới các thiết bị thuộc loại đó (LAN / BT / USB)
   Future<void> printAll({
     LabelModel? labelModel,
     PrintThermalModel? escModel,
     PrinterConnectionType? connectionType,
   });
 
+  /// [identifier] trên iOS là UUID string của CBPeripheral.
+  /// Trên Android là MAC address.
+  /// Giữ tên param là macAddress để tương thích backward.
   Future<bool> connectBluetooth({required String macAddress});
 
   Future<List<BluetoothDeviceModel>> getBluetoothDevices();
 
+  /// Stream các device được discover trong quá trình scan.
+  /// Gọi [startBluetoothScan] trước khi listen trên iOS.
   Stream<BluetoothDeviceModel> get bluetoothScanStream;
 
   Stream<UsbConnectionEvent> get usbDeviceStream;

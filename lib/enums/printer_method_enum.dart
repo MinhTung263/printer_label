@@ -4,6 +4,8 @@ enum PrinterMethod {
   disconnect('disconnect'),
   connectLan('connect_lan'),
   connectBt('connect_bt'),
+  scanBt('scan_bt'),
+  stopScanBt('stop_scan_bt'),
   getBluetoothDevices('get_bluetooth_devices'),
   printBarcode('print_barcode'),
   printLabel('print_label'),
