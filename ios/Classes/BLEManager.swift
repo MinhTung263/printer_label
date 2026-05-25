@@ -40,6 +40,9 @@ final class BLEManager: NSObject {
     private var pendingConnectResults: [String: FlutterResult] = [:]
     private var pendingDisconnectResults: [String: FlutterResult] = [:]
 
+    // Lọc thiết bị theo RSSI để tránh hiển thị quá nhiều thiết bị yếu
+     private let minScanRSSI: Int = -50
+
     // EventChannel sink để push device được discover về Flutter
     var scanEventSink: FlutterEventSink?
 
@@ -57,11 +60,13 @@ final class BLEManager: NSObject {
     // MARK: - Scan
 
     func startScan() {
-        guard !isScanning else { return }
+        
+        guard !isScanning else { return } // avoid duplicate scans
         isScanning = true
         // Xóa cache thiết bị cũ, giữ lại những thiết bị đang kết nối
         discoveredPeripherals = discoveredPeripherals.filter { connectedPeripherals[$0.key] != nil }
         guard centralManager.state == .poweredOn else { return }
+    
         centralManager.scanForPeripherals(
             withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
@@ -88,11 +93,12 @@ final class BLEManager: NSObject {
             return
         }
 
+        // Nếu đã kết nối rồi → trả về thành công ngay
         if peripheral.state == .connected {
             result(true)
             return
         }
-
+        //  Nếu đang kết nối → return error (tránh kết nối 2 lần)
         if peripheral.state == .connecting {
             result(FlutterError(
                 code: "ALREADY_CONNECTING",
@@ -114,6 +120,7 @@ final class BLEManager: NSObject {
             result(false)
             return
         }
+    
         pendingDisconnectResults[identifier] = result
         centralManager.cancelPeripheralConnection(peripheral)
     }
@@ -179,14 +186,16 @@ final class BLEManager: NSObject {
 
     // MARK: - Status
 
+        // Kiểm tra kết nối của peripheral theo identifier
     func isConnected(identifier: String) -> Bool {
         return connectedPeripherals[identifier]?.state == .connected
     }
 
+    // Kiểm tra có kết nối nào đang hoạt động hay không
     func hasAnyConnection() -> Bool {
         return !connectedPeripherals.isEmpty
     }
-
+    // Lấy danh sách thiết bị đã discover (đang cache) để Flutter hiển thị
     func getDiscoveredDevices() -> [[String: Any]] {
         return discoveredPeripherals.values.map { peripheral in
             [
@@ -207,7 +216,7 @@ final class BLEManager: NSObject {
             ] as [String: Any])
         }
     }
-
+    // Lấy trạng thái kết nối của tất cả peripheral đã cache
     func getAllConnectionStatus() -> [String: Bool] {
         var status: [String: Bool] = [:]
         for (id, peripheral) in connectedPeripherals {
@@ -219,6 +228,7 @@ final class BLEManager: NSObject {
 
 // MARK: - CBCentralManagerDelegate
 extension BLEManager: CBCentralManagerDelegate {
+
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
@@ -244,6 +254,8 @@ extension BLEManager: CBCentralManagerDelegate {
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
     ) {
+        // Lọc thiết bị theo RSSI để tránh hiển thị quá nhiều thiết bị yếu
+        guard RSSI.intValue >= minScanRSSI else { return }
         let identifier = peripheral.identifier.uuidString
 
         // Giữ strong reference — bắt buộc để connect sau này
