@@ -35,7 +35,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     private var scanChannel: FlutterEventChannel?
     private var usbChannel: FlutterEventChannel?
 
-    // PTDispatcher dùng cho LAN printing
+    // legacy PTPrinter kept for compatibility but not used for LAN transport
     private var printer = PTPrinter()
 
     private let escPrinter: ESCPosPrinter
@@ -198,26 +198,22 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     // MARK: - LAN Helpers
 
     private func connectLAN(ip: String, result: @escaping FlutterResult) {
-        printer.ip = ip
-        printer.module = .wiFi
-        printer.port = "9100"
-
-        let dispatcher = PTDispatcher.share()
-        if dispatcher?.printerConnected != nil {
-            dispatcher?.disconnect()
+        // Use LANPrinterManager to create/maintain a connection per IP
+        LANPrinterManager.shared.connect(ip: ip, port: 9100, autoReconnect: true) { success in
+            result(success)
         }
-        dispatcher?.whenConnectSuccess { result(true) }
-        dispatcher?.whenConnectFailureWithErrorBlock { _ in result(false) }
-        dispatcher?.connect(self.printer)
     }
 
     private func disconnectLAN(result: @escaping FlutterResult) {
-        let dispatcher = PTDispatcher.share()
-        if dispatcher?.printerConnected != nil {
-            dispatcher?.disconnect()
-            result(true)
+        // If caller provided an IP previously (printer.ip), prefer disconnecting that.
+        // Otherwise, disconnect all LAN connections.
+        if let ip = printer.ip, !ip.isEmpty {
+            LANPrinterManager.shared.disconnect(ip: ip) { success in
+                result(success)
+            }
         } else {
-            result(false)
+            LANPrinterManager.shared.disconnectAll()
+            result(true)
         }
     }
 
@@ -225,21 +221,40 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     // Quyết định route print data tới BLE hay LAN dựa trên device_id/connection_type
     func sendToPrinter(_ data: Data, deviceId: String? = nil, connectionType: String? = nil) {
+        print("[PrinterLabelPlugin] sendToPrinter called: deviceId=\(deviceId ?? "nil"), connectionType=\(connectionType ?? "nil"), data size=\(data.count)")
+        
         if connectionType == "Bluetooth" {
+            print("[PrinterLabelPlugin] → Route: Bluetooth")
             // Thử extract UUID kể cả khi có prefix "BT:"
             let bleId = deviceId.flatMap { extractBLEIdentifier(from: $0) }
             routeToBLE(data, identifier: bleId)
         } else if let id = deviceId, let bleId = extractBLEIdentifier(from: id) {
+            print("[PrinterLabelPlugin] → Route: BLE (extracted UUID: \(bleId))")
+            // deviceId là BLE UUID → gửi tới BLE device cụ thể
             routeToBLE(data, identifier: bleId)
-        } else if deviceId != nil {
-            // deviceId có nhưng không phải BLE → LAN/IP → PTDispatcher
-            PTDispatcher.share()?.send(data)
+        } else if let id = deviceId {
+            print("[PrinterLabelPlugin] → Route: LAN (deviceId: \(id))")
+            // deviceId có nhưng không phải BLE → extract IP từ "LAN:192.168.1.10" format
+            if let ip = extractLANIp(from: id) {
+                print("[PrinterLabelPlugin] → Extracted IP: \(ip)")
+                LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
+            } else {
+                print("[PrinterLabelPlugin] ❌ Failed to extract IP from \(id)")
+            }
         } else {
-            // Không có device_id → thử BLE trước, fallback sang LAN
+            print("[PrinterLabelPlugin] → Route: Default (no deviceId)")
+            // Không có device_id → thử BLE trước, fallback sang LAN tất cả
             if BLEManager.shared.hasAnyConnection() {
+                print("[PrinterLabelPlugin] → Fallback to first BLE device")
                 BLEManager.shared.writeDataToFirstConnected(data) { _ in }
             } else {
-                PTDispatcher.share()?.send(data)
+                print("[PrinterLabelPlugin] → Fallback to all LAN printers")
+                // no deviceId and no BLE: send to all connected LAN printers
+                let ips = LANPrinterManager.shared.getConnectedPrinters()
+                print("[PrinterLabelPlugin] Found \(ips.count) LAN printers: \(ips)")
+                for ip in ips {
+                    LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
+                }
             }
         }
     }
@@ -262,6 +277,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     private func extractBLEIdentifier(from deviceId: String) -> String? {
         let raw = deviceId.hasPrefix("BT:") ? String(deviceId.dropFirst(3)) : deviceId
         return isUUID(raw) ? raw : nil
+    }
+
+    // Trích IP từ device_id có prefix "LAN:" (từ DeviceId.lan())
+    // Ví dụ: "LAN:192.168.1.10" → "192.168.1.10"
+    private func extractLANIp(from deviceId: String) -> String? {
+        guard deviceId.hasPrefix("LAN:") else { return nil }
+        return String(deviceId.dropFirst(4))
     }
 
     // MARK: - Print Methods
@@ -378,7 +400,10 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                     self.sendToPrinter(data, deviceId: nil, connectionType: connectionType)
                 }
                 if connectionType == "LAN" || connectionType == nil {
-                    PTDispatcher.share()?.send(data)
+                    let ips = LANPrinterManager.shared.getConnectedPrinters()
+                    for ip in ips {
+                        LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
+                    }
                 }
                 result(true)
             }
