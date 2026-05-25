@@ -161,6 +161,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 printLabel(call, conn, result)
             }
 
+
             "print_image_esc" -> {
                 val conn = resolveConn(call, result) ?: return
                 printThermal.printImageESC(call, conn, result)

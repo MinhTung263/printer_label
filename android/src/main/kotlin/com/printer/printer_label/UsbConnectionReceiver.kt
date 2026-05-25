@@ -9,8 +9,8 @@ import android.os.Build
 import io.flutter.plugin.common.MethodChannel
 
 class UsbConnectionReceiver(
-        private val methodChannel: MethodChannel,
-        private val printerLabelPlugin: PrinterLabelPlugin
+    private val methodChannel: MethodChannel,
+    private val printerLabelPlugin: PrinterLabelPlugin
 ) : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -29,6 +29,7 @@ class UsbConnectionReceiver(
             UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                 device?.let { printerLabelPlugin.handleUsbDeviceAttached(it) }
             }
+
             UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                 printerLabelPlugin.handleUsbDeviceDetached(device)
             }
