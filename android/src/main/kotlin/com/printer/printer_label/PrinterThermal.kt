@@ -1,11 +1,11 @@
 package com.printer.printer_label
 
 import android.graphics.BitmapFactory
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
 import net.posprinter.IDeviceConnection
 import net.posprinter.POSConst
 import net.posprinter.POSPrinter
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
 
 class PrinterThermal {
     fun printImageESC(

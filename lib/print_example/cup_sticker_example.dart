@@ -10,6 +10,8 @@ class CupStickerPrintExample {
   static Future<void> printOrderCupSticker(
     CupStickerSize size, {
     BuildContext? context,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
   }) async {
     final List<PreviewLabelModel> dataList = [
       PreviewLabelModel(
@@ -46,14 +48,16 @@ class CupStickerPrintExample {
         toppings: ["Đá", "Thạch", "Sữa đặc"],
       ),
     ];
-    final List<Widget> stickerWidgets = dataList.map((data) {
-      return PreviewCupSticker(data: data);
-    }).toList();
+
+    final List<Widget> stickerWidgets =
+        dataList.map((data) => PreviewCupSticker(data: data)).toList();
 
     await CupStickerPrinter.printWithWidgets(
       widgets: stickerWidgets,
       size: size,
       context: context,
+      deviceId: deviceId,
+      connectionType: connectionType,
     );
   }
 }

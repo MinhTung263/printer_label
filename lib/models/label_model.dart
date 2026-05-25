@@ -14,7 +14,7 @@ class LabelModel {
   });
 
   /// Converts the model to a map for use in method channel calls
-  Map<String, dynamic> toLabel() {
+  Map<String, dynamic> toJson() {
     final label = labelPerRow ?? LabelPerRow.single;
     final map = <String, dynamic>{
       'images': images,

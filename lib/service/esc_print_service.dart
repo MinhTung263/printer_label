@@ -7,18 +7,27 @@ class ESCPrintService {
   static final ESCPrintService instance = ESCPrintService._();
 
   Future<void> print({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
     required PrintThermalModel model,
   }) async {
     await PrinterLabel.printESC(
+      deviceId: deviceId,
+      connectionType: connectionType,
       printThermalModel: model,
     );
   }
 
-  Future<void> printExample() async {
+  Future<void> printExample({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+  }) async {
     final image =
         await loadImageFromAssets("packages/printer_label/images/ticket.png");
     await PrinterLabel.printESC(
-      printThermalModel: PrintThermalModel(image: image),
+      deviceId: deviceId,
+      connectionType: connectionType,
+      printThermalModel: PrintThermalModel(image: image, size: TicketSize.mm58),
     );
   }
 
