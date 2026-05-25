@@ -1,3 +1,6 @@
+## [2.1.0] - 2026-05-25
+- Add Bluetooth connection support for iOS
+- Support multiple printer connections
 ## [2.0.9] - 2026-04-9
 - Fix connect USB
 ## [2.0.8] - 2026-01-22
