@@ -8,6 +8,12 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   final EventChannel _usbChannel = EventChannel(PrinterChannel.usbEvents.name);
 
   @override
+  Future<bool> bluetoothEnabled() async {
+    return await _channel.invokeMethod(PrinterMethod.bluetoothEnabled.value) ??
+        false;
+  }
+
+  @override
   Future<bool> checkConnect({String? deviceId}) async {
     if (deviceId == null) return false;
     return await _channel.invokeMethod(PrinterMethod.checkConnect.value, {

@@ -11,7 +11,8 @@ enum PrinterMethod {
   printLabel('print_label'),
   printImage('print_image'),
   printImageEsc('print_image_esc'),
-  printAll('print_all');
+  printAll('print_all'),
+  bluetoothEnabled('bluetooth_enabled');
 
   const PrinterMethod(this.value);
   final String value;

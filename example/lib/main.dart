@@ -70,13 +70,21 @@ class _MyHomePageState extends State<MyHomePage> {
   // ── Danh sách thiết bị đã kết nối ────────────────────────────────────────
   final List<_ConnectedDevice> _connectedDevices = [];
   StreamSubscription<UsbConnectionEvent>? _usbSub;
+  bool? _bluetoothEnabled;
 
   @override
   void initState() {
     super.initState();
     checkConnectPrint(deviceId: textEditingController.text);
+    _checkBluetoothEnabled();
     addProducts();
     _listenUsb();
+  }
+
+  Future<void> _checkBluetoothEnabled() async {
+    final enabled = await PrinterLabel.bluetoothEnabled();
+    if (!mounted) return;
+    setState(() => _bluetoothEnabled = enabled);
   }
 
   @override

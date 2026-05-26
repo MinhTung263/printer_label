@@ -106,6 +106,12 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
         when (call.method) {
             "getPlatformVersion" -> result.success("Android ${Build.VERSION.RELEASE}")
+
+            "bluetooth_enabled" -> {
+                val adapter = getBluetoothAdapter()
+                result.success(adapter?.isEnabled == true)
+            }
+
             "checkConnect" -> {
                 val deviceId = call.argument<String>("device_id")
                 if (deviceId != null) {

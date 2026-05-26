@@ -186,7 +186,11 @@ final class BLEManager: NSObject {
 
     // MARK: - Status
 
-        // Kiểm tra kết nối của peripheral theo identifier
+    var isBluetoothEnabled: Bool {
+        return centralManager.state == .poweredOn
+    }
+
+    // Kiểm tra kết nối của peripheral theo identifier
     func isConnected(identifier: String) -> Bool {
         return connectedPeripherals[identifier]?.state == .connected
     }
