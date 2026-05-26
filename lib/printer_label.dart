@@ -7,9 +7,8 @@ PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
 class PrinterLabel {
   static Future<String?> get platformVersion => _platform.platformVersion;
 
-  static Future<bool> checkConnect({required String deviceId}) async {
-    return Platform.isAndroid &&
-        await _platform.checkConnect(deviceId: deviceId);
+  static Future<bool> checkConnect({String? deviceId}) async {
+    return await _platform.checkConnect(deviceId: deviceId);
   }
 
   static Future<Map<String, bool>> getAllConnections() async {
