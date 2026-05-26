@@ -182,9 +182,20 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             let args = call.arguments as? [String: Any]
             let deviceId = args?["device_id"] as? String
             if let id = deviceId {
-                result(BLEManager.shared.isConnected(identifier: id))
+                // Kiểm tra BLE connection
+                if let bleId = extractBLEIdentifier(from: id) {
+                    result(BLEManager.shared.isConnected(identifier: bleId))
+                } else if let ip = extractLANIp(from: id) {
+                    // Kiểm tra LAN connection
+                    result(LANPrinterManager.shared.isConnected(ip: ip))
+                } else {
+                    result(false)
+                }
             } else {
-                result(BLEManager.shared.hasAnyConnection())
+                // Không có deviceId → check BLE hoặc LAN bất kỳ cái nào có kết nối
+                let hasBleSub = BLEManager.shared.hasAnyConnection()
+                let hasLanSub = !LANPrinterManager.shared.getConnectedPrinters().isEmpty
+                result(hasBleSub || hasLanSub)
             }
 
         case "getPlatformVersion":

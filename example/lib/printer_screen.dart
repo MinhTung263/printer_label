@@ -18,6 +18,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
   /// MACs của các thiết bị đang được kết nối thành công
   final Set<String> _connectedMacs = {};
 
+  
   StreamSubscription<BluetoothDeviceModel>? _scanSubscription;
   bool _isScanning = false;
   String? _errorMessage;
@@ -105,6 +106,16 @@ class _PrinterScreenState extends State<PrinterScreen> {
     _cancelScan();
     await Future.delayed(const Duration(milliseconds: 500));
 
+    // check connected
+    final bool isConnected =
+        await PrinterLabel.checkConnect(deviceId: device.mac);
+    if (isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Thiết bị ${device.name} đã kết nối"),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
     final ok = await PrinterLabel.connectBluetooth(macAddress: device.mac);
     if (!mounted) return;
 
@@ -126,7 +137,8 @@ class _PrinterScreenState extends State<PrinterScreen> {
   Future<void> _printSample() async {
     if (_connectedMacs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("Chưa kết nối thiết bị nào. Nhấn vào thiết bị để kết nối."),
+        content:
+            Text("Chưa kết nối thiết bị nào. Nhấn vào thiết bị để kết nối."),
       ));
       return;
     }
@@ -203,8 +215,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
                         const Text("Không tìm thấy thiết bị nào"),
                         const SizedBox(height: 12),
                         ElevatedButton(
-                            onPressed: _refresh,
-                            child: const Text("Quét lại")),
+                            onPressed: _refresh, child: const Text("Quét lại")),
                       ]
                     ],
                   ),

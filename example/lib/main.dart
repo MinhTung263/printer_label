@@ -286,6 +286,14 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> connect() async {
     final input = textEditingController.text.replaceAll(',', '.');
+    // kiem tra ket noi
+    final bool isConnected = await PrinterLabel.checkConnect(
+      deviceId: DeviceId.lan(input),
+    );
+    if (isConnected) {
+      _showSnack('Thiết bị $input đã kết nối', Colors.yellow[800]!);
+      return;
+    }
     final bool ok = await PrinterLabel.connectLan(ipAddress: input);
     if (!mounted) return;
     setState(() {
