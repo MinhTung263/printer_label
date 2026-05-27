@@ -198,6 +198,9 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 result(hasBleSub || hasLanSub)
             }
 
+        case "bluetooth_enabled":
+            result(BLEManager.shared.isBluetoothEnabled)
+
         case "getPlatformVersion":
             result("iOS " + UIDevice.current.systemVersion)
 

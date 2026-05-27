@@ -7,6 +7,8 @@ PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
 class PrinterLabel {
   static Future<String?> get platformVersion => _platform.platformVersion;
 
+  static Future<bool> bluetoothEnabled() => _platform.bluetoothEnabled();
+
   static Future<bool> checkConnect({String? deviceId}) async {
     return await _platform.checkConnect(deviceId: deviceId);
   }

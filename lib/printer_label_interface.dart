@@ -17,6 +17,8 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   }
 
   Future<String?> get platformVersion;
+  
+  Future<bool> bluetoothEnabled();
 
   Future<bool> checkConnect({String? deviceId});
 
