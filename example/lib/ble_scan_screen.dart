@@ -68,7 +68,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
       if (!ok && mounted) {
         setState(() => _scanning = false);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Bluetooth bị từ chối quyền. Vào Settings → Privacy → Bluetooth để bật lại.'),
+          content: Text(
+              'Bluetooth bị từ chối quyền. Vào Settings → Privacy → Bluetooth để bật lại.'),
           backgroundColor: Colors.red,
           duration: Duration(seconds: 5),
         ));
@@ -86,6 +87,16 @@ class _BleScanScreenState extends State<BleScanScreen> {
   // MARK: - Connect / Disconnect
 
   Future<void> _connect(BluetoothDeviceModel device) async {
+    // check connected
+    final isConnect = await PrinterLabel.checkConnect(deviceId: device.mac);
+    if (isConnect) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Thiết bị ${device.name} đã kết nối"),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+    print("isConnect: $isConnect");
     final id = device.identifier;
     setState(() => _connState[id] = _ConnState.connecting);
 
@@ -93,7 +104,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
     final ok = await PrinterLabel.connectBluetooth(macAddress: id);
     if (!mounted) return;
 
-    setState(() => _connState[id] = ok ? _ConnState.connected : _ConnState.failed);
+    setState(
+        () => _connState[id] = ok ? _ConnState.connected : _ConnState.failed);
 
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -127,7 +139,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
         "packages/printer_label/images/ticket.png",
       );
       await PrinterLabel.printESC(
-        deviceId: DeviceId.bluetooth(id),   // "BT:<UUID>"
+        deviceId: DeviceId.bluetooth(id), // "BT:<UUID>"
         connectionType: PrinterConnectionType.BT,
         printThermalModel: PrintThermalModel(
           image: image,
