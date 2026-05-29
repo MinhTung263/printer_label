@@ -24,21 +24,45 @@ public final class LANPrinterManager {
                     DispatchQueue.main.async { completion?(true) }
                     return
                 }
+                // exists but not connected: re-wire the connect-result callbacks and retry
+                self.attachConnectResult(to: conn, ip: ip, completion: completion)
+                conn.connect()
             } else {
                 let conn = LANPrinterConnection(ip: ip, port: port, autoReconnect: autoReconnect)
-                conn.onConnected = { [weak self] in
-                    DispatchQueue.main.async { completion?(true) }
-                }
-                conn.onDisconnected = { error in
-                    // no-op here; manager retains connection so caller can inspect state
-                }
                 self.connections[ip] = conn
+                self.attachConnectResult(to: conn, ip: ip, completion: completion)
                 conn.connect()
-                return
             }
-            // if we reach here, connection exists but not connected, attempt connect
-            self.connections[ip]?.connect()
         }
+    }
+
+    // Wire onConnected/onDisconnected so the connect result is reported back to the
+    // caller exactly once. Without this, a failed/timed-out connection never calls
+    // completion and the Flutter side hangs with no error.
+    private func attachConnectResult(to conn: LANPrinterConnection, ip: String, completion: ((_ success: Bool) -> Void)?) {
+        // Guard against double-firing: success and failure callbacks race, and
+        // onDisconnected can fire again on later background reconnect attempts.
+        var didReport = false
+        let report: (Bool) -> Void = { [weak self, weak conn] success in
+            guard !didReport else { return }
+            didReport = true
+            // Detach the one-shot connect callbacks; keep the connection around so
+            // subsequent send()/state inspection still works.
+            conn?.onConnected = nil
+            conn?.onDisconnected = nil
+            if !success {
+                // Drop the failed connection so a later connect() starts cleanly.
+                // Mutate the connections map on the manager's serial queue.
+                self?.queue.async {
+                    self?.connections[ip]?.disconnect()
+                    self?.connections.removeValue(forKey: ip)
+                }
+            }
+            DispatchQueue.main.async { completion?(success) }
+        }
+
+        conn.onConnected = { report(true) }
+        conn.onDisconnected = { _ in report(false) }
     }
 
     public func disconnect(ip: String, completion: ((_ success: Bool) -> Void)? = nil) {
