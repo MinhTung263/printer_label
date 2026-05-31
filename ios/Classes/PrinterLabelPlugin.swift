@@ -213,7 +213,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     private func connectLAN(ip: String, result: @escaping FlutterResult) {
         // Use LANPrinterManager to create/maintain a connection per IP
-        LANPrinterManager.shared.connect(ip: ip, port: 9100, autoReconnect: true) { success in
+        LANPrinterManager.shared.connect(ip: ip, port: 9100) { success in
             result(success)
         }
     }
