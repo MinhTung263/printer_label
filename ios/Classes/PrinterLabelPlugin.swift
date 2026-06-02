@@ -86,8 +86,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         case "scan_bt":
             BLEManager.shared.startScan()
             // Trả false nếu BT không được cấp quyền để Flutter biết
-            let authorized = CBCentralManager.authorization != .denied
-                && CBCentralManager.authorization != .restricted
+            let authorized: Bool
+            if #available(iOS 13.1, *) {
+                authorized = CBCentralManager.authorization != .denied
+                    && CBCentralManager.authorization != .restricted
+            } else {
+                authorized = true
+            }
             result(authorized)
 
         case "stop_scan_bt":
