@@ -41,7 +41,7 @@ final class BLEManager: NSObject {
     private var pendingDisconnectResults: [String: FlutterResult] = [:]
 
     // Lọc thiết bị theo RSSI để tránh hiển thị quá nhiều thiết bị yếu
-     private let minScanRSSI: Int = -50
+     private let minScanRSSI: Int = -70
 
     // EventChannel sink để push device được discover về Flutter
     var scanEventSink: FlutterEventSink?
@@ -82,23 +82,57 @@ final class BLEManager: NSObject {
     // MARK: - Connect
 
     // identifier là UUID string từ peripheral.identifier.uuidString
-    // PHẢI có trong discoveredPeripherals cache — không thể recreate từ string
+    // Có thể connect từ 3 nguồn (theo thứ tự ưu tiên):
+    // 1. discoveredPeripherals cache (đã scan trong phiên này)
+    // 2. retrievePeripherals(withIdentifiers:) — từ UUID đã lưu (KHÔNG CẦN SCAN)
+    // 3. retrieveConnectedPeripherals(withServices:) — thiết bị đã kết nối hệ thống
     func connect(identifier: String, result: @escaping FlutterResult) {
-        guard let peripheral = discoveredPeripherals[identifier] else {
-            result(FlutterError(
-                code: "PERIPHERAL_NOT_FOUND",
-                message: "Peripheral \(identifier) not in cache. Run scan first.",
-                details: nil
-            ))
+        // 1. Cache scan
+        if let peripheral = discoveredPeripherals[identifier] {
+            _connect(peripheral, identifier: identifier, result: result)
             return
         }
+        
+        // 2. Retrieve từ UUID đã lưu — KHÔNG CẦN SCAN LẠI
+        if let uuid = UUID(uuidString: identifier) {
+            let retrieved = centralManager.retrievePeripherals(withIdentifiers: [uuid])
+            if let peripheral = retrieved.first {
+                discoveredPeripherals[identifier] = peripheral
+                _connect(peripheral, identifier: identifier, result: result)
+                return
+            }
+            
+            // 3. Retrieve từ các thiết bị đang kết nối hệ thống
+            let connected = centralManager.retrieveConnectedPeripherals(withServices: [])
+            if let peripheral = connected.first(where: { $0.identifier.uuidString == identifier }) {
+                discoveredPeripherals[identifier] = peripheral
+                _connect(peripheral, identifier: identifier, result: result)
+                return
+            }
+        }
+        
+        // 4. Thất bại hoàn toàn → yêu cầu scan
+        result(FlutterError(
+            code: "PERIPHERAL_NOT_FOUND",
+            message: "Peripheral \(identifier) not found. Please scan first.",
+            details: nil
+        ))
+    }
 
-        // Nếu đã kết nối rồi → trả về thành công ngay
+    /// Internal connect helper — tránh duplicate code
+    private func _connect(_ peripheral: CBPeripheral, identifier: String, result: @escaping FlutterResult) {
         if peripheral.state == .connected {
-            result(true)
+            // Nếu đã có trong connectedPeripherals nhưng chưa có characteristic thì vẫn phải discover lại
+            if writableCharacteristics[identifier] != nil {
+                result(true)
+                return
+            }
+            // peripheral vẫn .connected nhưng chưa có characteristic cache → discover lại
+            peripheral.delegate = self
+            peripheral.discoverServices(nil)
+            pendingConnectResults[identifier] = result
             return
         }
-        //  Nếu đang kết nối → return error (tránh kết nối 2 lần)
         if peripheral.state == .connecting {
             result(FlutterError(
                 code: "ALREADY_CONNECTING",
@@ -107,7 +141,6 @@ final class BLEManager: NSObject {
             ))
             return
         }
-
         pendingConnectResults[identifier] = result
         peripheral.delegate = self
         centralManager.connect(peripheral, options: nil)
