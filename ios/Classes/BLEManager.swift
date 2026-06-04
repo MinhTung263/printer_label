@@ -73,12 +73,8 @@ final class BLEManager: NSObject {
                 return
             }
         }
-        // 4. Thất bại
-        result(FlutterError(
-            code: "PERIPHERAL_NOT_FOUND",
-            message: "Peripheral \(identifier) not found. Please scan first.",
-            details: nil
-        ))
+        // 4. Thất bại → false (giống Android)
+        result(false)
     }
 
     private func _connect(_ peripheral: CBPeripheral, identifier: String, result: @escaping FlutterResult) {
@@ -96,25 +92,20 @@ final class BLEManager: NSObject {
             return
         }
         if peripheral.state == .connecting {
-            result(FlutterError(code: "ALREADY_CONNECTING", message: "Already connecting to \(identifier)", details: nil))
+            result(false) // giống Android
             return
         }
         pendingConnectResults[identifier] = result
         peripheral.delegate = self
         centralManager.connect(peripheral, options: nil)
 
-        // ⭐ Schedule timeout — nếu máy in tắt, sau 8s tự động trả về lỗi
+        // ⭐ Schedule timeout — nếu máy in tắt, sau 8s tự động trả về false
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            // Nếu còn pending (chưa có didConnect/didFailToConnect) → timeout
             if self.pendingConnectResults[identifier] != nil {
                 self.pendingConnectResults.removeValue(forKey: identifier)
                 self.centralManager.cancelPeripheralConnection(peripheral)
-                result(FlutterError(
-                    code: "CONNECT_TIMEOUT",
-                    message: "Connect to \(identifier) timed out. Printer may be off.",
-                    details: nil
-                ))
+                result(false)
             }
             self.connectTimeouts.removeValue(forKey: identifier)
         }
@@ -242,12 +233,11 @@ extension BLEManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         let identifier = peripheral.identifier.uuidString
-        // ⭐ Hủy timeout connect
         connectTimeouts[identifier]?.cancel()
         connectTimeouts.removeValue(forKey: identifier)
 
         if let result = pendingConnectResults.removeValue(forKey: identifier) {
-            result(FlutterError(code: "CONNECT_FAILED", message: error?.localizedDescription ?? "Failed to connect", details: nil))
+            result(false) // giống Android
         }
     }
 
@@ -267,7 +257,7 @@ extension BLEManager: CBPeripheralDelegate {
         let identifier = peripheral.identifier.uuidString
         guard error == nil, let services = peripheral.services, !services.isEmpty else {
             if let result = pendingConnectResults.removeValue(forKey: identifier) {
-                result(FlutterError(code: "SERVICE_DISCOVERY_FAILED", message: error?.localizedDescription ?? "No services found", details: nil))
+                result(false)
             }
             return
         }
@@ -295,7 +285,7 @@ extension BLEManager: CBPeripheralDelegate {
             if writableCharacteristics[identifier] != nil {
                 result(true)
             } else {
-                result(FlutterError(code: "NO_WRITABLE_CHARACTERISTIC", message: "Printer connected but no writable characteristic found", details: nil))
+                result(false) // giống Android
             }
         }
     }
