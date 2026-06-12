@@ -1,9 +1,7 @@
 import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:screenshot/screenshot.dart';
-
 import '../src.dart';
 
 class LabelFromWidget {
@@ -22,17 +20,14 @@ class LabelFromWidget {
     Dimensions dimensions = labelPerRow == LabelPerRow.single
         ? Dimensions.large
         : Dimensions.defaultDimens;
-
     final int itemsPerRow = labelPerRow.count;
     final List<Uint8List> images = [];
     final List<T> expandedProducts = [];
-
     for (var product in products) {
       for (int i = 0; i < quantity(product); i++) {
         expandedProducts.add(product);
       }
     }
-
     final List<List<T>> groupedProducts = [];
     for (int i = 0; i < expandedProducts.length; i++) {
       if (i % itemsPerRow == 0) {
@@ -40,41 +35,33 @@ class LabelFromWidget {
       }
       groupedProducts.last.add(expandedProducts[i]);
     }
-
-    for (var row in groupedProducts) {
+    Widget buildRowWidget(List<T> row) {
       final List<Widget> productWidgets = [];
-
       for (int i = 0; i < row.length; i++) {
-        productWidgets.add(
-          itemBuilder(row[i], dimensions),
-        );
-
+        productWidgets.add(itemBuilder(row[i], dimensions));
         if (i < row.length - 1) {
           productWidgets.add(SizedBox(width: spacer));
         }
       }
-
       final itemsToAdd = itemsPerRow - row.length;
       for (int i = 0; i < itemsToAdd; i++) {
         productWidgets.add(
-          SizedBox(
-            width: dimensions.width + spacer,
-            height: dimensions.height,
-          ),
+          SizedBox(width: dimensions.width + spacer, height: dimensions.height),
         );
       }
-
-      final rowWidget = Row(children: productWidgets);
-
-      final imageBytes = await ScreenshotController().captureFromLongWidget(
-        rowWidget,
-        context: context,
-        constraints: const BoxConstraints.tightFor(),
-      );
-
-      images.add(imageBytes);
+      return Row(children: productWidgets);
     }
 
+    final captured = await Future.wait(
+      groupedProducts.map(
+        (row) => ScreenshotController().captureFromLongWidget(
+          buildRowWidget(row),
+          context: context,
+          constraints: const BoxConstraints.tightFor(),
+        ),
+      ),
+    );
+    images.addAll(captured);
     return images;
   }
 
