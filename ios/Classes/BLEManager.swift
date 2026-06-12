@@ -17,7 +17,7 @@ final class BLEManager: NSObject {
 
     // ⭐ Timeout cho connect — tránh treo khi máy in tắt
     private var connectTimeouts: [String: DispatchWorkItem] = [:]
-    private let connectTimeoutInterval: TimeInterval = 8.0 // 8 giây
+    private let connectTimeoutInterval: TimeInterval = 5.0 // 5 giây
 
     private let minScanRSSI: Int = -70
     var scanEventSink: FlutterEventSink?

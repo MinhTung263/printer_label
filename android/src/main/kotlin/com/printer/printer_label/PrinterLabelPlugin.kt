@@ -678,7 +678,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     companion object {
         private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"
-        private const val CONNECT_TIMEOUT_MS = 10_000L
+        private const val CONNECT_TIMEOUT_MS = 5_000L
 
         /** A no-op Result used for fire-and-forget connects (e.g. USB auto-attach). */
         private val NoOpResult = object : Result {
