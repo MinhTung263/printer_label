@@ -52,16 +52,29 @@ class LabelFromWidget {
       return Row(children: productWidgets);
     }
 
-    final captured = await Future.wait(
-      groupedProducts.map(
-        (row) => ScreenshotController().captureFromLongWidget(
-          buildRowWidget(row),
-          context: context,
-          constraints: const BoxConstraints.tightFor(),
+    // Capture in small sequential batches instead of all at once.
+    // Rendering every row widget to an image on the main (UI) thread
+    // simultaneously causes dropped frames / ANR and holds every Uint8List
+    // in memory at the same time (OOM -> lost device connection).
+    const int batchSize = 10;
+    for (int start = 0; start < groupedProducts.length; start += batchSize) {
+      final int end = (start + batchSize).clamp(0, groupedProducts.length);
+      final batch = groupedProducts.sublist(start, end);
+
+      final captured = await Future.wait(
+        batch.map(
+          (row) => ScreenshotController().captureFromLongWidget(
+            buildRowWidget(row),
+            context: context,
+            constraints: const BoxConstraints.tightFor(),
+          ),
         ),
-      ),
-    );
-    images.addAll(captured);
+      );
+      images.addAll(captured);
+
+      // Yield to the main thread so it can draw a frame between batches.
+      await Future.delayed(const Duration(milliseconds: 16));
+    }
     return images;
   }
 
