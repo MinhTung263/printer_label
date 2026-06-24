@@ -44,12 +44,16 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private var usbEventSink: EventChannel.EventSink? = null
 
     // ─── Multi-connection store ───────────────────────────────────────────────
-    // Key   = device id: MAC address | IP address | USB device path
+    // Key   = device id: MAC address | IP address | stable USB id (USB:v{vid}_p{pid}_s{serial})
     // Value = active IDeviceConnection
     private val connections = mutableMapOf<String, IDeviceConnection>()
 
     // Type label for each connection: "USB" | "LAN" | "BT"
     private val connectionTypes = mutableMapOf<String, ConnectionType>()
+
+    // Maps stable USB id → actual device path (e.g. /dev/bus/usb/001/002)
+    // Updated each time the device is attached so rawId() always has the current path.
+    private val usbDevicePaths = mutableMapOf<String, String>()
 
     // Pending connect state — keyed by deviceId so parallel connects don't clash
     private data class PendingConnect(
@@ -212,12 +216,12 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         if (!deviceId.isNullOrEmpty()) {
             val conn = connections[deviceId]
             if (conn != null && conn.isConnect) return conn
+            // device_id was provided but not connected — do not silently fall through to another printer
+            result.error("NO_CONNECTION", "Device $deviceId is not connected", null)
+            return null
         }
 
-        val activeConn = connections.values.firstOrNull { it.isConnect }
-        if (activeConn != null) return activeConn
-
-        result.error("NO_CONNECTION", "No active connection found", null)
+        result.error("NO_CONNECTION", "No device_id provided", null)
         return null
     }
 
@@ -289,7 +293,20 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
 
-    private fun rawId(deviceId: String): String = deviceId.substringAfter(':')
+    // For USB: returns the current device path from usbDevicePaths (updates each attach).
+    // For BT/LAN: strips the "TYPE:" prefix to get the raw address.
+    private fun rawId(deviceId: String): String =
+        if (deviceId.startsWith("USB:")) usbDevicePaths[deviceId] ?: deviceId.substringAfter(':')
+        else deviceId.substringAfter(':')
+
+    private fun stableUsbId(device: UsbDevice): String {
+        val serial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1)
+            runCatching { device.serialNumber }.getOrNull() else null
+        return if (!serial.isNullOrBlank())
+            "USB:v${device.vendorId}_p${device.productId}_s$serial"
+        else
+            "USB:v${device.vendorId}_p${device.productId}"
+    }
 
     private fun scheduleConnectTimeout(deviceId: String) {
         Handler(Looper.getMainLooper()).postDelayed({
@@ -376,7 +393,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 tryConnectWithDelay(device, 0)
             } else {
                 toast("Người dùng từ chối quyền USB")
-                val deviceId = "USB:${device?.deviceName ?: return}"
+                val d = device ?: return
+                val deviceId = stableUsbId(d)
                 pendingConnects[deviceId]?.result?.success(false)
                 pendingConnects.remove(deviceId)
             }
@@ -397,7 +415,9 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     fun handleUsbDeviceAttached(device: UsbDevice) {
-        toast("USB được gắn: ${device.deviceName}")
+        val deviceId = stableUsbId(device)
+        usbDevicePaths[deviceId] = device.deviceName  // update path for this plug-in event
+        toast("USB được gắn: $deviceId")
         if (usbManager.hasPermission(device)) {
             tryConnectWithDelay(device, 0)
         } else {
@@ -412,7 +432,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             usbManager.requestPermission(device, permIntent)
             Handler(Looper.getMainLooper()).postDelayed({
                 if (!isDetached && usbManager.hasPermission(device) &&
-                    connections["USB:${device.deviceName}"]?.isConnect != true) {
+                    connections[deviceId]?.isConnect != true) {
                     tryConnectWithDelay(device, 0)
                 }
             }, 500L)
@@ -420,16 +440,19 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     fun handleUsbDeviceDetached(device: UsbDevice?) {
-        val deviceId = "USB:${device?.deviceName ?: return}"
+        if (device == null) return
+        val deviceId = stableUsbId(device)
         runCatching { connections[deviceId]?.close() }
         connections.remove(deviceId)
         connectionTypes.remove(deviceId)
+        usbDevicePaths.remove(deviceId)
         emitUsbEvent(deviceId, false)
         toast("USB bị ngắt kết nối [$deviceId]")
     }
 
     private fun tryConnectWithDelay(device: UsbDevice, attempt: Int) {
-        val deviceId = "USB:${device.deviceName}"
+        val deviceId = stableUsbId(device)
+        usbDevicePaths[deviceId] = device.deviceName  // keep path current on each attempt
         if (attempt > 3) {
             toast("Kết nối USB thất bại sau nhiều lần thử")
             pendingConnects[deviceId]?.result?.success(false)

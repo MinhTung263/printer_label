@@ -31,8 +31,8 @@ class _ConnectedDevice {
 
 // ⭐ Model cho thiết bị BT đã lưu trong SharedPreferences
 class _SavedBtDevice {
-  final String id;     // UUID (iOS) hoặc MAC (Android)
-  final String name;   // Tên hiển thị
+  final String id; // UUID (iOS) hoặc MAC (Android)
+  final String name; // Tên hiển thị
   const _SavedBtDevice({required this.id, required this.name});
 }
 
@@ -109,12 +109,12 @@ class _MyHomePageState extends State<MyHomePage> {
         if (event.connected) {
           if (_connectedDevices.any((d) => d.id == event.deviceId)) return;
           _connectedDevices.add(_ConnectedDevice(
-            id: event.deviceId, // already prefixed "USB:/dev/bus/..."
-            label: 'USB: ${event.deviceId.split('/').last}',
+            id: event.deviceId,
+            label: 'USB: ${event.deviceId.replaceFirst('USB:', '')}',
             type: 'USB',
           ));
         } else {
-          _connectedDevices.removeWhere((d) => d.id == event.deviceId);
+          // _connectedDevices.removeWhere((d) => d.id == event.deviceId);
         }
       });
     });
@@ -214,7 +214,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _showSavedBtPicker() async {
     final savedList = await _getSavedBtDevices();
     if (savedList.isEmpty) {
-      _showSnack('Chưa có thiết bị BT nào được lưu. Hãy scan và kết nối trước.', Colors.orange);
+      _showSnack('Chưa có thiết bị BT nào được lưu. Hãy scan và kết nối trước.',
+          Colors.orange);
       return;
     }
     if (!mounted) return;
@@ -673,6 +674,12 @@ class _MyHomePageState extends State<MyHomePage> {
                 PopupMenuItem(value: 'esc', child: Text('In ESC')),
               ],
               onSelected: (action) async {
+                final connected = await PrinterLabel.checkConnect(deviceId: device.id);
+                if (!connected) {
+                  if (mounted) _showSnack('Máy in "${device.label}" chưa kết nối', Colors.red);
+                  return;
+                }
+                if (!mounted) return;
                 switch (action) {
                   case 'label':
                     await LabelPrintService.instance
@@ -1094,7 +1101,8 @@ class _SavedBtPickerState extends State<_SavedBtPicker> {
                       return ListTile(
                         leading: CircleAvatar(
                           radius: 18,
-                          backgroundColor: Colors.indigo.withValues(alpha: 0.12),
+                          backgroundColor:
+                              Colors.indigo.withValues(alpha: 0.12),
                           child: const Icon(Icons.bluetooth_rounded,
                               color: Colors.indigo, size: 18),
                         ),
@@ -1129,7 +1137,8 @@ class _SavedBtPickerState extends State<_SavedBtPicker> {
                             else
                               ElevatedButton.icon(
                                 onPressed: () => _connect(d),
-                                icon: const Icon(Icons.wifi_tethering, size: 16),
+                                icon:
+                                    const Icon(Icons.wifi_tethering, size: 16),
                                 label: const Text('Kết nối'),
                                 style: ElevatedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(
