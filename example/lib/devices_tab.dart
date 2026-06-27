@@ -24,7 +24,7 @@ class DevicesTab extends StatelessWidget {
   final bool isCheckingStatus;
   final bool isCheckingConnection;
   final bool isPrinting;
-  final VoidCallback? onShowSavedBt;
+
 
 
   const DevicesTab({
@@ -49,8 +49,8 @@ class DevicesTab extends StatelessWidget {
     this.isCheckingStatus = false,
     this.isCheckingConnection = false,
     this.isPrinting = false,
-    this.onShowSavedBt,
   });
+
 
   @override
   Widget build(BuildContext context) {
@@ -238,18 +238,11 @@ class DevicesTab extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const Spacer(),
-            if (onShowSavedBt != null)
-              IconButton(
-                onPressed: onShowSavedBt,
-                icon: const Icon(Icons.bluetooth_connected,
-                    color: Colors.indigo),
-                tooltip: 'Chọn máy in BT đã lưu để kết nối lại',
-              ),
-            IconButton(
+             IconButton(
               onPressed: onAddBluetooth,
-              icon: const Icon(Icons.bluetooth_searching,
+              icon: const Icon(Icons.bluetooth,
                   color: Color(0xFF4F46E5)),
-              tooltip: 'Thêm Bluetooth',
+              tooltip: 'Kết nối Bluetooth',
             ),
             PopupMenuButton<PrintAction>(
               icon: const Icon(Icons.print, color: Color(0xFF4F46E5)),

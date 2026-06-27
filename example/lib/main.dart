@@ -149,7 +149,16 @@ class _MyHomePageState extends State<MyHomePage>
     });
   }
 
-  Future<void> _showAddBluetooth() async {
+  Future<void> _handleBluetoothButtonPressed() async {
+    final savedList = await _getSavedBtDevices();
+    if (savedList.isNotEmpty) {
+      await _showSavedBtPicker();
+    } else {
+      await _scanAndConnectBluetooth();
+    }
+  }
+
+  Future<void> _scanAndConnectBluetooth() async {
     if (Platform.isAndroid) {
       final statuses = await [
         Permission.bluetoothConnect,
@@ -186,6 +195,7 @@ class _MyHomePageState extends State<MyHomePage>
       ),
     );
   }
+
 
   // ⭐ Lưu danh sách thiết bị BT đã kết nối (lưu nhiều máy)
   static const String _prefsBtListKey = 'saved_bt_devices';
@@ -254,9 +264,11 @@ class _MyHomePageState extends State<MyHomePage>
           context.showSnackBar('Đã xóa ${device.name} khỏi danh sách',
               backgroundColor: Colors.orange);
         },
+        onScanNewDevice: _scanAndConnectBluetooth,
       ),
     );
   }
+
 
   // ⭐ Thử reconnect BLE từ identifier đã lưu — KHÔNG CẦN SCAN TRÊN iOS
   Future<void> _reconnectBtFromSaved(_SavedBtDevice device) async {
@@ -539,7 +551,7 @@ class _MyHomePageState extends State<MyHomePage>
                 context.showSnackBar('Đã tắt kết nối chính',
                     backgroundColor: Colors.blueGrey);
               },
-              onAddBluetooth: _showAddBluetooth,
+              onAddBluetooth: _handleBluetoothButtonPressed,
               onPrintAllLan: _printAllLan,
               onPrintAll: _printAll,
               onPrintAllEsc: _printAllEsc,
@@ -564,7 +576,7 @@ class _MyHomePageState extends State<MyHomePage>
                         ipAddress: textEditingController.text,
                       )
                   : null,
-              onShowSavedBt: _showSavedBtPicker,
+
             ),
             FunctionsTab(
               products: products,
@@ -602,11 +614,13 @@ class _SavedBtPicker extends StatefulWidget {
   final List<_SavedBtDevice> devices;
   final void Function(_SavedBtDevice device) onConnect;
   final void Function(_SavedBtDevice device) onDelete;
+  final VoidCallback onScanNewDevice;
 
   const _SavedBtPicker({
     required this.devices,
     required this.onConnect,
     required this.onDelete,
+    required this.onScanNewDevice,
   });
 
   @override
@@ -654,9 +668,17 @@ class _SavedBtPickerState extends State<_SavedBtPicker> {
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 const Spacer(),
-                Text(
-                  '${widget.devices.length} thiết bị',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onScanNewDevice();
+                  },
+                  icon: const Icon(Icons.bluetooth_searching, size: 16),
+                  label: const Text('Quét mới', style: TextStyle(fontSize: 13)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF4F46E5),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
                 ),
               ],
             ),
