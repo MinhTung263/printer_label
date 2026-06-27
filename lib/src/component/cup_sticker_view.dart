@@ -20,7 +20,7 @@ class PreviewCupSticker extends StatelessWidget {
               ),
             ],
           ),
-          Divider(),
+          const Divider(),
           _buildText(
             data.productName.toUpperCase(),
             fontWeight: FontWeight.bold,
@@ -52,7 +52,7 @@ class PreviewCupSticker extends StatelessWidget {
             data.price,
             fontWeight: FontWeight.bold,
           ),
-          Divider(),
+          const Divider(),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             spacing: 5,

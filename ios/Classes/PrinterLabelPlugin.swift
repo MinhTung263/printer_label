@@ -86,8 +86,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         case "scan_bt":
             BLEManager.shared.startScan()
             // Trả false nếu BT không được cấp quyền để Flutter biết
-            let authorized = CBCentralManager.authorization != .denied
-                && CBCentralManager.authorization != .restricted
+            let authorized: Bool
+            if #available(iOS 13.1, *) {
+                authorized = CBCentralManager.authorization != .denied
+                    && CBCentralManager.authorization != .restricted
+            } else {
+                authorized = true
+            }
             result(authorized)
 
         case "stop_scan_bt":
@@ -156,14 +161,6 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 return
             }
             printImage(args: args, result: result)
-
-        // MARK: Print Barcode (TSPL)
-        case "print_barcode":
-            guard let args = call.arguments as? [String: Any] else {
-                result(false)
-                return
-            }
-            printBarcode(args: args, result: result)
 
         // MARK: Print ESC/POS
         case "print_image_esc":
@@ -337,39 +334,6 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     }
 
     func printImage(args: [String: Any], result: @escaping FlutterResult) {
-        guard let imageData = args["image"] as? FlutterStandardTypedData else {
-            result(false)
-            return
-        }
-
-        let x = args["x"] as? Int ?? 0
-        let y = args["y"] as? Int ?? 0
-        let width = args["width"] as? Int ?? 100
-        let height = args["height"] as? Int ?? 20
-        let deviceId = args["device_id"] as? String
-        let connectionType = args["connection_type"] as? String
-
-        guard let cgImage = imageFromFlutter(imageData)?.cgImage else {
-            result(false)
-            return
-        }
-
-        let cmd = PTCommandTSPL()
-        cmd.encoding = String.Encoding.utf8.rawValue
-        cmd.setPrintAreaSizeWithWidth(width, height: height)
-        cmd.setGapWithDistance(1, offset: 0)
-        cmd.setCLS()
-        cmd.addBitmap(
-            withXPos: x, yPos: y,
-            mode: .OVERWRITE, image: cgImage,
-            bitmapMode: .binary, compress: .none
-        )
-        cmd.print(withSets: 1, copies: 1)
-        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
-        result(true)
-    }
-
-    func printBarcode(args: [String: Any], result: @escaping FlutterResult) {
         guard let imageData = args["image"] as? FlutterStandardTypedData else {
             result(false)
             return

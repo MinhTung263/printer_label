@@ -4,8 +4,8 @@ import '../component/src.dart';
 import '../enums/enum.src.dart';
 import '../service/service.src.dart';
 
-class CupStickerPrintExample {
-  const CupStickerPrintExample._();
+class CupStickerExample {
+  const CupStickerExample._();
 
   static Future<void> printOrderCupSticker(
     CupStickerSize size, {
@@ -23,7 +23,7 @@ class CupStickerPrintExample {
         labelIndex: 1,
         billDate: "01/01/2026",
         totalLabels: 1,
-        toppings: ["Đá", "Đường"],
+        toppings: const ["Đá", "Đường"],
       ),
       PreviewLabelModel(
         code: "1214",
@@ -34,7 +34,7 @@ class CupStickerPrintExample {
         labelIndex: 2,
         billDate: "02/01/2026",
         totalLabels: 2,
-        toppings: ["Đá", "Trân châu"],
+        toppings: const ["Đá", "Trân châu"],
       ),
       PreviewLabelModel(
         code: "1215",
@@ -45,7 +45,7 @@ class CupStickerPrintExample {
         labelIndex: 3,
         billDate: "03/01/2026",
         totalLabels: 3,
-        toppings: ["Đá", "Thạch", "Sữa đặc"],
+        toppings: const ["Đá", "Thạch", "Sữa đặc"],
       ),
     ];
 
@@ -61,3 +61,6 @@ class CupStickerPrintExample {
     );
   }
 }
+
+@Deprecated('Use CupStickerExample instead')
+typedef CupStickerPrintExample = CupStickerExample;

@@ -6,16 +6,23 @@ import 'package:screenshot/screenshot.dart';
 
 import '../src.dart';
 
+/// A helper utility service to convert Flutter widgets into rasterized image byte lists
+/// suitable for printing as labels or stickers.
 class LabelFromWidget {
   const LabelFromWidget._();
+
+  /// Captures multiple generic [items] into a list of image byte arrays.
+  /// 
+  /// Group items according to the [labelPerRow] count, builds widgets using [itemBuilder],
+  /// replicates each item based on its [quantity], and renders the row as a PNG.
   static Future<List<Uint8List>> captureImages<T>(
-    List<T> products,
+    List<T> items,
     BuildContext context, {
     required Widget Function(
-      T product,
+      T item,
       Dimensions dimensions,
     ) itemBuilder,
-    required int Function(T product) quantity,
+    required int Function(T item) quantity,
     LabelPerRow labelPerRow = LabelPerRow.doubleLabels,
     double spacer = 60,
   }) async {
@@ -25,23 +32,28 @@ class LabelFromWidget {
 
     final int itemsPerRow = labelPerRow.count;
     final List<Uint8List> images = [];
-    final List<T> expandedProducts = [];
+    final List<T> expandedItems = [];
 
-    for (var product in products) {
-      for (int i = 0; i < quantity(product); i++) {
-        expandedProducts.add(product);
+    // Duplicate items based on their print quantity
+    for (var item in items) {
+      for (int i = 0; i < quantity(item); i++) {
+        expandedItems.add(item);
       }
     }
 
-    final List<List<T>> groupedProducts = [];
-    for (int i = 0; i < expandedProducts.length; i++) {
+    // Group items into chunks matching the columns per row
+    final List<List<T>> groupedItems = [];
+    for (int i = 0; i < expandedItems.length; i++) {
       if (i % itemsPerRow == 0) {
-        groupedProducts.add([]);
+        groupedItems.add([]);
       }
-      groupedProducts.last.add(expandedProducts[i]);
+      groupedItems.last.add(expandedItems[i]);
     }
 
-    for (var row in groupedProducts) {
+    final screenshotController = ScreenshotController();
+
+    // Render each row group to a rasterized image
+    for (var row in groupedItems) {
       final List<Widget> productWidgets = [];
 
       for (int i = 0; i < row.length; i++) {
@@ -54,6 +66,7 @@ class LabelFromWidget {
         }
       }
 
+      // Pad remaining empty columns in the row if necessary
       final itemsToAdd = itemsPerRow - row.length;
       for (int i = 0; i < itemsToAdd; i++) {
         productWidgets.add(
@@ -66,7 +79,7 @@ class LabelFromWidget {
 
       final rowWidget = Row(children: productWidgets);
 
-      final imageBytes = await ScreenshotController().captureFromLongWidget(
+      final imageBytes = await screenshotController.captureFromLongWidget(
         rowWidget,
         context: context,
         constraints: const BoxConstraints.tightFor(),
@@ -78,6 +91,9 @@ class LabelFromWidget {
     return images;
   }
 
+  /// Captures a single [widget] and converts it directly into a PNG image byte array.
+  /// 
+  /// The [pixelRatio] parameter determines the export resolution scale (defaults to `5` for print clarity).
   static Future<Uint8List> captureFromWidget(
     Widget widget, {
     BuildContext? context,

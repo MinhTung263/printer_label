@@ -9,9 +9,9 @@ class DeviceId {
 
   /// Trả về loại kết nối dựa vào prefix của deviceId.
   static PrinterConnectionType? typeOf(String deviceId) {
-    if (deviceId.startsWith('LAN:')) return PrinterConnectionType.LAN;
-    if (deviceId.startsWith('BT:')) return PrinterConnectionType.BT;
-    if (deviceId.startsWith('USB:')) return PrinterConnectionType.USB;
+    if (deviceId.startsWith('LAN:')) return PrinterConnectionType.lan;
+    if (deviceId.startsWith('BT:')) return PrinterConnectionType.bt;
+    if (deviceId.startsWith('USB:')) return PrinterConnectionType.usb;
     return null;
   }
 }

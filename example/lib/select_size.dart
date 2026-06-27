@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:printer_label/enums/enum.src.dart';
+import 'package:printer_label/printer_label.dart';
 
-class CupStickerSizeSelector extends StatefulWidget {
+/// Controlled size selector for cup stickers.
+/// Parent owns the selected [value]; [onChanged] fires when the user picks a new size;
+/// [onPrint] fires when the user taps the print button.
+class CupStickerSizeSelector extends StatelessWidget {
+  final CupStickerSize value;
+  final ValueChanged<CupStickerSize> onChanged;
   final Future<void> Function(CupStickerSize size) onPrint;
 
   const CupStickerSizeSelector({
     super.key,
+    required this.value,
+    required this.onChanged,
     required this.onPrint,
   });
-
-  @override
-  State<CupStickerSizeSelector> createState() => _CupStickerSizeSelectorState();
-}
-
-class _CupStickerSizeSelectorState extends State<CupStickerSizeSelector> {
-  CupStickerSize _selectedSize = CupStickerSize.s50x30;
 
   @override
   Widget build(BuildContext context) {
@@ -23,17 +23,15 @@ class _CupStickerSizeSelectorState extends State<CupStickerSizeSelector> {
       children: [
         /// Dropdown chọn size
         DropdownButton<CupStickerSize>(
-          value: _selectedSize,
+          value: value,
           items: CupStickerSize.defaults.map((size) {
             return DropdownMenuItem(
               value: size,
               child: Text('${size.key} mm'),
             );
           }).toList(),
-          onChanged: (value) {
-            if (value != null) {
-              setState(() => _selectedSize = value);
-            }
+          onChanged: (v) {
+            if (v != null) onChanged(v);
           },
         ),
 
@@ -41,9 +39,7 @@ class _CupStickerSizeSelectorState extends State<CupStickerSizeSelector> {
 
         /// Nút in
         ElevatedButton(
-          onPressed: () async {
-            await widget.onPrint(_selectedSize);
-          },
+          onPressed: () async => onPrint(value),
           child: const Text('Print Cup Sticker'),
         ),
       ],

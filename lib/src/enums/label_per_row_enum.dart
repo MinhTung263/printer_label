@@ -28,9 +28,9 @@ class LabelPerRow {
       };
 
   String get title => switch (name) {
-        'single' => 'Print 1 tem / row',
-        'double' => 'Print 2 tem / row',
-        'triple' => 'Print 3 tem / row',
+        'single' => '1 tem / hàng',
+        'double' => '2 tem / hàng',
+        'triple' => '3 tem / hàng',
         _ => '',
       };
 

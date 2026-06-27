@@ -27,13 +27,19 @@ class BarcodeModel {
             'height': barcodeHeight,
             'barcodeContent': barcodeContent,
           },
-          'text': textData?.map((text) => text.toMap()).toList(),
+          'text': textData?.map((text) => text.toJson()).toList(),
           'quantity': quantity,
         };
 
-  // Method to convert PrintModel to a Map for further processing
-  Map<String, dynamic> toMap() {
+  /// Converts the barcode model to a JSON-compatible map.
+  Map<String, dynamic> toJson() {
     return printData;
+  }
+
+  /// [Deprecated] Use [toJson] instead.
+  @Deprecated('Use toJson instead')
+  Map<String, dynamic> toMap() {
+    return toJson();
   }
 }
 
@@ -52,8 +58,8 @@ class TextData {
     this.data,
   });
 
-  // Convert TextData instance to a map
-  Map<String, dynamic> toMap() {
+  /// Converts the text data model to a JSON-compatible map.
+  Map<String, dynamic> toJson() {
     return {
       'x': x,
       'y': y,
@@ -61,5 +67,11 @@ class TextData {
       'sizeY': sizeY,
       'data': data,
     };
+  }
+
+  /// [Deprecated] Use [toJson] instead.
+  @Deprecated('Use toJson instead')
+  Map<String, dynamic> toMap() {
+    return toJson();
   }
 }

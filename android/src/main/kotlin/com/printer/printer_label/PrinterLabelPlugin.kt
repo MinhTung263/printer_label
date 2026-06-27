@@ -156,10 +156,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 getBluetoothDevices(result)
             }
 
-            "print_barcode" -> {
-                val conn = resolveConn(call, result) ?: return
-                printBarcode(call, conn, result)
-            }
 
             "print_label" -> {
                 toast("[print_label] nhận lệnh in")
@@ -573,30 +569,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         } catch (e: Exception) {
             result.error("BT_ERROR", e.message, null)
         }
-    }
-
-    // ─── Print implementations ────────────────────────────────────────────────
-
-    private fun printBarcode(call: MethodCall, curConnect: IDeviceConnection, result: Result) {
-        val size = call.argument<Map<String, Double>>("size")
-        val gap = call.argument<Map<String, Double>>("gap")
-        val barcode = call.argument<Map<String, Any>>("barcode")
-        val textList = call.argument<List<Map<String, Any>>>("text")
-        val quantity = call.argument<Int>("quantity") ?: 1
-        val (sizeWidth, sizeHeight) = extractSize(size)
-        val (gapWidth, gapHeight) = extractGap(gap)
-        // Initialize printer
-        val printer = TSPLPrinter(curConnect)
-        printer.sizeMm(sizeWidth, sizeHeight)
-        printer.gapMm(gapWidth, gapHeight)
-        printer.cls()
-        barcode?.let { processBarcode(it, printer) }
-
-        // Process text
-        textList?.forEach { text -> processText(text, printer) }
-
-        printer.print(quantity)
-        result.success("Printed Successfully")
     }
 
     private fun printLabel(call: MethodCall, conn: IDeviceConnection, result: Result) {

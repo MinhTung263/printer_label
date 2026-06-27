@@ -7,7 +7,6 @@ enum PrinterMethod {
   scanBt('scan_bt'),
   stopScanBt('stop_scan_bt'),
   getBluetoothDevices('get_bluetooth_devices'),
-  printBarcode('print_barcode'),
   printLabel('print_label'),
   printImage('print_image'),
   printImageEsc('print_image_esc'),

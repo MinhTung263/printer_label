@@ -2,10 +2,14 @@ import 'package:flutter/services.dart';
 
 import '../src.dart';
 
+/// A high-level helper service for thermal receipt printing using ESC/POS protocol.
 class ESCPrintService {
   ESCPrintService._();
+
+  /// The singleton instance of the [ESCPrintService].
   static final ESCPrintService instance = ESCPrintService._();
 
+  /// Prints a thermal receipt from the specified [model].
   Future<void> print({
     String? deviceId,
     PrinterConnectionType? connectionType,
@@ -18,6 +22,7 @@ class ESCPrintService {
     );
   }
 
+  /// Prints a sample receipt template for test purposes.
   Future<void> printExample({
     String? deviceId,
     PrinterConnectionType? connectionType,
@@ -31,6 +36,7 @@ class ESCPrintService {
     );
   }
 
+  /// Utility helper to load raw image bytes from asset bundles.
   Future<Uint8List> loadImageFromAssets(String path) async {
     final byteData = await rootBundle.load(path);
     return byteData.buffer.asUint8List();
