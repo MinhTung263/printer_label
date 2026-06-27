@@ -29,12 +29,11 @@ class PrinterThermal {
             }
 
             val bitmap = BitmapFactory.decodeByteArray(image, 0, image.size)
-            val printResult =
-                printer.initializePrinter()
-                    .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, size ?: 576)
-                    .feedLine()
-                    .cutHalfAndFeed(1)
-            result.success(printResult)
+            printer.initializePrinter()
+                .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, size ?: 576)
+                .feedLine()
+                .cutHalfAndFeed(1)
+            result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
         }
@@ -48,12 +47,11 @@ class PrinterThermal {
         val printer = POSPrinter(curConnect)
         val text = call.argument<String>("text") ?: ""
         try {
-            val printResult =
-                printer.initializePrinter()
-                    .printText(text, 0, POSConst.ALIGNMENT_LEFT, 0)
-                    .feedLine()
-                    .cutHalfAndFeed(1)
-            result.success(printResult)
+            printer.initializePrinter()
+                .printText(text, 0, POSConst.ALIGNMENT_LEFT, 0)
+                .feedLine()
+                .cutHalfAndFeed(1)
+            result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
         }
@@ -81,12 +79,11 @@ class PrinterThermal {
                 "CODE93" -> 72
                 else -> 73
             }
-            val printResult =
-                printer.initializePrinter()
-                    .printBarCode(code, type, width, height, 2)
-                    .feedLine()
-                    .cutHalfAndFeed(1)
-            result.success(printResult)
+            printer.initializePrinter()
+                .printBarCode(code, type, width, height, 2)
+                .feedLine()
+                .cutHalfAndFeed(1)
+            result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
         }
@@ -101,12 +98,11 @@ class PrinterThermal {
         val code = call.argument<String>("code") ?: ""
         val size = call.argument<Int>("size") ?: 8
         try {
-            val printResult =
-                printer.initializePrinter()
-                    .printQRCode(code, size)
-                    .feedLine()
-                    .cutHalfAndFeed(1)
-            result.success(printResult)
+            printer.initializePrinter()
+                .printQRCode(code, size)
+                .feedLine()
+                .cutHalfAndFeed(1)
+            result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
         }

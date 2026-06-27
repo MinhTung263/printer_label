@@ -237,6 +237,24 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 result(hasBleSub || hasLanSub)
             }
 
+        case "check_printer_status":
+            let args = call.arguments as? [String: Any]
+            let deviceId = args?["device_id"] as? String
+            if let id = deviceId {
+                let isConnected: Bool
+                if let bleId = extractBLEIdentifier(from: id) {
+                    isConnected = BLEManager.shared.isConnected(identifier: bleId)
+                } else if let ip = extractLANIp(from: id) {
+                    isConnected = LANPrinterManager.shared.isConnected(ip: ip)
+                } else {
+                    isConnected = false
+                }
+                result(isConnected ? "normal" : "offline")
+            } else {
+                let anyConnected = BLEManager.shared.hasAnyConnection() || !LANPrinterManager.shared.getConnectedPrinters().isEmpty
+                result(anyConnected ? "normal" : "offline")
+            }
+
         case "bluetooth_enabled":
             result(BLEManager.shared.isBluetoothEnabled)
 

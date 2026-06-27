@@ -31,6 +31,12 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// If [deviceId] is null, checks if any printer connection is active.
   Future<bool> checkConnect({String? deviceId});
 
+  /// Queries the operational status of a specific printer by [deviceId].
+  ///
+  /// Specify [type] as either "TSPL" or "ESC" to check specific protocols.
+  /// Returns a [PrinterStatus] value.
+  Future<PrinterStatus> checkPrinterStatus({String? deviceId, String? type});
+
   /// Gets a map of all currently active printer connections (only supported on Android).
   ///
   /// Returns a [Map] containing `deviceId` as keys and their connection states (`true`/`false`) as values.

@@ -31,6 +31,19 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<PrinterStatus> checkPrinterStatus({String? deviceId, String? type}) async {
+    final targetId = deviceId?.trim();
+    final String? statusStr = await _channel.invokeMethod<String>(
+      PrinterMethod.checkPrinterStatus.value,
+      {
+        if (targetId != null && targetId.isNotEmpty) "device_id": targetId,
+        if (type != null && type.isNotEmpty) "type": type,
+      },
+    );
+    return PrinterStatus.fromValue(statusStr);
+  }
+
+  @override
   Future<Map<String, bool>> getAllConnections() async {
     final result = await _channel.invokeMethod<Map>(
       PrinterMethod.checkConnect.value,

@@ -17,7 +17,8 @@ enum PrinterMethod {
   printBarcode('print_barcode'),
   printQRCode('print_qrcode'),
   printBarcodeESC('print_barcode_esc'),
-  printQRCodeESC('print_qrcode_esc');
+  printQRCodeESC('print_qrcode_esc'),
+  checkPrinterStatus('check_printer_status');
 
   const PrinterMethod(this.value);
   final String value;

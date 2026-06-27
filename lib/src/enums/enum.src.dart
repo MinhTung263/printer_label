@@ -5,3 +5,4 @@ export 'paper_size_enum.dart';
 export 'channel_enum.dart';
 export 'printer_connection_type.dart';
 export 'printer_method_enum.dart';
+export 'printer_status.dart';

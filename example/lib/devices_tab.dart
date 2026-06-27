@@ -20,6 +20,10 @@ class DevicesTab extends StatelessWidget {
   final Function(ConnectedDevice device) onPrintDeviceLabel;
   final Function(ConnectedDevice device) onPrintDeviceEsc;
   final VoidCallback onOpenBluetoothPage;
+  final VoidCallback? onCheckPrinterStatus;
+  final bool isCheckingStatus;
+  final bool isCheckingConnection;
+  final bool isPrinting;
 
   const DevicesTab({
     super.key,
@@ -39,6 +43,10 @@ class DevicesTab extends StatelessWidget {
     required this.onPrintDeviceLabel,
     required this.onPrintDeviceEsc,
     required this.onOpenBluetoothPage,
+    this.onCheckPrinterStatus,
+    this.isCheckingStatus = false,
+    this.isCheckingConnection = false,
+    this.isPrinting = false,
   });
 
   @override
@@ -100,11 +108,38 @@ class DevicesTab extends StatelessWidget {
                 ],
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.refresh, color: Color(0xFF4F46E5)),
-              tooltip: 'Kiểm tra lại',
-              onPressed: onCheckConnect,
-            ),
+            isCheckingConnection
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.refresh, color: Color(0xFF4F46E5)),
+                    tooltip: 'Kiểm tra kết nối',
+                    onPressed: isCheckingStatus ? null : onCheckConnect,
+                  ),
+            if (isConnected && onCheckPrinterStatus != null)
+              isCheckingStatus
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)),
+                        ),
+                      ),
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.fact_check_outlined, color: Color(0xFF0D9488)),
+                      tooltip: 'Kiểm tra máy in',
+                      onPressed: isCheckingConnection ? null : onCheckPrinterStatus,
+                    ),
           ],
         ),
       ),

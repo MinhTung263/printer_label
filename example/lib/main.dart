@@ -64,6 +64,9 @@ class _MyHomePageState extends State<MyHomePage>
   late TabController _tabController;
   bool isConnected = false;
   bool isConnecting = false;
+  bool isCheckingStatus = false;
+  bool isCheckingConnection = false;
+  bool isPrinting = false;
 
   final TextEditingController textEditingController =
       TextEditingController(text: "192.168.1.56");
@@ -241,12 +244,78 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
+  Future<void> _checkPrinterStatus({required String ipAddress}) async {
+    setState(() => isCheckingStatus = true);
+    context.showSnackBar('Đang kiểm tra máy in...', backgroundColor: Colors.blueGrey);
+    try {
+      // 1. Thử check theo giao thức ESC/POS trước
+      var status = await PrinterLabel.checkPrinterStatus(
+        deviceId: DeviceId.lan(ipAddress),
+        type: "ESC",
+      );
+
+      // 2. Nếu trả về UNKNOWN (do timeout / không phải máy ESC), thử sang TSPL
+      if (status == PrinterStatus.unknown) {
+        status = await PrinterLabel.checkPrinterStatus(
+          deviceId: DeviceId.lan(ipAddress),
+          type: "TSPL",
+        );
+      }
+
+      if (!mounted) return;
+      final (msg, color) = switch (status) {
+        PrinterStatus.normal => ('Máy in bình thường ✅', const Color(0xFF10B981)),
+        PrinterStatus.outOfPaper => ('Hết giấy 📄', const Color(0xFFF59E0B)),
+        PrinterStatus.paperJam => ('Kẹt giấy ⚠️', Colors.orange),
+        PrinterStatus.headOpened => ('Đầu in đang mở 🔓', Colors.orange),
+        PrinterStatus.outOfRibbon => ('Hết ruy băng mực 🎞️', Colors.orange),
+        PrinterStatus.pause => ('Máy in đang tạm dừng ⏸️', Colors.blueGrey),
+        PrinterStatus.printing => ('Đang in... 🖨️', const Color(0xFF4F46E5)),
+        PrinterStatus.offline => ('Máy in không phản hồi ❌', const Color(0xFFE11D48)),
+        PrinterStatus.unknown => ('Không xác định được trạng thái ❓', Colors.grey),
+      };
+      context.showSnackBar(msg, backgroundColor: color);
+    } finally {
+      if (mounted) {
+        setState(() => isCheckingStatus = false);
+      }
+    }
+  }
+
   Future<void> _checkConnectionState({required String ipAddress}) async {
-    final connected =
-        await PrinterLabel.checkConnect(deviceId: DeviceId.lan(ipAddress));
-    setState(() {
-      isConnected = connected;
-    });
+    setState(() => isCheckingConnection = true);
+    try {
+      final connected =
+          await PrinterLabel.checkConnect(deviceId: DeviceId.lan(ipAddress));
+      setState(() {
+        isConnected = connected;
+      });
+
+      if (connected) {
+        // Tự động kiểm tra loại máy in (thử ESC trước, fallback TSPL)
+        var status = await PrinterLabel.checkPrinterStatus(
+          deviceId: DeviceId.lan(ipAddress),
+          type: "ESC",
+        );
+        if (status == PrinterStatus.unknown) {
+          status = await PrinterLabel.checkPrinterStatus(
+            deviceId: DeviceId.lan(ipAddress),
+            type: "TSPL",
+          );
+        }
+        if (!mounted) return;
+        context.showSnackBar(
+          'Trạng thái hoạt động máy in: ${status.name.toUpperCase()}',
+          backgroundColor: status == PrinterStatus.normal
+              ? const Color(0xFF10B981)
+              : const Color(0xFFF59E0B),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => isCheckingConnection = false);
+      }
+    }
   }
 
   Future<void> _printProductLabels(List<ProductBarcodeModel> items) async {
@@ -334,6 +403,9 @@ class _MyHomePageState extends State<MyHomePage>
             DevicesTab(
               isConnected: isConnected,
               isConnecting: isConnecting,
+              isCheckingStatus: isCheckingStatus,
+              isCheckingConnection: isCheckingConnection,
+              isPrinting: isPrinting,
               ipController: textEditingController,
               ipFocusNode: focusNode,
               connectedDevices: _connectedDevices,
@@ -372,6 +444,11 @@ class _MyHomePageState extends State<MyHomePage>
                 );
               },
               onPrintDeviceEsc: (device) => _printExampleESC(device.id),
+              onCheckPrinterStatus: isConnected
+                  ? () => _checkPrinterStatus(
+                        ipAddress: textEditingController.text,
+                      )
+                  : null,
               onOpenBluetoothPage: () {
                 Navigator.push(
                   context,

@@ -21,6 +21,17 @@ class PrinterLabel {
     return await _platform.checkConnect(deviceId: deviceId);
   }
 
+  /// Queries the operational status of a specific printer by its [deviceId].
+  ///
+  /// Specify [type] as either "TSPL" or "ESC" to check specific protocols.
+  /// Returns a [PrinterStatus] value.
+  static Future<PrinterStatus> checkPrinterStatus({
+    String? deviceId,
+    String? type,
+  }) async {
+    return await _platform.checkPrinterStatus(deviceId: deviceId, type: type);
+  }
+
   /// Gets a map of all currently active printer connections (only supported on Android).
   ///
   /// Returns a [Map] containing `deviceId` as keys and their connection states (`true`/`false`) as values.

@@ -27,6 +27,9 @@ import io.flutter.plugin.common.MethodChannel.Result
 import net.posprinter.IConnectListener
 import net.posprinter.IDeviceConnection
 import net.posprinter.POSConnect
+import net.posprinter.posprinterface.IStatusCallback
+import net.posprinter.POSConst
+import net.posprinter.POSPrinter
 import net.posprinter.TSPLConst
 import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
@@ -197,6 +200,89 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             "print_image_esc" -> {
                 val conn = resolveConn(call, result) ?: return
                 printThermal.printImageESC(call, conn, result)
+            }
+
+            "check_printer_status" -> {
+                val conn = resolveConn(call, result)
+                if (conn == null || !conn.isConnect) {
+                    result.success("offline")
+                    return
+                }
+                val type = call.argument<String>("type") ?: "TSPL"
+                val handler = Handler(Looper.getMainLooper())
+                var isDelivered = false
+
+                val timeoutRunnable = Runnable {
+                    if (!isDelivered) {
+                        isDelivered = true
+                        result.success("unknown")
+                    }
+                }
+                handler.postDelayed(timeoutRunnable, 2000)
+
+                if (type == "ESC") {
+                    try {
+                        val posPrinter = POSPrinter(conn)
+                        posPrinter.printerStatus { code ->
+                            if (!isDelivered) {
+                                isDelivered = true
+                                handler.removeCallbacks(timeoutRunnable)
+                                val status = when (code) {
+                                    0 -> "normal"
+                                    1 -> "headOpened" // Cover open
+                                    2 -> "paperJam"
+                                    4 -> "outOfPaper" // Paper empty
+                                    else -> "normal"
+                                }
+                                handler.post {
+                                    result.success(status)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (!isDelivered) {
+                            isDelivered = true
+                            handler.removeCallbacks(timeoutRunnable)
+                            result.success("normal")
+                        }
+                    }
+                } else {
+                    try {
+                        val tsplPrinter = TSPLPrinter(conn)
+                        tsplPrinter.printerStatus(1500) { code ->
+                            if (!isDelivered) {
+                                isDelivered = true
+                                handler.removeCallbacks(timeoutRunnable)
+                                val status = when (code) {
+                                    0 -> "normal"
+                                    1 -> "headOpened"
+                                    2 -> "paperJam"
+                                    3 -> "paperJam"
+                                    4 -> "outOfPaper"
+                                    5 -> "outOfPaper"
+                                    8 -> "outOfRibbon"
+                                    9 -> "outOfRibbon"
+                                    10 -> "outOfRibbon"
+                                    11 -> "outOfRibbon"
+                                    12 -> "outOfRibbon"
+                                    13 -> "outOfRibbon"
+                                    16 -> "pause"
+                                    32 -> "printing"
+                                    else -> "normal"
+                                }
+                                handler.post {
+                                    result.success(status)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (!isDelivered) {
+                            isDelivered = true
+                            handler.removeCallbacks(timeoutRunnable)
+                            result.success("normal")
+                        }
+                    }
+                }
             }
 
             "print_all" -> {

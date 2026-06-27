@@ -18,6 +18,7 @@ export 'src/enums/label_per_row_enum.dart';
 export 'src/enums/paper_size_enum.dart';
 export 'src/enums/printer_connection_type.dart';
 export 'src/enums/type_print_enum.dart';
+export 'src/enums/printer_status.dart';
 
 // Export components
 export 'src/component/barcode_view.dart';
