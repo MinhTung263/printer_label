@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
-
-import '../component/src.dart';
-import '../enums/enum.src.dart';
-import '../service/service.src.dart';
+import 'package:printer_label/printer_label.dart';
 
 class CupStickerExample {
   const CupStickerExample._();

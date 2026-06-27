@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'src.dart';
+import '../src.dart';
 
 PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
 

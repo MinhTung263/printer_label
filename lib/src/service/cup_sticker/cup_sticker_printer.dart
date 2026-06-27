@@ -2,7 +2,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-import '../src.dart';
+import '../../enums/enum.src.dart';
+import 'cup_sticker_printer_interface.dart';
 
 /// A specialized printer service for rendering and printing cup stickers/labels.
 class CupStickerPrinter {
@@ -14,26 +15,12 @@ class CupStickerPrinter {
     PrinterConnectionType? connectionType,
     required List<Uint8List> imageBytesList,
     required CupStickerSize size,
-  }) async {
-    final images = <Uint8List>[];
-
-    for (final bytes in imageBytesList) {
-      images.add(await resizeImage(imageBytes: bytes, size: size));
-    }
-
-    final model = LabelModel(
-      images: images,
-      labelPerRow: LabelPerRow.single.copyWith(
-        width: size.widthMm.toInt(),
-        height: size.heightMm.toInt(),
-        x: 0,
-        y: 0,
-      ),
-    );
-    await PrinterLabel.printLabel(
+  }) {
+    return CupStickerPrinterPlatform.instance.printSticker(
       deviceId: deviceId,
       connectionType: connectionType,
-      labelModel: model,
+      imageBytesList: imageBytesList,
+      size: size,
     );
   }
 
@@ -49,38 +36,15 @@ class CupStickerPrinter {
     double? paddingMm,
     String? deviceId,
     PrinterConnectionType? connectionType,
-  }) async {
-    final images = <Uint8List>[];
-
-    for (final widget in widgets) {
-      if (context != null && !context.mounted) return;
-      final bytes = await LabelFromWidget.captureFromWidget(
-        widget,
-        context: context,
-      );
-      final resized = await resizeImage(
-        imageBytes: bytes,
-        size: size,
-        paddingMm: paddingMm,
-      );
-      images.add(resized);
-    }
-
-    final widthMm = size.widthMm.toInt() + (widthOffsetMm ?? 0);
-    final model = LabelModel(
-      images: images,
-      labelPerRow: LabelPerRow.single.copyWith(
-        width: widthMm,
-        height: size.heightMm.toInt(),
-        x: 0,
-        y: 0,
-      ),
-    );
-
-    await PrinterLabel.printLabel(
+  }) {
+    return CupStickerPrinterPlatform.instance.printWithWidgets(
+      widgets: widgets,
+      context: context,
+      size: size,
+      widthOffsetMm: widthOffsetMm,
+      paddingMm: paddingMm,
       deviceId: deviceId,
       connectionType: connectionType,
-      labelModel: model,
     );
   }
 
@@ -91,11 +55,12 @@ class CupStickerPrinter {
     required CupStickerSize size,
     BuildContext? context,
     double? paddingMm,
-  }) async {
-    final raw = await LabelFromWidget.captureFromWidget(
-      widget,
+  }) {
+    return CupStickerPrinterPlatform.instance.captureSticker(
+      widget: widget,
+      size: size,
       context: context,
+      paddingMm: paddingMm,
     );
-    return resizeImage(imageBytes: raw, size: size, paddingMm: paddingMm);
   }
 }

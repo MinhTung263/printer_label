@@ -1,6 +1,6 @@
 library printer_label;
 
-export 'src/printer_label.dart';
+export 'src/platform/printer_label.dart';
 
 // Export models
 export 'src/models/barcode_model.dart';
@@ -24,10 +24,11 @@ export 'src/component/barcode_view.dart';
 export 'src/component/cup_sticker_view.dart';
 
 // Export services
-export 'src/service/cup_sticker_printer.dart';
-export 'src/service/label_from_widget.dart';
-export 'src/service/label_printer_service.dart';
-export 'src/service/esc_print_service.dart';
+export 'src/service/cup_sticker/cup_sticker_printer.dart';
+export 'src/service/cup_sticker/cup_sticker_printer_interface.dart';
+export 'src/service/label/label_from_widget.dart';
+export 'src/service/label/label_printer_service.dart';
+export 'src/service/label/label_printer_service_interface.dart';
+export 'src/service/esc/esc_print_service.dart';
+export 'src/service/esc/esc_print_service_interface.dart';
 
-// Export print examples
-export 'src/print_example/cup_sticker_example.dart';

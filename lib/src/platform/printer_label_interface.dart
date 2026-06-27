@@ -1,6 +1,6 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
-import 'src.dart';
+import '../src.dart';
 
 /// Abstract class defining the printer hardware communication APIs (TSPL and ESC/POS)
 /// between Dart/Flutter and Native SDKs (Android/iOS).

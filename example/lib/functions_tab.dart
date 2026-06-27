@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:example/cup_sticker_example.dart';
 import 'package:example/select_size.dart';
 import 'package:example/select_type_label.dart';
 import 'package:flutter/material.dart';

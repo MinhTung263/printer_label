@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:screenshot/screenshot.dart';
 
-import '../src.dart';
+import '../../src.dart';
 
 /// A helper utility service to convert Flutter widgets into rasterized image byte lists
 /// suitable for printing as labels or stickers.

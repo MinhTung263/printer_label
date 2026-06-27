@@ -1,6 +1,8 @@
-import 'package:flutter/services.dart';
+import 'dart:typed_data';
 
-import '../src.dart';
+import '../../enums/enum.src.dart';
+import '../../models/src.dart';
+import 'esc_print_service_interface.dart';
 
 /// A high-level helper service for thermal receipt printing using ESC/POS protocol.
 class ESCPrintService {
@@ -14,11 +16,11 @@ class ESCPrintService {
     String? deviceId,
     PrinterConnectionType? connectionType,
     required PrintThermalModel model,
-  }) async {
-    await PrinterLabel.printESC(
+  }) {
+    return ESCPrintServicePlatform.instance.print(
       deviceId: deviceId,
       connectionType: connectionType,
-      printThermalModel: model,
+      model: model,
     );
   }
 
@@ -26,19 +28,15 @@ class ESCPrintService {
   Future<void> printExample({
     String? deviceId,
     PrinterConnectionType? connectionType,
-  }) async {
-    final image =
-        await loadImageFromAssets("packages/printer_label/images/ticket.png");
-    await PrinterLabel.printESC(
+  }) {
+    return ESCPrintServicePlatform.instance.printExample(
       deviceId: deviceId,
       connectionType: connectionType,
-      printThermalModel: PrintThermalModel(image: image, size: TicketSize.mm58),
     );
   }
 
   /// Utility helper to load raw image bytes from asset bundles.
-  Future<Uint8List> loadImageFromAssets(String path) async {
-    final byteData = await rootBundle.load(path);
-    return byteData.buffer.asUint8List();
+  Future<Uint8List> loadImageFromAssets(String path) {
+    return ESCPrintServicePlatform.instance.loadImageFromAssets(path);
   }
 }

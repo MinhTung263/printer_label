@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import 'src.dart';
+import '../src.dart';
 
 /// Implementation of the printer communication protocol using [MethodChannel] and [EventChannel].
 class MethodChannelPrinterLabel extends PrinterLabelPlatform {
