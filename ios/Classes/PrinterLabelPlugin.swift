@@ -153,6 +153,48 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 return
             }
             printLabel(args: args, result: result)
+            
+        case "print_text":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printText(args: args, result: result)
+            
+        case "print_text_esc":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printTextESC(args: args, result: result)
+
+        case "print_barcode":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printBarcode(args: args, result: result)
+
+        case "print_qrcode":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printQRCode(args: args, result: result)
+
+        case "print_barcode_esc":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printBarcodeESC(args: args, result: result)
+
+        case "print_qrcode_esc":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printQRCodeESC(args: args, result: result)
 
         // MARK: Print Image (TSPL)
         case "print_image":
@@ -331,6 +373,220 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
         }
         result(true)
+    }
+
+    func printText(args: [String: Any], result: @escaping FlutterResult) {
+        let text = args["text"] as? String ?? ""
+        let startX = args["x"] as? Int ?? 0
+        let startY = args["y"] as? Int ?? 0
+        let fontVal = args["font"] as? Int ?? 0
+        let rotationVal = args["rotation"] as? Int ?? 0
+        let sizeX = args["sizeX"] as? Int ?? 1
+        let sizeY = args["sizeY"] as? Int ?? 1
+        
+        let labelWidthMM = args["width"] as? Int ?? 40
+        let labelHeightMM = args["height"] as? Int ?? 30
+        
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let cmd = PTCommandTSPL()
+        cmd.encoding = String.Encoding.utf8.rawValue
+        cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
+        cmd.setGapWithDistance(1, offset: 0)
+        cmd.setCLS()
+        
+        let fontStyle = PTTSCTextFontStyle(rawValue: UInt(fontVal)) ?? PTTSCTextFontStyle(rawValue: 0)!
+        let rotation = PTTSCStyleRotation(rawValue: UInt(rotationVal)) ?? PTTSCStyleRotation(rawValue: 0)!
+        
+        cmd.appendText(
+            withXpos: startX,
+            yPos: startY,
+            font: fontStyle,
+            rotation: rotation,
+            xMultiplication: sizeX,
+            yMultiplication: sizeY,
+            text: text
+        )
+        
+        cmd.print(withSets: 1, copies: 1)
+        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+        result(true)
+    }
+
+    func printTextESC(args: [String: Any], result: @escaping FlutterResult) {
+        let text = args["text"] as? String ?? ""
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let esc = PTCommandESC()
+        esc.initCommandQueue()
+        esc.appendZeroData()
+        esc.appendText(text)
+        esc.printAndLineFeed()
+        esc.setFullCutWithDistance(1)
+
+        let data = esc.getCommandData() as Data?
+        if let printData = data {
+            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
+            result(true)
+        } else {
+            result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC text command", details: nil))
+        }
+    }
+
+    func printBarcode(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let startX = args["x"] as? Int ?? 0
+        let startY = args["y"] as? Int ?? 0
+        let height = args["height"] as? Int ?? 100
+        let typeVal = args["type"] as? String ?? "128"
+        let width = args["width"] as? Int ?? 40
+        let heightMM = args["heightMM"] as? Int ?? 30
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let cmd = PTCommandTSPL()
+        cmd.encoding = String.Encoding.utf8.rawValue
+        cmd.setPrintAreaSizeWithWidth(width, height: heightMM)
+        cmd.setGapWithDistance(1, offset: 0)
+        cmd.setCLS()
+
+        let typeInt: Int = {
+            switch typeVal {
+            case "39": return 5
+            case "93": return 7
+            case "128": return 0
+            case "EAN13": return 8
+            case "EAN8": return 11
+            case "UPCA": return 16
+            case "UPCE": return 17
+            default: return 0
+            }
+        }()
+
+        let barcodeType = PTTSCBarcodeStyle(rawValue: UInt(typeInt)) ?? PTTSCBarcodeStyle(rawValue: 0)!
+        let readable = PTTSCBarcodeReadbleStyle(rawValue: 1) ?? PTTSCBarcodeReadbleStyle(rawValue: 1)!
+        let rotation = PTTSCStyleRotation(rawValue: 0) ?? PTTSCStyleRotation(rawValue: 0)!
+        let ratio = PTTSCBarcodeRatio(rawValue: 2) ?? PTTSCBarcodeRatio(rawValue: 2)!
+
+        cmd.printBarcode(
+            withXPos: startX,
+            yPos: startY,
+            type: barcodeType,
+            height: height,
+            readable: readable,
+            rotation: rotation,
+            ratio: ratio,
+            context: code
+        )
+
+        cmd.print(withSets: 1, copies: 1)
+        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+        result(true)
+    }
+
+    func printQRCode(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let startX = args["x"] as? Int ?? 0
+        let startY = args["y"] as? Int ?? 0
+        let size = args["size"] as? Int ?? 4
+        let width = args["width"] as? Int ?? 40
+        let heightMM = args["heightMM"] as? Int ?? 30
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let cmd = PTCommandTSPL()
+        cmd.encoding = String.Encoding.utf8.rawValue
+        cmd.setPrintAreaSizeWithWidth(width, height: heightMM)
+        cmd.setGapWithDistance(1, offset: 0)
+        cmd.setCLS()
+
+        let ecc = PTTSCQRcodeEcclevel(rawValue: 76) ?? PTTSCQRcodeEcclevel(rawValue: 76)!
+        let widthQR = PTTSCQRcodeWidth(rawValue: UInt(size)) ?? PTTSCQRcodeWidth(rawValue: 4)!
+        let mode = PTTSCQRCodeMode(rawValue: 77) ?? PTTSCQRCodeMode(rawValue: 77)!
+        let rotation = PTTSCStyleRotation(rawValue: 0) ?? PTTSCStyleRotation(rawValue: 0)!
+        let model = PTTSCQRCodeModel(rawValue: 1) ?? PTTSCQRCodeModel(rawValue: 1)!
+        let mask = PTTSCQRcodeMask(rawValue: 8) ?? PTTSCQRcodeMask(rawValue: 8)!
+
+        cmd.printQRcode(
+            withXPos: startX,
+            yPos: startY,
+            eccLevel: ecc,
+            cellWidth: widthQR,
+            mode: mode,
+            rotation: rotation,
+            model: model,
+            mask: mask,
+            context: code
+        )
+
+        cmd.print(withSets: 1, copies: 1)
+        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+        result(true)
+    }
+
+    func printBarcodeESC(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let typeVal = args["type"] as? String ?? "128"
+        let width = args["width"] as? Int ?? 2
+        let height = args["height"] as? Int ?? 162
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let esc = PTCommandESC()
+        esc.initCommandQueue()
+        esc.appendZeroData()
+
+        let typeInt: Int = {
+            switch typeVal {
+            case "UPCA": return 65
+            case "UPCE": return 66
+            case "EAN13": return 67
+            case "EAN8": return 68
+            case "CODE39": return 69
+            case "ITF": return 70
+            case "CODEBAR": return 71
+            case "CODE93": return 72
+            default: return 73
+            }
+        }()
+
+        let barcodeType = ESCBarcode(rawValue: typeInt) ?? ESCBarcode(rawValue: 73)!
+        esc.append(barcodeType, data: code, justification: 1, width: width, height: height, hri: 2)
+        esc.printAndLineFeed()
+        esc.setFullCutWithDistance(1)
+
+        let data = esc.getCommandData() as Data?
+        if let printData = data {
+            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
+            result(true)
+        } else {
+            result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC barcode command", details: nil))
+        }
+    }
+
+    func printQRCodeESC(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let size = args["size"] as? Int ?? 8
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let esc = PTCommandESC()
+        esc.initCommandQueue()
+        esc.appendZeroData()
+
+        esc.appendQRCodeData(code, justification: 1, leftMargin: 0, eccLevel: 48, model: 49, size: size)
+        esc.printAndLineFeed()
+        esc.setFullCutWithDistance(1)
+
+        let data = esc.getCommandData() as Data?
+        if let printData = data {
+            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
+            result(true)
+        } else {
+            result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC QR code command", details: nil))
+        }
     }
 
     func printImage(args: [String: Any], result: @escaping FlutterResult) {

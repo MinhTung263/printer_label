@@ -11,7 +11,13 @@ enum PrinterMethod {
   printImage('print_image'),
   printImageEsc('print_image_esc'),
   printAll('print_all'),
-  bluetoothEnabled('bluetooth_enabled');
+  bluetoothEnabled('bluetooth_enabled'),
+  printText('print_text'),
+  printTextESC('print_text_esc'),
+  printBarcode('print_barcode'),
+  printQRCode('print_qrcode'),
+  printBarcodeESC('print_barcode_esc'),
+  printQRCodeESC('print_qrcode_esc');
 
   const PrinterMethod(this.value);
   final String value;

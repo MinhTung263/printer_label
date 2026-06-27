@@ -63,6 +63,7 @@ class _MyHomePageState extends State<MyHomePage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool isConnected = false;
+  bool isConnecting = false;
 
   final TextEditingController textEditingController =
       TextEditingController(text: "192.168.1.56");
@@ -232,7 +233,7 @@ class _MyHomePageState extends State<MyHomePage>
           backgroundColor: Colors.amber[800]!);
       return;
     }
-    final image = await ESCPrintService.instance.loadImageFromAssets(
+    final image = await _loadImageFromAssets(
       "packages/printer_label/images/ticket.png",
     );
     await PrinterLabel.printAll(
@@ -248,9 +249,9 @@ class _MyHomePageState extends State<MyHomePage>
     });
   }
 
-  Future<void> _printProductLabels() async {
+  Future<void> _printProductLabels(List<ProductBarcodeModel> items) async {
     await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
-      items: products,
+      items: items,
       context: context,
       deviceId: DeviceId.lan(textEditingController.text),
       labelPerRow: _selectedRow,
@@ -263,33 +264,38 @@ class _MyHomePageState extends State<MyHomePage>
     final input = textEditingController.text.replaceAll(',', '.').trim();
     if (input.isEmpty) return;
 
-    final bool alreadyConnected = await PrinterLabel.checkConnect(
-      deviceId: DeviceId.lan(input),
-    );
-    if (!mounted) return;
-    if (alreadyConnected) {
-      context.showSnackBar('Thiết bị LAN $input đã kết nối từ trước',
-          backgroundColor: Colors.amber[800]!);
-      return;
-    }
-
-    final bool ok = await PrinterLabel.connectLan(ipAddress: input);
-    if (!mounted) return;
-    setState(() {
-      isConnected = ok;
-      if (ok) {
-        _addConnectedDevice(ConnectedDevice(
-          id: DeviceId.lan(input),
-          label: 'LAN: $input',
-          type: 'LAN',
-        ));
+    setState(() => isConnecting = true);
+    try {
+      final bool alreadyConnected = await PrinterLabel.checkConnect(
+        deviceId: DeviceId.lan(input),
+      );
+      if (!mounted) return;
+      if (alreadyConnected) {
+        context.showSnackBar('Thiết bị LAN $input đã kết nối từ trước',
+            backgroundColor: Colors.amber[800]!);
+        return;
       }
-    });
-    focusNode.unfocus();
-    context.showSnackBar(
-      ok ? 'Kết nối LAN thành công: $input' : 'Kết nối LAN thất bại',
-      backgroundColor: ok ? const Color(0xFF10B981) : const Color(0xFFF43F5E),
-    );
+
+      final bool ok = await PrinterLabel.connectLan(ipAddress: input);
+      if (!mounted) return;
+      setState(() {
+        isConnected = ok;
+        if (ok) {
+          _addConnectedDevice(ConnectedDevice(
+            id: DeviceId.lan(input),
+            label: 'LAN: $input',
+            type: 'LAN',
+          ));
+        }
+      });
+      focusNode.unfocus();
+      context.showSnackBar(
+        ok ? 'Kết nối LAN thành công: $input' : 'Kết nối LAN thất bại',
+        backgroundColor: ok ? const Color(0xFF10B981) : const Color(0xFFF43F5E),
+      );
+    } finally {
+      if (mounted) setState(() => isConnecting = false);
+    }
   }
 
   @override
@@ -327,6 +333,7 @@ class _MyHomePageState extends State<MyHomePage>
           children: [
             DevicesTab(
               isConnected: isConnected,
+              isConnecting: isConnecting,
               ipController: textEditingController,
               ipFocusNode: focusNode,
               connectedDevices: _connectedDevices,
@@ -364,10 +371,7 @@ class _MyHomePageState extends State<MyHomePage>
                   quantity: (p) => p.quantity,
                 );
               },
-              onPrintDeviceEsc: (device) async {
-                await ESCPrintService.instance
-                    .printExample(deviceId: device.id);
-              },
+              onPrintDeviceEsc: (device) => _printExampleESC(device.id),
               onOpenBluetoothPage: () {
                 Navigator.push(
                   context,
@@ -391,6 +395,19 @@ class _MyHomePageState extends State<MyHomePage>
           ],
         ),
       ),
+    );
+  }
+
+  Future<Uint8List> _loadImageFromAssets(String path) async {
+    final byteData = await DefaultAssetBundle.of(context).load(path);
+    return byteData.buffer.asUint8List();
+  }
+
+  Future<void> _printExampleESC(String deviceId) async {
+    final image = await _loadImageFromAssets("packages/printer_label/images/ticket.png");
+    await ESCPrintService.instance.print(
+      deviceId: deviceId,
+      model: PrintThermalModel(image: image, size: TicketSize.mm58),
     );
   }
 }

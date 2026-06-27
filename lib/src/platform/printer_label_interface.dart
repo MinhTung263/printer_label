@@ -109,4 +109,69 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   /// Stream emitting USB connection events (attach/detach) for USB printers (Android only).
   Stream<UsbConnectionEvent> get usbDeviceStream;
+
+  /// Prints raw text directly using TSPL printer commands.
+  Future<void> printText({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+    int x = 0,
+    int y = 0,
+    int font = 0,
+    int rotation = 0,
+    int sizeX = 1,
+    int sizeY = 1,
+    int width = 40,
+    int height = 30,
+  });
+
+  /// Prints raw text directly using ESC/POS printer commands.
+  Future<void> printTextESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+  });
+
+  /// Prints raw barcode directly using TSPL printer commands.
+  Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int height = 100,
+    String type = "128",
+    int width = 40,
+    int heightMM = 30,
+  });
+
+  /// Prints raw QR code directly using TSPL printer commands.
+  Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int size = 4,
+    int width = 40,
+    int heightMM = 30,
+  });
+
+  /// Prints raw barcode directly using ESC/POS printer commands.
+  Future<void> printBarcodeESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    String type = "128",
+    int width = 2,
+    int height = 162,
+  });
+
+  /// Prints raw QR code directly using ESC/POS printer commands.
+  Future<void> printQRCodeESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int size = 8,
+  });
 }

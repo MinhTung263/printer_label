@@ -1,4 +1,3 @@
-import 'package:flutter/services.dart';
 import '../../enums/enum.src.dart';
 import '../../models/src.dart';
 import '../../platform/printer_label.dart';
@@ -18,22 +17,52 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
     );
   }
 
+
+
   @override
-  Future<void> printExample({
+  Future<void> printText({
     String? deviceId,
     PrinterConnectionType? connectionType,
-  }) async {
-    final image = await loadImageFromAssets("packages/printer_label/images/ticket.png");
-    await PrinterLabel.printESC(
+    required String text,
+  }) {
+    return PrinterLabel.printTextESC(
       deviceId: deviceId,
       connectionType: connectionType,
-      printThermalModel: PrintThermalModel(image: image, size: TicketSize.mm58),
+      text: text,
     );
   }
 
   @override
-  Future<Uint8List> loadImageFromAssets(String path) async {
-    final byteData = await rootBundle.load(path);
-    return byteData.buffer.asUint8List();
+  Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    String type = "128",
+    int width = 2,
+    int height = 162,
+  }) {
+    return PrinterLabel.printBarcodeESC(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      type: type,
+      width: width,
+      height: height,
+    );
+  }
+
+  @override
+  Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int size = 8,
+  }) {
+    return PrinterLabel.printQRCodeESC(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      size: size,
+    );
   }
 }

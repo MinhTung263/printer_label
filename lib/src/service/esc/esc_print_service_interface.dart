@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import '../../enums/enum.src.dart';
 import '../../models/src.dart';
@@ -24,10 +23,27 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
     required PrintThermalModel model,
   });
 
-  Future<void> printExample({
+
+
+  Future<void> printText({
     String? deviceId,
     PrinterConnectionType? connectionType,
+    required String text,
   });
 
-  Future<Uint8List> loadImageFromAssets(String path);
+  Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    String type = "128",
+    int width = 2,
+    int height = 162,
+  });
+
+  Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int size = 8,
+  });
 }

@@ -26,4 +26,41 @@ abstract class LabelPrintServicePlatform extends PlatformInterface {
     required Widget Function(T item, Dimensions dimensions) itemBuilder,
     required int Function(T item) quantity,
   });
+
+  Future<void> printText({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+    int x = 0,
+    int y = 0,
+    int font = 0,
+    int rotation = 0,
+    int sizeX = 1,
+    int sizeY = 1,
+    int width = 40,
+    int height = 30,
+  });
+
+  Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int height = 100,
+    String type = "128",
+    int width = 40,
+    int heightMM = 30,
+  });
+
+  Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int size = 4,
+    int width = 40,
+    int heightMM = 30,
+  });
 }

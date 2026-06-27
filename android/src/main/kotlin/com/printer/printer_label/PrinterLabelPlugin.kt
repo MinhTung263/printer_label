@@ -163,6 +163,36 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 printLabel(call, conn, result)
             }
 
+            "print_text" -> {
+                val conn = resolveConn(call, result) ?: return
+                printText(call, conn, result)
+            }
+
+            "print_text_esc" -> {
+                val conn = resolveConn(call, result) ?: return
+                printThermal.printTextESC(call, conn, result)
+            }
+
+            "print_barcode" -> {
+                val conn = resolveConn(call, result) ?: return
+                printBarcode(call, conn, result)
+            }
+
+            "print_qrcode" -> {
+                val conn = resolveConn(call, result) ?: return
+                printQRCode(call, conn, result)
+            }
+
+            "print_barcode_esc" -> {
+                val conn = resolveConn(call, result) ?: return
+                printThermal.printBarcodeESC(call, conn, result)
+            }
+
+            "print_qrcode_esc" -> {
+                val conn = resolveConn(call, result) ?: return
+                printThermal.printQRCodeESC(call, conn, result)
+            }
+
 
             "print_image_esc" -> {
                 val conn = resolveConn(call, result) ?: return
@@ -604,6 +634,93 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     )
                     .print(1)
             }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("PRINT_ERROR", e.message, null)
+        }
+    }
+
+    private fun printText(call: MethodCall, conn: IDeviceConnection, result: Result) {
+        try {
+            val text = call.argument<String>("text") ?: ""
+            val x = call.argument<Int>("x") ?: 0
+            val y = call.argument<Int>("y") ?: 0
+            val fontVal = call.argument<Int>("font") ?: 0
+            val rotationVal = call.argument<Int>("rotation") ?: 0
+            val sizeX = call.argument<Int>("sizeX") ?: 1
+            val sizeY = call.argument<Int>("sizeY") ?: 1
+
+            val fontStr = when (fontVal) {
+                1 -> "1"
+                else -> "3"
+            }
+
+            val rotationStr = when (rotationVal) {
+                90 -> TSPLConst.ROTATION_90
+                180 -> TSPLConst.ROTATION_180
+                270 -> TSPLConst.ROTATION_270
+                else -> TSPLConst.ROTATION_0
+            }
+
+            val sizeWidth = call.argument<Int>("width") ?: 40
+            val sizeHeight = call.argument<Int>("height") ?: 30
+
+            val printer = TSPLPrinter(conn)
+            printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
+                .cls()
+                .text(x, y, fontStr, rotationStr, sizeX, sizeY, text)
+                .print(1)
+
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("PRINT_ERROR", e.message, null)
+        }
+    }
+
+    private fun printBarcode(call: MethodCall, conn: IDeviceConnection, result: Result) {
+        try {
+            val code = call.argument<String>("code") ?: ""
+            val x = call.argument<Int>("x") ?: 0
+            val y = call.argument<Int>("y") ?: 0
+            val height = call.argument<Int>("height") ?: 100
+            val typeVal = call.argument<String>("type") ?: "128"
+            val width = call.argument<Int>("width") ?: 40
+            val heightMM = call.argument<Int>("heightMM") ?: 30
+
+            val barcodeType = when (typeVal) {
+                "39" -> TSPLConst.CODE_TYPE_39
+                "93" -> TSPLConst.CODE_TYPE_93
+                "128" -> TSPLConst.CODE_TYPE_128
+                else -> typeVal
+            }
+
+            val printer = TSPLPrinter(conn)
+            printer.sizeMm(width.toDouble(), heightMM.toDouble())
+                .cls()
+                .barcode(x, y, barcodeType, height, TSPLConst.READABLE_LEFT, TSPLConst.ROTATION_0, 2, 2, code)
+                .print(1)
+
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("PRINT_ERROR", e.message, null)
+        }
+    }
+
+    private fun printQRCode(call: MethodCall, conn: IDeviceConnection, result: Result) {
+        try {
+            val code = call.argument<String>("code") ?: ""
+            val x = call.argument<Int>("x") ?: 0
+            val y = call.argument<Int>("y") ?: 0
+            val size = call.argument<Int>("size") ?: 4
+            val width = call.argument<Int>("width") ?: 40
+            val heightMM = call.argument<Int>("heightMM") ?: 30
+
+            val printer = TSPLPrinter(conn)
+            printer.sizeMm(width.toDouble(), heightMM.toDouble())
+                .cls()
+                .qrcode(x, y, TSPLConst.EC_LEVEL_L, size, TSPLConst.QRCODE_MODE_MANUAL, TSPLConst.ROTATION_0, code)
+                .print(1)
+
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)

@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import '../../enums/enum.src.dart';
 import '../../models/src.dart';
 import 'esc_print_service_interface.dart';
@@ -24,19 +22,52 @@ class ESCPrintService {
     );
   }
 
-  /// Prints a sample receipt template for test purposes.
-  Future<void> printExample({
+
+
+  /// Prints raw text directly using ESC/POS printer commands.
+  Future<void> printText({
     String? deviceId,
     PrinterConnectionType? connectionType,
+    required String text,
   }) {
-    return ESCPrintServicePlatform.instance.printExample(
+    return ESCPrintServicePlatform.instance.printText(
       deviceId: deviceId,
       connectionType: connectionType,
+      text: text,
     );
   }
 
-  /// Utility helper to load raw image bytes from asset bundles.
-  Future<Uint8List> loadImageFromAssets(String path) {
-    return ESCPrintServicePlatform.instance.loadImageFromAssets(path);
+  /// Prints a raw 1D barcode directly using ESC/POS printer commands.
+  Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    String type = "128",
+    int width = 2,
+    int height = 162,
+  }) {
+    return ESCPrintServicePlatform.instance.printBarcode(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      type: type,
+      width: width,
+      height: height,
+    );
+  }
+
+  /// Prints a raw QR code directly using ESC/POS printer commands.
+  Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int size = 8,
+  }) {
+    return ESCPrintServicePlatform.instance.printQRCode(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      size: size,
+    );
   }
 }

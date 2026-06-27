@@ -162,4 +162,128 @@ class PrinterLabel {
   /// Stream emitting USB connection events (attach/detach) for USB printers (Android only).
   static Stream<UsbConnectionEvent> get usbDeviceStream =>
       _platform.usbDeviceStream;
+
+  /// Prints raw text directly using TSPL printer commands.
+  static Future<void> printText({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+    int x = 0,
+    int y = 0,
+    int font = 0,
+    int rotation = 0,
+    int sizeX = 1,
+    int sizeY = 1,
+    int width = 40,
+    int height = 30,
+  }) {
+    return _platform.printText(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      text: text,
+      x: x,
+      y: y,
+      font: font,
+      rotation: rotation,
+      sizeX: sizeX,
+      sizeY: sizeY,
+      width: width,
+      height: height,
+    );
+  }
+
+  /// Prints raw text directly using ESC/POS printer commands.
+  static Future<void> printTextESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+  }) {
+    return _platform.printTextESC(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      text: text,
+    );
+  }
+
+  /// Prints raw barcode directly using TSPL printer commands.
+  static Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int height = 100,
+    String type = "128",
+    int width = 40,
+    int heightMM = 30,
+  }) {
+    return _platform.printBarcode(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      x: x,
+      y: y,
+      height: height,
+      type: type,
+      width: width,
+      heightMM: heightMM,
+    );
+  }
+
+  /// Prints raw QR code directly using TSPL printer commands.
+  static Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int size = 4,
+    int width = 40,
+    int heightMM = 30,
+  }) {
+    return _platform.printQRCode(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      x: x,
+      y: y,
+      size: size,
+      width: width,
+      heightMM: heightMM,
+    );
+  }
+
+  /// Prints raw barcode directly using ESC/POS printer commands.
+  static Future<void> printBarcodeESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    String type = "128",
+    int width = 2,
+    int height = 162,
+  }) {
+    return _platform.printBarcodeESC(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      type: type,
+      width: width,
+      height: height,
+    );
+  }
+
+  /// Prints raw QR code directly using ESC/POS printer commands.
+  static Future<void> printQRCodeESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int size = 8,
+  }) {
+    return _platform.printQRCodeESC(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      size: size,
+    );
+  }
 }

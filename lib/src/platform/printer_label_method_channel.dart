@@ -202,4 +202,134 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     });
     return _usbDeviceStream!;
   }
+
+  @override
+  Future<void> printText({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+    int x = 0,
+    int y = 0,
+    int font = 0,
+    int rotation = 0,
+    int sizeX = 1,
+    int sizeY = 1,
+    int width = 40,
+    int height = 30,
+  }) async {
+    final data = {
+      "text": text,
+      "x": x,
+      "y": y,
+      "font": font,
+      "rotation": rotation,
+      "sizeX": sizeX,
+      "sizeY": sizeY,
+      "width": width,
+      "height": height,
+      if (deviceId != null) "device_id": deviceId,
+      if (connectionType != null) "connection_type": connectionType.value,
+    };
+    await _channel.invokeMethod<void>(PrinterMethod.printText.value, data);
+  }
+
+  @override
+  Future<void> printTextESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+  }) async {
+    final data = {
+      "text": text,
+      if (deviceId != null) "device_id": deviceId,
+      if (connectionType != null) "connection_type": connectionType.value,
+    };
+    await _channel.invokeMethod<void>(PrinterMethod.printTextESC.value, data);
+  }
+
+  @override
+  Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int height = 100,
+    String type = "128",
+    int width = 40,
+    int heightMM = 30,
+  }) async {
+    final data = {
+      "code": code,
+      "x": x,
+      "y": y,
+      "height": height,
+      "type": type,
+      "width": width,
+      "heightMM": heightMM,
+      if (deviceId != null) "device_id": deviceId,
+      if (connectionType != null) "connection_type": connectionType.value,
+    };
+    await _channel.invokeMethod<void>(PrinterMethod.printBarcode.value, data);
+  }
+
+  @override
+  Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int size = 4,
+    int width = 40,
+    int heightMM = 30,
+  }) async {
+    final data = {
+      "code": code,
+      "x": x,
+      "y": y,
+      "size": size,
+      "width": width,
+      "heightMM": heightMM,
+      if (deviceId != null) "device_id": deviceId,
+      if (connectionType != null) "connection_type": connectionType.value,
+    };
+    await _channel.invokeMethod<void>(PrinterMethod.printQRCode.value, data);
+  }
+
+  @override
+  Future<void> printBarcodeESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    String type = "128",
+    int width = 2,
+    int height = 162,
+  }) async {
+    final data = {
+      "code": code,
+      "type": type,
+      "width": width,
+      "height": height,
+      if (deviceId != null) "device_id": deviceId,
+      if (connectionType != null) "connection_type": connectionType.value,
+    };
+    await _channel.invokeMethod<void>(PrinterMethod.printBarcodeESC.value, data);
+  }
+
+  @override
+  Future<void> printQRCodeESC({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int size = 8,
+  }) async {
+    final data = {
+      "code": code,
+      "size": size,
+      if (deviceId != null) "device_id": deviceId,
+      if (connectionType != null) "connection_type": connectionType.value,
+    };
+    await _channel.invokeMethod<void>(PrinterMethod.printQRCodeESC.value, data);
+  }
 }

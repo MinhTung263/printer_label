@@ -5,6 +5,7 @@ enum PrintAction { lan, all, esc }
 
 class DevicesTab extends StatelessWidget {
   final bool isConnected;
+  final bool isConnecting;
   final TextEditingController ipController;
   final FocusNode ipFocusNode;
   final List<ConnectedDevice> connectedDevices;
@@ -23,6 +24,7 @@ class DevicesTab extends StatelessWidget {
   const DevicesTab({
     super.key,
     required this.isConnected,
+    this.isConnecting = false,
     required this.ipController,
     required this.ipFocusNode,
     required this.connectedDevices,
@@ -142,9 +144,18 @@ class DevicesTab extends StatelessWidget {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: onConnect,
-                    icon: const Icon(Icons.link),
-                    label: const Text("Kết nối"),
+                    onPressed: isConnecting ? null : onConnect,
+                    icon: isConnecting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.link),
+                    label: Text(isConnecting ? "Đang kết nối..." : "Kết nối"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4F46E5),
                       foregroundColor: Colors.white,

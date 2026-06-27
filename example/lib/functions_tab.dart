@@ -10,7 +10,7 @@ class FunctionsTab extends StatefulWidget {
   final List<ProductBarcodeModel> products;
   final LabelPerRow selectedRow;
   final ValueChanged<LabelPerRow> onLabelPerRowChanged;
-  final VoidCallback onPrintLabels;
+  final Function(List<ProductBarcodeModel> filteredProducts) onPrintLabels;
   final String ipAddress;
 
   const FunctionsTab({
@@ -36,6 +36,8 @@ class _FunctionsTabState extends State<FunctionsTab>
   bool _labelPreviewLoading = false;
   int _previewProductCount = 1;
   int _previewCupCount = 1;
+  bool _isPrintingLabel = false;
+  bool _isPrintingEsc = false;
 
   // Mirrors the exact data used by CupStickerExample.printOrderCupSticker
   static final _cupSampleData = [
@@ -160,7 +162,7 @@ class _FunctionsTabState extends State<FunctionsTab>
       children: [
         Expanded(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -171,11 +173,11 @@ class _FunctionsTabState extends State<FunctionsTab>
                   subtitle:
                       'Tạo nhãn sản phẩm từ widget rồi gửi lệnh TSPL đến máy in.',
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
                 // ─── Preview ───
                 if (_labelPreviewLoading)
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
+                    padding: EdgeInsets.symmetric(vertical: 24),
                     child: Center(
                         child: CircularProgressIndicator(strokeWidth: 2)),
                   )
@@ -186,7 +188,7 @@ class _FunctionsTabState extends State<FunctionsTab>
                   )
                 else
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
+                    padding: EdgeInsets.symmetric(vertical: 16),
                     child: Center(
                       child:
                           Icon(Icons.image_not_supported, color: Colors.grey),
@@ -210,102 +212,181 @@ class _FunctionsTabState extends State<FunctionsTab>
               ),
             ],
           ),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
             children: [
-              Center(
-                child: Text(
-                  '${widget.selectedRow.title} • ${_labelPreviews.length} tờ',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              // Quy cách
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: LabelPerRowSelector(
+                  value: widget.selectedRow,
+                  onChanged: widget.onLabelPerRowChanged,
                 ),
               ),
-              const SizedBox(height: 12),
-              // Quy cách
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Quy cách in:',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
+              const SizedBox(width: 8),
+              // Số sản phẩm
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: _previewProductCount,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w500,
                     ),
-                    child: LabelPerRowSelector(
-                      value: widget.selectedRow,
-                      onChanged: widget.onLabelPerRowChanged,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              // Số sản phẩm xem trước
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Số sản phẩm xem:',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        value: _previewProductCount,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Colors.black87,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: 1,
-                            child: Text('1 sản phẩm'),
-                          ),
-                          if (widget.products.length > 1)
-                            const DropdownMenuItem(
-                              value: 2,
-                              child: Text('2 sản phẩm'),
-                            ),
-                          DropdownMenuItem(
-                            value: widget.products.length,
-                            child: const Text('Tất cả sản phẩm'),
-                          ),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() => _previewProductCount = val);
-                            _refreshLabelPreview();
-                          }
-                        },
+                    items: [
+                      const DropdownMenuItem(
+                        value: 1,
+                        child: Text('1 SP'),
                       ),
-                    ),
+                      if (widget.products.length > 1)
+                        const DropdownMenuItem(
+                          value: 2,
+                          child: Text('2 SP'),
+                        ),
+                      DropdownMenuItem(
+                        value: widget.products.length,
+                        child: const Text('Tất cả'),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() => _previewProductCount = val);
+                        _refreshLabelPreview();
+                      }
+                    },
                   ),
-                ],
+                ),
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
+              const SizedBox(width: 8),
+              // Nút In nhãn
+              Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: widget.onPrintLabels,
-                  icon: const Icon(Icons.print),
-                  label: const Text('In nhãn'),
+                  onPressed: _isPrintingLabel
+                      ? null
+                      : () => _printLabels(
+                            widget.products
+                                .take(_previewProductCount)
+                                .toList(),
+                          ),
+                  icon: _isPrintingLabel
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.print, size: 16),
+                  label: Text(
+                    _isPrintingLabel
+                        ? 'Đang in...'
+                        : 'In nhãn  •  ${_labelPreviews.length} tờ',
+                    style: const TextStyle(fontSize: 13),
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF4F46E5),
                     foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                 ),
+              ),
+            ],
+          ),
+        ),
+        // ─── Raw print section (dev) ─────────────────────────────────────────
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.blue.shade50,
+            border: Border(
+              top: BorderSide(color: Colors.blue.shade200, width: 1),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.developer_mode_rounded,
+                      size: 14, color: Colors.blue.shade700),
+                  const SizedBox(width: 6),
+                  Text(
+                    'In thô TSPL (dev)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      color: Colors.blue.shade700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _printRawTextLabel(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('In Text',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _printRawBarcodeLabel(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('In Barcode',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _printRawQRCodeLabel(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('In QR',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -375,13 +456,22 @@ class _FunctionsTabState extends State<FunctionsTab>
           child: SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () async {
-                await ESCPrintService.instance.printExample(
-                  deviceId: DeviceId.lan(widget.ipAddress),
-                );
-              },
-              icon: const Icon(Icons.print),
-              label: const Text('In thử hoá đơn ESC'),
+              onPressed: _isPrintingEsc
+                  ? null
+                  : () => _printExampleWithLoading(widget.ipAddress),
+              icon: _isPrintingEsc
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.print),
+              label: Text(
+                  _isPrintingEsc ? 'Đang in...' : 'In thử hoá đơn ESC'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF6366F1),
                 foregroundColor: Colors.white,
@@ -392,7 +482,121 @@ class _FunctionsTabState extends State<FunctionsTab>
             ),
           ),
         ),
+        // ─── Raw print section (dev) ───────────────────────────────────────
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.indigo.shade50,
+            border: Border(
+              top: BorderSide(color: Colors.indigo.shade200, width: 1),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.developer_mode_rounded,
+                      size: 14, color: Colors.indigo.shade700),
+                  const SizedBox(width: 6),
+                  Text(
+                    'In thô ESC/POS (dev)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      color: Colors.indigo.shade700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _printRawTextESC(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('In Text',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _printRawBarcodeESC(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('In Barcode',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _printRawQRCodeESC(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('In QR',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ],
+    );
+  }
+
+  Future<Uint8List> _loadImageFromAssets(String path) async {
+    final byteData = await DefaultAssetBundle.of(context).load(path);
+    return byteData.buffer.asUint8List();
+  }
+
+  Future<void> _printLabels(List<ProductBarcodeModel> items) async {
+    setState(() => _isPrintingLabel = true);
+    try {
+      await widget.onPrintLabels(items);
+    } finally {
+      if (mounted) setState(() => _isPrintingLabel = false);
+    }
+  }
+
+  Future<void> _printExampleWithLoading(String ipAddress) async {
+    setState(() => _isPrintingEsc = true);
+    try {
+      await _printExample(ipAddress);
+    } finally {
+      if (mounted) setState(() => _isPrintingEsc = false);
+    }
+  }
+
+  Future<void> _printExample(String ipAddress) async {
+    final image = await _loadImageFromAssets("packages/printer_label/images/ticket.png");
+    await ESCPrintService.instance.print(
+      deviceId: DeviceId.lan(ipAddress),
+      model: PrintThermalModel(image: image, size: TicketSize.mm58),
     );
   }
 
@@ -607,6 +811,93 @@ class _FunctionsTabState extends State<FunctionsTab>
         ),
       ],
     );
+  }
+
+  Future<void> _printRawTextLabel() async {
+    try {
+      await LabelPrintService.instance.printText(
+        deviceId: DeviceId.lan(widget.ipAddress),
+        text: 'Printer Label - Test Raw Text Printing TSPL',
+        x: 10,
+        y: 10,
+        font: 0,
+        rotation: 0,
+        sizeX: 1,
+        sizeY: 1,
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi lệnh in Text TSPL')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    }
+  }
+
+  Future<void> _printRawBarcodeLabel() async {
+    try {
+      await LabelPrintService.instance.printBarcode(
+        deviceId: DeviceId.lan(widget.ipAddress),
+        code: '123456789012',
+        x: 10,
+        y: 10,
+        height: 80,
+        type: '128',
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi lệnh in Barcode TSPL')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    }
+  }
+
+  Future<void> _printRawQRCodeLabel() async {
+    try {
+      await LabelPrintService.instance.printQRCode(
+        deviceId: DeviceId.lan(widget.ipAddress),
+        code: 'https://github.com/MinhTung263/printer_label',
+        x: 10,
+        y: 10,
+        size: 4,
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi lệnh in QR Code TSPL')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    }
+  }
+
+  Future<void> _printRawTextESC() async {
+    try {
+      await ESCPrintService.instance.printText(
+        deviceId: DeviceId.lan(widget.ipAddress),
+        text: 'Printer Label - Test Raw Text Printing ESC/POS\nLine 2 - Hello World!\n\n',
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi lệnh in Text ESC')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    }
+  }
+
+  Future<void> _printRawBarcodeESC() async {
+    try {
+      await ESCPrintService.instance.printBarcode(
+        deviceId: DeviceId.lan(widget.ipAddress),
+        code: '123456789012',
+        type: '128',
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi lệnh in Barcode ESC')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    }
+  }
+
+  Future<void> _printRawQRCodeESC() async {
+    try {
+      await ESCPrintService.instance.printQRCode(
+        deviceId: DeviceId.lan(widget.ipAddress),
+        code: 'https://github.com/MinhTung263/printer_label',
+        size: 8,
+      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi lệnh in QR Code ESC')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    }
   }
 }
 

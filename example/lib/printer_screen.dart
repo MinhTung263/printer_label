@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:example/context_extensions.dart';
 import 'package:flutter/material.dart';
@@ -146,15 +147,25 @@ class _PrinterScreenState extends State<PrinterScreen> {
     );
   }
 
+  Future<Uint8List> _loadImageFromAssets(String path) async {
+    final byteData = await DefaultAssetBundle.of(context).load(path);
+    return byteData.buffer.asUint8List();
+  }
+
   Future<void> _printSample() async {
     if (_connectedMacs.isEmpty) {
       context.showSnackBar("Chưa kết nối thiết bị nào. Chọn thiết bị để kết nối.");
       return;
     }
 
+    final image = await _loadImageFromAssets("packages/printer_label/images/ticket.png");
+
     for (final mac in _connectedMacs) {
       try {
-        await ESCPrintService.instance.printExample(deviceId: DeviceId.bluetooth(mac));
+        await ESCPrintService.instance.print(
+          deviceId: DeviceId.bluetooth(mac),
+          model: PrintThermalModel(image: image, size: TicketSize.mm58),
+        );
       } catch (e) {
         if (!mounted) return;
         context.showSnackBar(

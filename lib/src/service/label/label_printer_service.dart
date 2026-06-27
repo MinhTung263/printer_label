@@ -38,4 +38,81 @@ class LabelPrintService {
       quantity: quantity,
     );
   }
+
+  /// Prints raw text directly using TSPL printer commands.
+  Future<void> printText({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String text,
+    int x = 0,
+    int y = 0,
+    int font = 0,
+    int rotation = 0,
+    int sizeX = 1,
+    int sizeY = 1,
+    int width = 40,
+    int height = 30,
+  }) {
+    return LabelPrintServicePlatform.instance.printText(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      text: text,
+      x: x,
+      y: y,
+      font: font,
+      rotation: rotation,
+      sizeX: sizeX,
+      sizeY: sizeY,
+      width: width,
+      height: height,
+    );
+  }
+
+  /// Prints a raw 1D barcode directly using TSPL printer commands.
+  Future<void> printBarcode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int height = 100,
+    String type = "128",
+    int width = 40,
+    int heightMM = 30,
+  }) {
+    return LabelPrintServicePlatform.instance.printBarcode(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      x: x,
+      y: y,
+      height: height,
+      type: type,
+      width: width,
+      heightMM: heightMM,
+    );
+  }
+
+  /// Prints a raw QR code directly using TSPL printer commands.
+  Future<void> printQRCode({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    required String code,
+    int x = 0,
+    int y = 0,
+    int size = 4,
+    int width = 40,
+    int heightMM = 30,
+  }) {
+    return LabelPrintServicePlatform.instance.printQRCode(
+      deviceId: deviceId,
+      connectionType: connectionType,
+      code: code,
+      x: x,
+      y: y,
+      size: size,
+      width: width,
+      heightMM: heightMM,
+    );
+  }
 }
