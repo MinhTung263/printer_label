@@ -11,9 +11,17 @@ import 'package:example/printer_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MyApp());
+}
+
+// ⭐ Model cho thiết bị BT đã lưu trong SharedPreferences
+class _SavedBtDevice {
+  final String id; // UUID (iOS) hoặc MAC (Android)
+  final String name; // Tên hiển thị
+  const _SavedBtDevice({required this.id, required this.name});
 }
 
 class MyApp extends StatelessWidget {
@@ -170,6 +178,7 @@ class _MyHomePageState extends State<MyHomePage>
             label: device.name.isEmpty ? 'Bluetooth Printer' : device.name,
             type: 'BT',
           ));
+          _saveBtIdentifier(device.mac, device.name);
           context.showSnackBar(
             'Kết nối Bluetooth thành công: ${device.name}',
             backgroundColor: const Color(0xFF10B981),
@@ -177,6 +186,113 @@ class _MyHomePageState extends State<MyHomePage>
         },
       ),
     );
+  }
+
+  // ⭐ Lưu danh sách thiết bị BT đã kết nối (lưu nhiều máy)
+  static const String _prefsBtListKey = 'saved_bt_devices';
+
+  Future<void> _saveBtIdentifier(String id, String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_prefsBtListKey) ?? [];
+    // Format: "id|name"
+    final entry = '$id|$name';
+    // Nếu đã có thiết bị này thì cập nhật lại, không thêm trùng
+    final idx = list.indexWhere((e) => e.startsWith('$id|'));
+    if (idx >= 0) {
+      list[idx] = entry;
+    } else {
+      list.add(entry);
+    }
+    await prefs.setStringList(_prefsBtListKey, list);
+  }
+
+  /// Đọc danh sách thiết bị BT đã lưu
+  Future<List<_SavedBtDevice>> _getSavedBtDevices() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_prefsBtListKey) ?? [];
+    final result = <_SavedBtDevice>[];
+    for (final entry in list) {
+      final parts = entry.split('|');
+      if (parts.length >= 2) {
+        result.add(_SavedBtDevice(id: parts[0], name: parts[1]));
+      }
+    }
+    return result;
+  }
+
+  /// Xóa 1 thiết bị khỏi danh sách đã lưu
+  Future<void> _removeSavedBtDevice(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_prefsBtListKey) ?? [];
+    list.removeWhere((e) => e.startsWith('$id|'));
+    await prefs.setStringList(_prefsBtListKey, list);
+  }
+
+  // ⭐ Mở dialog chọn thiết bị BT đã lưu để reconnect
+  Future<void> _showSavedBtPicker() async {
+    final savedList = await _getSavedBtDevices();
+    if (savedList.isEmpty) {
+      context.showSnackBar(
+        'Chưa có thiết bị BT nào được lưu. Hãy scan và kết nối trước.',
+        backgroundColor: Colors.orange,
+      );
+      return;
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _SavedBtPicker(
+        devices: savedList,
+        onConnect: (device) => _reconnectBtFromSaved(device),
+        onDelete: (device) async {
+          await _removeSavedBtDevice(device.id);
+          if (!mounted) return;
+          setState(() {});
+          context.showSnackBar('Đã xóa ${device.name} khỏi danh sách',
+              backgroundColor: Colors.orange);
+        },
+      ),
+    );
+  }
+
+  // ⭐ Thử reconnect BLE từ identifier đã lưu — KHÔNG CẦN SCAN TRÊN iOS
+  Future<void> _reconnectBtFromSaved(_SavedBtDevice device) async {
+    if (Platform.isAndroid) {
+      final statuses = await [
+        Permission.bluetoothConnect,
+        Permission.bluetoothScan,
+      ].request();
+      if (!statuses.values.every((s) => s.isGranted)) {
+        if (!mounted) return;
+        context.showSnackBar('Cần cấp quyền Bluetooth', backgroundColor: Colors.orange);
+        return;
+      }
+    }
+
+    context.showSnackBar('Đang kết nối lại ${device.name}...', backgroundColor: Colors.blue);
+    try {
+      final ok = await PrinterLabel.connectBluetooth(macAddress: device.id);
+      if (!mounted) return;
+      if (ok) {
+        setState(() {
+          final id = DeviceId.bluetooth(device.id);
+          _addConnectedDevice(ConnectedDevice(
+            id: id,
+            label: device.name.isEmpty ? 'Bluetooth Printer' : device.name,
+            type: 'BT',
+          ));
+        });
+        context.showSnackBar('Kết nối lại thành công: ${device.name}', backgroundColor: Colors.green);
+      } else {
+        context.showSnackBar('Kết nối lại thất bại. Hãy scan lại.', backgroundColor: Colors.red);
+      }
+    } catch (e) {
+      context.showSnackBar('Lỗi kết nối: $e', backgroundColor: Colors.red);
+    }
   }
 
   Widget _buildBarcodeView(ProductBarcodeModel product, Dimensions dimensions) {
@@ -457,6 +573,7 @@ class _MyHomePageState extends State<MyHomePage>
                   ),
                 );
               },
+              onShowSavedBt: _showSavedBtPicker,
             ),
             FunctionsTab(
               products: products,
@@ -485,6 +602,142 @@ class _MyHomePageState extends State<MyHomePage>
     await ESCPrintService.instance.print(
       deviceId: deviceId,
       model: PrintThermalModel(image: image, size: TicketSize.mm58),
+    );
+  }
+}
+
+// ⭐ Saved BT Picker bottom sheet — chọn máy in đã lưu để reconnect
+class _SavedBtPicker extends StatefulWidget {
+  final List<_SavedBtDevice> devices;
+  final void Function(_SavedBtDevice device) onConnect;
+  final void Function(_SavedBtDevice device) onDelete;
+
+  const _SavedBtPicker({
+    required this.devices,
+    required this.onConnect,
+    required this.onDelete,
+  });
+
+  @override
+  State<_SavedBtPicker> createState() => _SavedBtPickerState();
+}
+
+class _SavedBtPickerState extends State<_SavedBtPicker> {
+  final Set<String> _connecting = {};
+
+  Future<void> _connect(_SavedBtDevice device) async {
+    setState(() => _connecting.add(device.id));
+    try {
+      widget.onConnect(device);
+    } finally {
+      if (mounted) setState(() => _connecting.remove(device.id));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.4,
+      minChildSize: 0.3,
+      maxChildSize: 0.7,
+      builder: (_, controller) => Column(
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.history, size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'Máy in đã lưu',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const Spacer(),
+                Text(
+                  '${widget.devices.length} thiết bị',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: widget.devices.isEmpty
+                ? const Center(child: Text('Chưa có thiết bị nào được lưu'))
+                : ListView.builder(
+                    controller: controller,
+                    itemCount: widget.devices.length,
+                    itemBuilder: (_, i) {
+                      final d = widget.devices[i];
+                      final isConnecting = _connecting.contains(d.id);
+                      return ListTile(
+                        leading: CircleAvatar(
+                          radius: 18,
+                          backgroundColor:
+                              Colors.indigo.withValues(alpha: 0.12),
+                          child: const Icon(Icons.bluetooth_rounded,
+                              color: Colors.indigo, size: 18),
+                        ),
+                        title: Text(
+                          d.name,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        subtitle: Text(
+                          d.id,
+                          style: const TextStyle(fontSize: 10),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.red, size: 20),
+                              tooltip: 'Xóa khỏi danh sách',
+                              onPressed: () => widget.onDelete(d),
+                            ),
+                            if (isConnecting)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 12),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            else
+                              ElevatedButton.icon(
+                                onPressed: () => _connect(d),
+                                icon:
+                                    const Icon(Icons.wifi_tethering, size: 16),
+                                label: const Text('Kết nối'),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
+                                  textStyle: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

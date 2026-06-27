@@ -27,23 +27,22 @@ public final class LANPrinterConnection {
     private var writeQueue: [Data] = []
     private var isWriting: Bool = false
 
-    // reconnect strategy
-    private var shouldAutoReconnect: Bool
-    private var reconnectAttempts: Int = 0
-    private let maxReconnectAttempts = 5
-
     // connection timeout
-    private let connectionTimeout: TimeInterval = 8
+    private let connectionTimeout: TimeInterval = 4
 
     // Callbacks
     public var onConnected: (() -> Void)?
     public var onDisconnected: ((_ error: Error?) -> Void)?
 
+    // Hàng đợi completion cho connect(). Mọi caller gọi connect() trong khi đang
+    // .connecting đều được thêm vào đây và fire CHÍNH XÁC 1 lần khi connected/failed/timeout.
+    // Tránh lỗi: gọi connect() nhiều lần làm callback bị ghi đè và caller treo vô hạn.
+    private var connectCompletions: [(Bool) -> Void] = []
+
     // MARK: - Initialization
-    public init(ip: String, port: UInt16 = 9100, autoReconnect: Bool = true, queueLabel: String? = nil) {
+    public init(ip: String, port: UInt16 = 9100, queueLabel: String? = nil) {
         self.ip = ip
         self.port = port
-        self.shouldAutoReconnect = autoReconnect
         let label = queueLabel ?? "lan.printer." + ip
         self.queue = DispatchQueue(label: label)
     }
@@ -54,9 +53,22 @@ public final class LANPrinterConnection {
 
     // MARK: - Connect / Disconnect
     public func connect() {
+        connect(completion: nil)
+    }
+
+    // connect với completion: gọi đúng 1 lần với kết quả thành công/thất bại.
+    // An toàn khi gọi nhiều lần: nếu đang .connecting, completion mới được xếp
+    // vào hàng đợi và fire cùng các caller khác. Nếu đã .connected, fire ngay true.
+    public func connect(completion: ((Bool) -> Void)?) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            if self.state == .connected || self.state == .connecting { return }
+            if self.state == .connected {
+                if let c = completion { DispatchQueue.main.async { c(true) } }
+                return
+            }
+            if let c = completion { self.connectCompletions.append(c) }
+            // Đang connect dở → chỉ xếp hàng completion, không khởi tạo lại.
+            if self.state == .connecting { return }
             self.state = .connecting
             print("[LANPrinterConnection] 🔗 Connecting to \(self.ip):\(self.port)...")
 
@@ -72,10 +84,10 @@ public final class LANPrinterConnection {
                 guard let self = self else { return }
                 switch newState {
                 case .ready:
-                    self.reconnectAttempts = 0
                     self.state = .connected
                     print("[LANPrinterConnection] ✅ Connected to \(self.ip)")
                     self.onConnected?()
+                    self.fireConnectCompletions(true)
                     self.flushQueue()
                 case .failed(let error):
                     self.state = .failed
@@ -83,12 +95,13 @@ public final class LANPrinterConnection {
                     self.onDisconnected?(error)
                     self.connection?.cancel()
                     self.connection = nil
-                    self.scheduleReconnectIfNeeded()
+                    self.fireConnectCompletions(false)
                 case .cancelled:
                     self.state = .disconnected
                     print("[LANPrinterConnection] ⏹️ Disconnected from \(self.ip)")
                     self.onDisconnected?(nil)
                     self.connection = nil
+                    self.fireConnectCompletions(false)
                 default:
                     break
                 }
@@ -104,34 +117,34 @@ public final class LANPrinterConnection {
                     self.state = .failed
                     print("[LANPrinterConnection] ⏱️ Connection timeout to \(self.ip)")
                     self.onDisconnected?(NSError(domain: "LANPrinterConnection", code: -1, userInfo: [NSLocalizedDescriptionKey: "Connection timeout"]))
+                    self.connection?.cancel()
                     self.connection = nil
-                    self.scheduleReconnectIfNeeded()
+                    self.fireConnectCompletions(false)
                 }
             }
+        }
+    }
+
+    // Fire toàn bộ completion đang chờ đúng 1 lần (trên main thread), rồi xóa hàng đợi.
+    // Phải được gọi từ trong self.queue.
+    private func fireConnectCompletions(_ success: Bool) {
+        guard !connectCompletions.isEmpty else { return }
+        let pending = connectCompletions
+        connectCompletions.removeAll()
+        DispatchQueue.main.async {
+            for c in pending { c(success) }
         }
     }
 
     public func disconnect() {
         queue.async { [weak self] in
             guard let self = self else { return }
-            self.shouldAutoReconnect = false
-            self.reconnectAttempts = 0
             self.connection?.stateUpdateHandler = nil
             self.connection?.cancel()
             self.connection = nil
             self.state = .disconnected
             self.writeQueue.removeAll()
             self.isWriting = false
-        }
-    }
-
-    private func scheduleReconnectIfNeeded() {
-        guard shouldAutoReconnect else { return }
-        reconnectAttempts += 1
-        guard reconnectAttempts <= maxReconnectAttempts else { return }
-        let delay = min(pow(2.0, Double(reconnectAttempts)), 60)
-        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.connect()
         }
     }
 
@@ -187,7 +200,6 @@ public final class LANPrinterConnection {
                     self.connection = nil
                     self.state = .failed
                     self.onDisconnected?(err)
-                    self.scheduleReconnectIfNeeded()
                 } else {
                     // continue sending next chunk
                     sendNextChunk()

@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:screenshot/screenshot.dart';
@@ -29,7 +28,6 @@ class LabelFromWidget {
     Dimensions dimensions = labelPerRow == LabelPerRow.single
         ? Dimensions.large
         : Dimensions.defaultDimens;
-
     final int itemsPerRow = labelPerRow.count;
     final List<Uint8List> images = [];
     final List<T> expandedItems = [];
@@ -50,44 +48,46 @@ class LabelFromWidget {
       groupedItems.last.add(expandedItems[i]);
     }
 
-    final screenshotController = ScreenshotController();
-
-    // Render each row group to a rasterized image
-    for (var row in groupedItems) {
+    Widget buildRowWidget(List<T> row) {
       final List<Widget> productWidgets = [];
-
       for (int i = 0; i < row.length; i++) {
-        productWidgets.add(
-          itemBuilder(row[i], dimensions),
-        );
-
+        productWidgets.add(itemBuilder(row[i], dimensions));
         if (i < row.length - 1) {
           productWidgets.add(SizedBox(width: spacer));
         }
       }
-
-      // Pad remaining empty columns in the row if necessary
       final itemsToAdd = itemsPerRow - row.length;
       for (int i = 0; i < itemsToAdd; i++) {
         productWidgets.add(
-          SizedBox(
-            width: dimensions.width + spacer,
-            height: dimensions.height,
-          ),
+          SizedBox(width: dimensions.width + spacer, height: dimensions.height),
         );
       }
-
-      final rowWidget = Row(children: productWidgets);
-
-      final imageBytes = await screenshotController.captureFromLongWidget(
-        rowWidget,
-        context: context,
-        constraints: const BoxConstraints.tightFor(),
-      );
-
-      images.add(imageBytes);
+      return Row(children: productWidgets);
     }
 
+    // Capture in small sequential batches instead of all at once.
+    // Rendering every row widget to an image on the main (UI) thread
+    // simultaneously causes dropped frames / ANR and holds every Uint8List
+    // in memory at the same time (OOM -> lost device connection).
+    const int batchSize = 10;
+    for (int start = 0; start < groupedItems.length; start += batchSize) {
+      final int end = (start + batchSize).clamp(0, groupedItems.length);
+      final batch = groupedItems.sublist(start, end);
+
+      final captured = await Future.wait(
+        batch.map(
+          (row) => ScreenshotController().captureFromLongWidget(
+            buildRowWidget(row),
+            context: context,
+            constraints: const BoxConstraints.tightFor(),
+          ),
+        ),
+      );
+      images.addAll(captured);
+
+      // Yield to the main thread so it can draw a frame between batches.
+      await Future.delayed(const Duration(milliseconds: 16));
+    }
     return images;
   }
 

@@ -15,54 +15,29 @@ public final class LANPrinterManager {
     private init() {}
 
     // Connect to a printer by ip. If exists, will reuse existing connection.
-    public func connect(ip: String, port: UInt16 = 9100, autoReconnect: Bool = true, completion: ((_ success: Bool) -> Void)? = nil) {
+    // connect() của LANPrinterConnection tự quản lý hàng đợi completion → an toàn khi
+    // gọi nhiều lần cho cùng IP; completion luôn fire đúng 1 lần với kết quả thật.
+    public func connect(ip: String, port: UInt16 = 9100, completion: ((_ success: Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            if let conn = self.connections[ip] {
-                // already exists
-                if conn.state == .connected {
-                    DispatchQueue.main.async { completion?(true) }
-                    return
-                }
-                // exists but not connected: re-wire the connect-result callbacks and retry
-                self.attachConnectResult(to: conn, ip: ip, completion: completion)
-                conn.connect()
+            let conn: LANPrinterConnection
+            if let existing = self.connections[ip] {
+                conn = existing
             } else {
-                let conn = LANPrinterConnection(ip: ip, port: port, autoReconnect: autoReconnect)
+                conn = LANPrinterConnection(ip: ip, port: port)
                 self.connections[ip] = conn
-                self.attachConnectResult(to: conn, ip: ip, completion: completion)
-                conn.connect()
             }
-        }
-    }
-
-    // Wire onConnected/onDisconnected so the connect result is reported back to the
-    // caller exactly once. Without this, a failed/timed-out connection never calls
-    // completion and the Flutter side hangs with no error.
-    private func attachConnectResult(to conn: LANPrinterConnection, ip: String, completion: ((_ success: Bool) -> Void)?) {
-        // Guard against double-firing: success and failure callbacks race, and
-        // onDisconnected can fire again on later background reconnect attempts.
-        var didReport = false
-        let report: (Bool) -> Void = { [weak self, weak conn] success in
-            guard !didReport else { return }
-            didReport = true
-            // Detach the one-shot connect callbacks; keep the connection around so
-            // subsequent send()/state inspection still works.
-            conn?.onConnected = nil
-            conn?.onDisconnected = nil
-            if !success {
-                // Drop the failed connection so a later connect() starts cleanly.
-                // Mutate the connections map on the manager's serial queue.
-                self?.queue.async {
-                    self?.connections[ip]?.disconnect()
-                    self?.connections.removeValue(forKey: ip)
+            conn.connect { [weak self] success in
+                // Connect thất bại → bỏ connection để lần sau khởi tạo sạch.
+                if !success {
+                    self?.queue.async {
+                        self?.connections[ip]?.disconnect()
+                        self?.connections.removeValue(forKey: ip)
+                    }
                 }
+                completion?(success)
             }
-            DispatchQueue.main.async { completion?(success) }
         }
-
-        conn.onConnected = { report(true) }
-        conn.onDisconnected = { _ in report(false) }
     }
 
     public func disconnect(ip: String, completion: ((_ success: Bool) -> Void)? = nil) {

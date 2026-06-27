@@ -24,6 +24,8 @@ class DevicesTab extends StatelessWidget {
   final bool isCheckingStatus;
   final bool isCheckingConnection;
   final bool isPrinting;
+  final VoidCallback? onShowSavedBt;
+
 
   const DevicesTab({
     super.key,
@@ -47,6 +49,7 @@ class DevicesTab extends StatelessWidget {
     this.isCheckingStatus = false,
     this.isCheckingConnection = false,
     this.isPrinting = false,
+    this.onShowSavedBt,
   });
 
   @override
@@ -236,6 +239,13 @@ class DevicesTab extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const Spacer(),
+            if (onShowSavedBt != null)
+              IconButton(
+                onPressed: onShowSavedBt,
+                icon: const Icon(Icons.bluetooth_connected,
+                    color: Colors.indigo),
+                tooltip: 'Chọn máy in BT đã lưu để kết nối lại',
+              ),
             IconButton(
               onPressed: onAddBluetooth,
               icon: const Icon(Icons.bluetooth_searching,
