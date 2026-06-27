@@ -19,8 +19,8 @@ class DevicesTab extends StatelessWidget {
   final Function(ConnectedDevice device) onDisconnectDevice;
   final Function(ConnectedDevice device) onPrintDeviceLabel;
   final Function(ConnectedDevice device) onPrintDeviceEsc;
-  final VoidCallback onOpenBluetoothPage;
   final VoidCallback? onCheckPrinterStatus;
+
   final bool isCheckingStatus;
   final bool isCheckingConnection;
   final bool isPrinting;
@@ -44,8 +44,8 @@ class DevicesTab extends StatelessWidget {
     required this.onDisconnectDevice,
     required this.onPrintDeviceLabel,
     required this.onPrintDeviceEsc,
-    required this.onOpenBluetoothPage,
     this.onCheckPrinterStatus,
+
     this.isCheckingStatus = false,
     this.isCheckingConnection = false,
     this.isPrinting = false,
@@ -62,12 +62,11 @@ class DevicesTab extends StatelessWidget {
         _buildLanConnectionCard(),
         const SizedBox(height: 16),
         _buildConnectedDevicesSection(),
-        const SizedBox(height: 16),
-        _buildBluetoothPageButton(context),
         const SizedBox(height: 8),
       ],
     );
   }
+
 
   Widget _buildConnectionStatusCard() {
     return Card(
@@ -359,8 +358,6 @@ class DevicesTab extends StatelessWidget {
               tooltip: 'Kiểm thử in',
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'label', child: Text('In nhãn (Label)')),
-                PopupMenuItem(
-                    value: 'barcode', child: Text('In mã vạch (Barcode)')),
                 PopupMenuItem(value: 'esc', child: Text('In hoá đơn (ESC)')),
               ],
               onSelected: (action) {
@@ -383,23 +380,6 @@ class DevicesTab extends StatelessWidget {
       ),
     );
   }
-
-  Widget _buildBluetoothPageButton(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: onOpenBluetoothPage,
-        icon: const Icon(Icons.bluetooth),
-        label: const Text('Mở trang Bluetooth chuyên sâu'),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF3B82F6),
-          side: const BorderSide(color: Color(0xFF3B82F6)),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-    );
-  }
 }
+
+

@@ -7,7 +7,6 @@ import 'package:example/connected_device.dart';
 import 'package:example/context_extensions.dart';
 import 'package:example/devices_tab.dart';
 import 'package:example/functions_tab.dart';
-import 'package:example/printer_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
@@ -565,14 +564,6 @@ class _MyHomePageState extends State<MyHomePage>
                         ipAddress: textEditingController.text,
                       )
                   : null,
-              onOpenBluetoothPage: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const PrinterScreen(),
-                  ),
-                );
-              },
               onShowSavedBt: _showSavedBtPicker,
             ),
             FunctionsTab(
