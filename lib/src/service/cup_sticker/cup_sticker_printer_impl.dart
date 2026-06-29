@@ -26,8 +26,6 @@ class CupStickerPrinterImpl extends CupStickerPrinterPlatform {
       labelPerRow: LabelPerRow.single.copyWith(
         width: size.widthMm.toInt(),
         height: size.heightMm.toInt(),
-        x: 0,
-        y: 0,
       ),
     );
     await PrinterLabel.printLabel(
@@ -69,8 +67,6 @@ class CupStickerPrinterImpl extends CupStickerPrinterPlatform {
       labelPerRow: LabelPerRow.single.copyWith(
         width: widthMm,
         height: size.heightMm.toInt(),
-        x: 0,
-        y: 0,
       ),
     );
 

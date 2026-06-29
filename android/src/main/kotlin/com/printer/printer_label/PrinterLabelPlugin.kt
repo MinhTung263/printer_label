@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
@@ -728,23 +729,36 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             val gap = call.argument<Map<String, Any>>("gap")
             val gapWidth = (gap?.get("width") as? Number)?.toDouble() ?: 2.0
             val gapHeight = (gap?.get("height") as? Number)?.toDouble() ?: 0.0
-            val x = call.argument<Int>("x") ?: 0
-            val y = call.argument<Int>("y") ?: 0
 
             val targetWidthDots = sizeWidth * 8
+            val targetHeightDots = sizeHeight * 8
 
             images.forEach { imageData ->
                 val bitmap =
                     BitmapFactory.decodeByteArray(imageData, 0, imageData.size) ?: return@forEach
+                
+                // Scale bitmap to exactly targetWidthDots and targetHeightDots
+                val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidthDots, targetHeightDots, true)
+ 
+                // Compensate for printer's 20-dot hardware offset on the left
+                val shiftX = -20f
+                val shifted = Bitmap.createBitmap(targetWidthDots, targetHeightDots, scaledBitmap.config ?: Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(shifted)
+                canvas.drawColor(android.graphics.Color.WHITE)
+                canvas.drawBitmap(scaledBitmap, shiftX, 0f, null)
+                scaledBitmap.recycle()
+ 
                 printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
                     .gapMm(gapWidth, gapHeight)
+                    .reference(0, 0)
+                    .direction(0)
                     .cls()
                     .bitmap(
-                        x,
-                        y,
+                        0,
+                        0,
                         TSPLConst.BMP_MODE_OVERWRITE,
                         targetWidthDots,
-                        bitmap,
+                        shifted,
                         AlgorithmType.Threshold
                     )
                     .print(1)

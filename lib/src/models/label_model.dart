@@ -20,8 +20,7 @@ class LabelModel {
       'images': images,
       'type': 'TSPL',
       'quantity': quantity,
-      'x': label.x,
-      'y': label.y,
+      'label_count': label.count,
       'size': {
         'width': label.width,
         'height': label.height,

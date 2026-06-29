@@ -56,9 +56,10 @@ class _LabelTabState extends State<LabelTab> {
         previewProducts,
         context,
         labelPerRow: widget.selectedRow,
-        itemBuilder: (product, dimensions) => BarcodeView<ProductBarcodeModel>(
+        itemBuilder: (product, width, height) => BarcodeView<ProductBarcodeModel>(
           data: product,
-          dimensions: dimensions,
+          stampWidth: width,
+          stampHeight: height,
           nameBuilder: (p) => p.name,
           barcodeBuilder: (p) => p.barcode,
           priceBuilder: (p) => p.price,
@@ -211,15 +212,18 @@ class _LabelTabState extends State<LabelTab> {
           child: Row(
             children: [
               // Quy cách
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: LabelPerRowSelector(
-                  value: widget.selectedRow,
-                  onChanged: widget.onLabelPerRowChanged,
+              Expanded(
+                flex: 2,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: LabelPerRowSelector(
+                    value: widget.selectedRow,
+                    onChanged: widget.onLabelPerRowChanged,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -263,9 +267,7 @@ class _LabelTabState extends State<LabelTab> {
                   onPressed: _isPrintingLabel
                       ? null
                       : () => _printLabels(
-                            widget.products
-                                .take(_previewProductCount)
-                                .toList(),
+                            widget.products.take(_previewProductCount).toList(),
                           ),
                   icon: _isPrintingLabel
                       ? const SizedBox(

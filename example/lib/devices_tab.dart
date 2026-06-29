@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'connected_device.dart';
+import 'main.dart';
 
 enum PrintAction { lan, all, esc }
 
@@ -165,7 +166,7 @@ class DevicesTab extends StatelessWidget {
               focusNode: ipFocusNode,
               decoration: InputDecoration(
                 labelText: 'Địa chỉ IP máy in',
-                hintText: 'VD: 192.168.1.56',
+                hintText: 'VD: $defaultPrinterIp',
                 prefixIcon: const Icon(Icons.network_ping),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),

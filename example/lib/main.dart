@@ -66,7 +66,7 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-const String _defaultPrinterIp = '192.168.1.56';
+const String defaultPrinterIp = '192.168.1.199';
 
 class _MyHomePageState extends State<MyHomePage>
     with SingleTickerProviderStateMixin {
@@ -78,7 +78,7 @@ class _MyHomePageState extends State<MyHomePage>
   bool isPrinting = false;
 
   final TextEditingController textEditingController =
-      TextEditingController(text: _defaultPrinterIp);
+      TextEditingController(text: defaultPrinterIp);
   final FocusNode focusNode = FocusNode();
 
   final List<ProductBarcodeModel> products = [
@@ -198,7 +198,6 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-
   // ⭐ Lưu danh sách thiết bị BT đã kết nối (lưu nhiều máy)
   static const String _prefsBtListKey = 'saved_bt_devices';
 
@@ -271,7 +270,6 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-
   // ⭐ Thử reconnect BLE từ identifier đã lưu — KHÔNG CẦN SCAN TRÊN iOS
   Future<void> _reconnectBtFromSaved(_SavedBtDevice device) async {
     if (Platform.isAndroid) {
@@ -281,12 +279,14 @@ class _MyHomePageState extends State<MyHomePage>
       ].request();
       if (!statuses.values.every((s) => s.isGranted)) {
         if (!mounted) return;
-        context.showSnackBar('Cần cấp quyền Bluetooth', backgroundColor: Colors.orange);
+        context.showSnackBar('Cần cấp quyền Bluetooth',
+            backgroundColor: Colors.orange);
         return;
       }
     }
 
-    context.showSnackBar('Đang kết nối lại ${device.name}...', backgroundColor: Colors.blue);
+    context.showSnackBar('Đang kết nối lại ${device.name}...',
+        backgroundColor: Colors.blue);
     try {
       final ok = await PrinterLabel.connectBluetooth(macAddress: device.id);
       if (!mounted) return;
@@ -299,19 +299,22 @@ class _MyHomePageState extends State<MyHomePage>
             type: 'BT',
           ));
         });
-        context.showSnackBar('Kết nối lại thành công: ${device.name}', backgroundColor: Colors.green);
+        context.showSnackBar('Kết nối lại thành công: ${device.name}',
+            backgroundColor: Colors.green);
       } else {
-        context.showSnackBar('Kết nối lại thất bại. Hãy scan lại.', backgroundColor: Colors.red);
+        context.showSnackBar('Kết nối lại thất bại. Hãy scan lại.',
+            backgroundColor: Colors.red);
       }
     } catch (e) {
       context.showSnackBar('Lỗi kết nối: $e', backgroundColor: Colors.red);
     }
   }
 
-  Widget _buildBarcodeView(ProductBarcodeModel product, Dimensions dimensions) {
+  Widget _buildBarcodeView(ProductBarcodeModel product, double width, double height) {
     return BarcodeView<ProductBarcodeModel>(
       data: product,
-      dimensions: dimensions,
+      stampWidth: width,
+      stampHeight: height,
       nameBuilder: (p) => p.name,
       barcodeBuilder: (p) => p.barcode,
       priceBuilder: (p) => p.price,
@@ -375,7 +378,8 @@ class _MyHomePageState extends State<MyHomePage>
 
   Future<void> _checkPrinterStatus({required String ipAddress}) async {
     setState(() => isCheckingStatus = true);
-    context.showSnackBar('Đang kiểm tra máy in...', backgroundColor: Colors.blueGrey);
+    context.showSnackBar('Đang kiểm tra máy in...',
+        backgroundColor: Colors.blueGrey);
     try {
       // 1. Thử check theo giao thức ESC/POS trước
       var status = await PrinterLabel.checkPrinterStatus(
@@ -393,15 +397,24 @@ class _MyHomePageState extends State<MyHomePage>
 
       if (!mounted) return;
       final (msg, color) = switch (status) {
-        PrinterStatus.normal => ('Máy in bình thường ✅', const Color(0xFF10B981)),
+        PrinterStatus.normal => (
+            'Máy in bình thường ✅',
+            const Color(0xFF10B981)
+          ),
         PrinterStatus.outOfPaper => ('Hết giấy 📄', const Color(0xFFF59E0B)),
         PrinterStatus.paperJam => ('Kẹt giấy ⚠️', Colors.orange),
         PrinterStatus.headOpened => ('Đầu in đang mở 🔓', Colors.orange),
         PrinterStatus.outOfRibbon => ('Hết ruy băng mực 🎞️', Colors.orange),
         PrinterStatus.pause => ('Máy in đang tạm dừng ⏸️', Colors.blueGrey),
         PrinterStatus.printing => ('Đang in... 🖨️', const Color(0xFF4F46E5)),
-        PrinterStatus.offline => ('Máy in không phản hồi ❌', const Color(0xFFE11D48)),
-        PrinterStatus.unknown => ('Không xác định được trạng thái ❓', Colors.grey),
+        PrinterStatus.offline => (
+            'Máy in không phản hồi ❌',
+            const Color(0xFFE11D48)
+          ),
+        PrinterStatus.unknown => (
+            'Không xác định được trạng thái ❓',
+            Colors.grey
+          ),
       };
       context.showSnackBar(msg, backgroundColor: color);
     } finally {
@@ -578,7 +591,6 @@ class _MyHomePageState extends State<MyHomePage>
                         ipAddress: textEditingController.text,
                       )
                   : null,
-
             ),
             FunctionsTab(
               products: products,
@@ -603,7 +615,8 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   Future<void> _printExampleESC(String deviceId) async {
-    final image = await _loadImageFromAssets("packages/printer_label/images/ticket.png");
+    final image =
+        await _loadImageFromAssets("packages/printer_label/images/ticket.png");
     await ESCPrintService.instance.print(
       deviceId: deviceId,
       model: PrintThermalModel(image: image, size: TicketSize.mm58),
@@ -730,7 +743,8 @@ class _SavedBtPickerState extends State<_SavedBtPicker> {
                                 child: SizedBox(
                                   width: 20,
                                   height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 ),
                               )
                             else

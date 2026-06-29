@@ -147,9 +147,10 @@ await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
   context: context,
   deviceId: DeviceId.lan('192.168.1.56'),
   labelPerRow: LabelPerRow.single, // Or LabelPerRow.doubleLabels, LabelPerRow.tripleLabels
-  itemBuilder: (product, dimensions) => BarcodeView<ProductBarcodeModel>(
+  itemBuilder: (product, stampWidth, stampHeight) => BarcodeView<ProductBarcodeModel>(
     data: product,
-    dimensions: dimensions,
+    stampWidth: stampWidth,
+    stampHeight: stampHeight,
     nameBuilder: (p) => p.name,
     barcodeBuilder: (p) => p.barcode,
     priceBuilder: (p) => p.price,

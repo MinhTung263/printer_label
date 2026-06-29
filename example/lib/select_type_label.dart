@@ -18,18 +18,91 @@ class LabelPerRowSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButton<LabelPerRow>(
-      value: value,
-      underline: Container(height: 1, color: Colors.grey.shade400),
-      items: LabelPerRow.values.map((item) {
-        return DropdownMenuItem<LabelPerRow>(
-          value: item,
-          child: Text(item.title),
-        );
-      }).toList(),
-      onChanged: (v) {
-        if (v != null) onChanged(v);
-      },
+    final List<DropdownMenuItem<LabelPerRow?>> items = [];
+
+    // Nhóm 1: 1 Tem / Hàng
+    items.add(const DropdownMenuItem<LabelPerRow?>(
+      value: null,
+      enabled: false,
+      child: Text(
+        '── 1 TEM / HÀNG ──',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF4F46E5),
+          fontSize: 11,
+        ),
+      ),
+    ));
+    items.addAll(LabelPerRow.values
+        .where((item) => !item.name.startsWith('double') && !item.name.startsWith('triple'))
+        .map((item) => DropdownMenuItem<LabelPerRow?>(
+              value: item,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6.0),
+                child: Text(item.title),
+              ),
+            )));
+
+    // Nhóm 2: 2 Tem / Hàng
+    items.add(const DropdownMenuItem<LabelPerRow?>(
+      value: null,
+      enabled: false,
+      child: Text(
+        '── 2 TEM / HÀNG ──',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF4F46E5),
+          fontSize: 11,
+        ),
+      ),
+    ));
+    items.addAll(LabelPerRow.values
+        .where((item) => item.name.startsWith('double'))
+        .map((item) => DropdownMenuItem<LabelPerRow?>(
+              value: item,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6.0),
+                child: Text(item.title),
+              ),
+            )));
+
+    // Nhóm 3: 3 Tem / Hàng
+    items.add(const DropdownMenuItem<LabelPerRow?>(
+      value: null,
+      enabled: false,
+      child: Text(
+        '── 3 TEM / HÀNG ──',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF4F46E5),
+          fontSize: 11,
+        ),
+      ),
+    ));
+    items.addAll(LabelPerRow.values
+        .where((item) => item.name.startsWith('triple'))
+        .map((item) => DropdownMenuItem<LabelPerRow?>(
+              value: item,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6.0),
+                child: Text(item.title),
+              ),
+            )));
+
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<LabelPerRow?>(
+        value: value,
+        isExpanded: true,
+        style: const TextStyle(
+          fontSize: 13,
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
+        items: items,
+        onChanged: (v) {
+          if (v != null) onChanged(v);
+        },
+      ),
     );
   }
 }

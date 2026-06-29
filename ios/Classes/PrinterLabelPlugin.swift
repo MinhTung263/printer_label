@@ -357,25 +357,24 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         return String(deviceId.dropFirst(4))
     }
 
-    private func resizeCGImage(_ image: CGImage, targetWidth: Int) -> CGImage? {
-        let width = CGFloat(targetWidth)
-        let scale = width / CGFloat(image.width)
-        let height = CGFloat(image.height) * scale
+    private func resizeImage(_ image: UIImage, targetWidth: CGFloat, targetHeight: CGFloat, drawX: CGFloat = 0.0) -> CGImage? {
+        UIGraphicsBeginImageContextWithOptions(
+            CGSize(width: targetWidth, height: targetHeight),
+            true, // opaque: true (gives us a solid white background to avoid transparent pixel issues)
+            1.0   // scale factor of 1.0 to keep exact dot dimensions
+        )
         
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil,
-            width: Int(width),
-            height: Int(height),
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        // Fill background with white
+        if let context = UIGraphicsGetCurrentContext() {
+            context.setFillColor(UIColor.white.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+        }
         
-        context.interpolationQuality = .high
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage()
+        image.draw(in: CGRect(x: drawX, y: 0, width: targetWidth, height: targetHeight))
+        let resized = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return resized?.cgImage
     }
 
     // MARK: - Print Methods
@@ -394,25 +393,28 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let gapWidthMM = gapMap?["width"] as? Int ?? 2
         let gapHeightMM = gapMap?["height"] as? Int ?? 0
         
-        let startX = max(0, (args["x"] as? Int ?? 0) - 20)
-        let startY = args["y"] as? Int ?? 0
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
 
         let targetWidth = labelWidthMM * 8
+        let targetHeight = labelHeightMM * 8
 
         for imageData in images {
             let cmd = PTCommandTSPL()
             cmd.encoding = String.Encoding.utf8.rawValue
             cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
             cmd.setGapWithDistance(gapWidthMM, offset: gapHeightMM)
+            cmd.setReferenceXPos(0, yPos: 0)
+            cmd.setPrintDirection(.normal, mirror: .normal)
             cmd.setCLS()
 
-            guard let originalImage = imageFromFlutter(imageData)?.cgImage else { continue }
-            guard let cgImage = resizeCGImage(originalImage, targetWidth: targetWidth) else { continue }
+            guard let uiImage = imageFromFlutter(imageData) else { continue }
+            // Compensate for printer's 20-dot hardware offset on the left.
+            let drawX: CGFloat = -20.0
+            guard let cgImage = resizeImage(uiImage, targetWidth: CGFloat(targetWidth), targetHeight: CGFloat(targetHeight), drawX: drawX) else { continue }
 
             cmd.addBitmap(
-                withXPos: startX, yPos: startY,
+                withXPos: 0, yPos: 0,
                 mode: .OVERWRITE, image: cgImage,
                 bitmapMode: .binary, compress: .none
             )

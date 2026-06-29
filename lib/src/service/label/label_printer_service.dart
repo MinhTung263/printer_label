@@ -25,7 +25,7 @@ class LabelPrintService {
 
     /// Optional target device ID (e.g. LAN IP address or Bluetooth UUID)
     String? deviceId,
-    required Widget Function(T item, Dimensions dimensions) itemBuilder,
+    required Widget Function(T item, double stampWidth, double stampHeight) itemBuilder,
     required int Function(T item) quantity,
   }) {
     return LabelPrintServicePlatform.instance.printLabels<T>(
