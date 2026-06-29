@@ -34,6 +34,7 @@ class _LabelTabState extends State<LabelTab> {
   @override
   void initState() {
     super.initState();
+    _previewProductCount = widget.selectedRow.count;
     WidgetsBinding.instance.addPostFrameCallback((_) => _refreshPreview());
   }
 
@@ -42,6 +43,7 @@ class _LabelTabState extends State<LabelTab> {
     super.didUpdateWidget(old);
     if (old.selectedRow != widget.selectedRow ||
         old.products != widget.products) {
+      _previewProductCount = widget.selectedRow.count.clamp(1, widget.products.length);
       _refreshPreview();
     }
   }
@@ -242,15 +244,30 @@ class _LabelTabState extends State<LabelTab> {
                       color: Colors.black87,
                       fontWeight: FontWeight.w500,
                     ),
-                    items: [
-                      const DropdownMenuItem(value: 1, child: Text('1 SP')),
-                      if (widget.products.length > 1)
-                        const DropdownMenuItem(value: 2, child: Text('2 SP')),
-                      DropdownMenuItem(
-                        value: widget.products.length,
-                        child: const Text('Tất cả'),
-                      ),
-                    ],
+                    items: () {
+                      final items = <DropdownMenuItem<int>>[];
+                      final maxCount = widget.products.length;
+                      final limit = maxCount > 15 ? 15 : maxCount;
+                      for (int i = 1; i <= limit; i++) {
+                        items.add(DropdownMenuItem(value: i, child: Text('$i SP')));
+                      }
+                      if (maxCount > limit) {
+                        items.add(DropdownMenuItem(
+                          value: maxCount,
+                          child: const Text('Tất cả'),
+                        ));
+                      }
+                      // Ensure current value is always in the list to prevent errors
+                      if (!items.any((item) => item.value == _previewProductCount)) {
+                        items.add(DropdownMenuItem(
+                          value: _previewProductCount,
+                          child: Text('$_previewProductCount SP'),
+                        ));
+                      }
+                      // Sort items by value
+                      items.sort((a, b) => a.value!.compareTo(b.value!));
+                      return items;
+                    }(),
                     onChanged: (val) {
                       if (val != null) {
                         setState(() => _previewProductCount = val);
@@ -262,37 +279,35 @@ class _LabelTabState extends State<LabelTab> {
               ),
               const SizedBox(width: 8),
               // Nút In
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _isPrintingLabel
-                      ? null
-                      : () => _printLabels(
-                            widget.products.take(_previewProductCount).toList(),
-                          ),
-                  icon: _isPrintingLabel
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : const Icon(Icons.print, size: 16),
-                  label: Text(
-                    _isPrintingLabel
-                        ? 'Đang in...'
-                        : 'In nhãn  •  ${_labelPreviews.length} tờ',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4F46E5),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+              ElevatedButton.icon(
+                onPressed: _isPrintingLabel
+                    ? null
+                    : () => _printLabels(
+                          widget.products.take(_previewProductCount).toList(),
+                        ),
+                icon: _isPrintingLabel
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.print, size: 16),
+                label: Text(
+                  _isPrintingLabel
+                      ? 'Đang in...'
+                      : 'In nhãn  •  ${_labelPreviews.length} tờ',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4F46E5),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
               ),
