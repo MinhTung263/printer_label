@@ -357,6 +357,27 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         return String(deviceId.dropFirst(4))
     }
 
+    private func resizeCGImage(_ image: CGImage, targetWidth: Int) -> CGImage? {
+        let width = CGFloat(targetWidth)
+        let scale = width / CGFloat(image.width)
+        let height = CGFloat(image.height) * scale
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: Int(width),
+            height: Int(height),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
     // MARK: - Print Methods
 
     func printLabel(args: [String: Any], result: @escaping FlutterResult) {
@@ -378,6 +399,8 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
 
+        let targetWidth = labelWidthMM * 8
+
         for imageData in images {
             let cmd = PTCommandTSPL()
             cmd.encoding = String.Encoding.utf8.rawValue
@@ -385,7 +408,8 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             cmd.setGapWithDistance(gapWidthMM, offset: gapHeightMM)
             cmd.setCLS()
 
-            guard let cgImage = imageFromFlutter(imageData)?.cgImage else { continue }
+            guard let originalImage = imageFromFlutter(imageData)?.cgImage else { continue }
+            guard let cgImage = resizeCGImage(originalImage, targetWidth: targetWidth) else { continue }
 
             cmd.addBitmap(
                 withXPos: startX, yPos: startY,
