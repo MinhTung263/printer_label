@@ -731,6 +731,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             val x = call.argument<Int>("x") ?: 0
             val y = call.argument<Int>("y") ?: 0
 
+            val targetWidthDots = sizeWidth * 8
+
             images.forEach { imageData ->
                 val bitmap =
                     BitmapFactory.decodeByteArray(imageData, 0, imageData.size) ?: return@forEach
@@ -741,7 +743,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                         x,
                         y,
                         TSPLConst.BMP_MODE_OVERWRITE,
-                        bitmap.width,
+                        targetWidthDots,
                         bitmap,
                         AlgorithmType.Threshold
                     )
