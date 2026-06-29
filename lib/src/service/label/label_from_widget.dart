@@ -92,7 +92,7 @@ class LabelFromWidget {
         data: MediaQueryData(
           size: Size(totalWidgetWidth, totalWidgetHeight),
           devicePixelRatio: 3.0, // Use high-DPI for sharp text rendering
-          textScaleFactor: 1.0,
+          textScaler: TextScaler.noScaling,
           padding: EdgeInsets.zero,
           viewInsets: EdgeInsets.zero,
           viewPadding: EdgeInsets.zero,

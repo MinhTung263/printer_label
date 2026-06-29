@@ -241,6 +241,7 @@ class _MyHomePageState extends State<MyHomePage>
   // ⭐ Mở dialog chọn thiết bị BT đã lưu để reconnect
   Future<void> _showSavedBtPicker() async {
     final savedList = await _getSavedBtDevices();
+    if (!mounted) return;
     if (savedList.isEmpty) {
       context.showSnackBar(
         'Chưa có thiết bị BT nào được lưu. Hãy scan và kết nối trước.',
@@ -285,6 +286,7 @@ class _MyHomePageState extends State<MyHomePage>
       }
     }
 
+    if (!mounted) return;
     context.showSnackBar('Đang kết nối lại ${device.name}...',
         backgroundColor: Colors.blue);
     try {
@@ -306,6 +308,7 @@ class _MyHomePageState extends State<MyHomePage>
             backgroundColor: Colors.red);
       }
     } catch (e) {
+      if (!mounted) return;
       context.showSnackBar('Lỗi kết nối: $e', backgroundColor: Colors.red);
     }
   }
