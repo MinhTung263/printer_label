@@ -313,11 +313,11 @@ class _MyHomePageState extends State<MyHomePage>
     }
   }
 
-  Widget _buildBarcodeView(ProductBarcodeModel product, double width, double height) {
+  Widget _buildBarcodeView(ProductBarcodeModel product) {
     return BarcodeView<ProductBarcodeModel>(
       data: product,
-      stampWidth: width,
-      stampHeight: height,
+      stampWidth: _selectedRow.stampWidth,
+      stampHeight: _selectedRow.stampHeight,
       nameBuilder: (p) => p.name,
       barcodeBuilder: (p) => p.barcode,
       priceBuilder: (p) => p.price,

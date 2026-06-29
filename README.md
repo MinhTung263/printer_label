@@ -147,15 +147,43 @@ await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
   context: context,
   deviceId: DeviceId.lan('192.168.1.56'),
   labelPerRow: LabelPerRow.single, // Or LabelPerRow.doubleLabels, LabelPerRow.tripleLabels
-  itemBuilder: (product, stampWidth, stampHeight) => BarcodeView<ProductBarcodeModel>(
+  itemBuilder: (product) => BarcodeView<ProductBarcodeModel>(
     data: product,
-    stampWidth: stampWidth,
-    stampHeight: stampHeight,
+    stampWidth: LabelPerRow.single.stampWidth,
+    stampHeight: LabelPerRow.single.stampHeight,
     nameBuilder: (p) => p.name,
     barcodeBuilder: (p) => p.barcode,
     priceBuilder: (p) => p.price,
   ),
   quantity: (p) => p.quantity,
+);
+```
+
+#### 💡 Custom Widget Example (No `BarcodeView` dependency)
+You can print **any** custom Flutter widget (e.g. price tags, milk tea labels, QR codes) by returning your own layout in `itemBuilder`:
+
+```dart
+await LabelPrintService.instance.printLabels<MyCustomProduct>(
+  items: products,
+  context: context,
+  deviceId: DeviceId.lan('192.168.1.56'),
+  labelPerRow: LabelPerRow.single,
+  itemBuilder: (product) => Container(
+    padding: const EdgeInsets.all(8),
+    color: Colors.white,
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          product.name,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        Text('Price: \$${product.price}'),
+        // You can embed QR codes, icons, custom borders, etc.
+      ],
+    ),
+  ),
+  quantity: (p) => 1,
 );
 ```
 

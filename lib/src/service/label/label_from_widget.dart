@@ -19,8 +19,6 @@ class LabelFromWidget {
     BuildContext context, {
     required Widget Function(
       T item,
-      double stampWidth,
-      double stampHeight,
     ) itemBuilder,
     required int Function(T item) quantity,
     LabelPerRow labelPerRow = LabelPerRow.doubleLabels,
@@ -72,8 +70,7 @@ class LabelFromWidget {
         productWidgets.add(SizedBox(width: leftPadding));
       }
       for (int i = 0; i < row.length; i++) {
-        productWidgets.add(itemBuilder(
-            row[i], labelPerRow.stampWidth, labelPerRow.stampHeight));
+        productWidgets.add(itemBuilder(row[i]));
         if (i < row.length - 1) {
           productWidgets.add(SizedBox(width: effectiveSpacer));
         }

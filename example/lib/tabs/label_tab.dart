@@ -58,10 +58,10 @@ class _LabelTabState extends State<LabelTab> {
         previewProducts,
         context,
         labelPerRow: widget.selectedRow,
-        itemBuilder: (product, width, height) => BarcodeView<ProductBarcodeModel>(
+        itemBuilder: (product) => BarcodeView<ProductBarcodeModel>(
           data: product,
-          stampWidth: width,
-          stampHeight: height,
+          stampWidth: widget.selectedRow.stampWidth,
+          stampHeight: widget.selectedRow.stampHeight,
           nameBuilder: (p) => p.name,
           barcodeBuilder: (p) => p.barcode,
           priceBuilder: (p) => p.price,

@@ -13,7 +13,7 @@ class LabelPrintServiceImpl extends LabelPrintServicePlatform {
     required LabelPerRow labelPerRow,
     PrinterConnectionType? connectionType,
     String? deviceId,
-    required Widget Function(T item, double stampWidth, double stampHeight) itemBuilder,
+    required Widget Function(T item) itemBuilder,
     required int Function(T item) quantity,
   }) async {
     final images = await LabelFromWidget.captureImages<T>(
