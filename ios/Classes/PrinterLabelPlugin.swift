@@ -366,8 +366,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         }
 
         let sizeMap = args["size"] as? [String: Any]
-        let labelWidthMM = sizeMap?["width"] as? Int ?? 100
-        let labelHeightMM = sizeMap?["height"] as? Int ?? 20
+        let labelWidthMM = sizeMap?["width"] as? Int ?? 40
+        let labelHeightMM = sizeMap?["height"] as? Int ?? 25
+        
+        let gapMap = args["gap"] as? [String: Any]
+        let gapWidthMM = gapMap?["width"] as? Int ?? 2
+        let gapHeightMM = gapMap?["height"] as? Int ?? 0
+        
         let startX = args["x"] as? Int ?? 0
         let startY = args["y"] as? Int ?? 0
         let deviceId = args["device_id"] as? String
@@ -377,7 +382,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             let cmd = PTCommandTSPL()
             cmd.encoding = String.Encoding.utf8.rawValue
             cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
-            cmd.setGapWithDistance(1, offset: 0)
+            cmd.setGapWithDistance(gapWidthMM, offset: gapHeightMM)
             cmd.setCLS()
 
             guard let cgImage = imageFromFlutter(imageData)?.cgImage else { continue }

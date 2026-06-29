@@ -723,8 +723,11 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             }
 
             val printer = TSPLPrinter(conn)
-            val size = call.argument<Map<String, Int>>("size")
+            val size = call.argument<Map<String, Any>>("size")
             val (sizeWidth, sizeHeight) = extractSizeImage(size)
+            val gap = call.argument<Map<String, Any>>("gap")
+            val gapWidth = (gap?.get("width") as? Number)?.toDouble() ?: 2.0
+            val gapHeight = (gap?.get("height") as? Number)?.toDouble() ?: 0.0
             val x = call.argument<Int>("x") ?: 0
             val y = call.argument<Int>("y") ?: 0
 
@@ -732,12 +735,13 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 val bitmap =
                     BitmapFactory.decodeByteArray(imageData, 0, imageData.size) ?: return@forEach
                 printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
+                    .gapMm(gapWidth, gapHeight)
                     .cls()
                     .bitmap(
                         x,
                         y,
                         TSPLConst.BMP_MODE_OVERWRITE,
-                        900,
+                        bitmap.width,
                         bitmap,
                         AlgorithmType.Threshold
                     )
@@ -844,8 +848,11 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private fun extractGap(gap: Map<String, Double>?) =
         Pair(gap?.get("width") ?: 0.0, gap?.get("height") ?: 0.0)
 
-    private fun extractSizeImage(size: Map<String, Int>?) =
-        Pair(size?.get("width") ?: 600, size?.get("height") ?: 20)
+    private fun extractSizeImage(size: Map<String, Any>?) =
+        Pair(
+            (size?.get("width") as? Number)?.toInt() ?: 40,
+            (size?.get("height") as? Number)?.toInt() ?: 25
+        )
 
     private fun processBarcode(barcode: Map<String, Any>, printer: TSPLPrinter) {
         printer.barcode(

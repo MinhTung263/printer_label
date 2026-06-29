@@ -26,6 +26,10 @@ class LabelModel {
         'width': label.width,
         'height': label.height,
       },
+      'gap': {
+        'width': label.gap,
+        'height': 0,
+      },
     };
     return map;
   }
