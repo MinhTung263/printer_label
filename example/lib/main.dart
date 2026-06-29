@@ -66,6 +66,8 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
+const String _defaultPrinterIp = '192.168.1.56';
+
 class _MyHomePageState extends State<MyHomePage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
@@ -76,7 +78,7 @@ class _MyHomePageState extends State<MyHomePage>
   bool isPrinting = false;
 
   final TextEditingController textEditingController =
-      TextEditingController(text: "192.168.1.56");
+      TextEditingController(text: _defaultPrinterIp);
   final FocusNode focusNode = FocusNode();
 
   final List<ProductBarcodeModel> products = [
