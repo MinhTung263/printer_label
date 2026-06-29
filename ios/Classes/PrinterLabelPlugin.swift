@@ -394,7 +394,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let gapWidthMM = gapMap?["width"] as? Int ?? 2
         let gapHeightMM = gapMap?["height"] as? Int ?? 0
         
-        let startX = args["x"] as? Int ?? 0
+        let startX = max(0, (args["x"] as? Int ?? 0) - 20)
         let startY = args["y"] as? Int ?? 0
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
