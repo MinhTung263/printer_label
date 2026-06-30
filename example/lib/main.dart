@@ -277,21 +277,21 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-  Future<void> _checkPrinterStatus({required String ipAddress}) async {
+  Future<void> _checkPrinterStatus(ConnectedDevice device) async {
     setState(() => isCheckingStatus = true);
     context.showSnackBar('Đang kiểm tra máy in...',
         backgroundColor: Colors.blueGrey);
     try {
       // 1. Thử check theo giao thức ESC/POS trước
       var status = await PrinterLabel.checkPrinterStatus(
-        deviceId: DeviceId.lan(ipAddress),
+        deviceId: device.id,
         type: "ESC",
       );
 
       // 2. Nếu trả về UNKNOWN (do timeout / không phải máy ESC), thử sang TSPL
       if (status == PrinterStatus.unknown) {
         status = await PrinterLabel.checkPrinterStatus(
-          deviceId: DeviceId.lan(ipAddress),
+          deviceId: device.id,
           type: "TSPL",
         );
       }
@@ -475,11 +475,7 @@ class _MyHomePageState extends State<MyHomePage>
                 await PrinterLabel.disconnectPrinter(deviceId: device.id);
                 _removeConnectedDevice(device.id);
               },
-              onCheckPrinterStatus: isConnected
-                  ? () => _checkPrinterStatus(
-                        ipAddress: textEditingController.text,
-                      )
-                  : null,
+              onCheckPrinterStatus: _checkPrinterStatus,
               btDevices: _btDevices,
               isScanningBt: _isScanningBt,
               hasScannedBt: _hasScannedBt,

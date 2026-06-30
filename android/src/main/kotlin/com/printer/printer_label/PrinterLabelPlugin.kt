@@ -655,6 +655,30 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             scanEventSink?.error("BT_OFF", "Bluetooth is not enabled", null)
             return
         }
+
+        val isDiscovering = try {
+            adapter.isDiscovering
+        } catch (_: SecurityException) {
+            false
+        }
+
+        if (isDiscovering) {
+            try {
+                adapter.cancelDiscovery()
+            } catch (_: SecurityException) {}
+
+            // Trì hoãn 500ms để đảm bảo Bluetooth stack hoàn tất việc hủy quét cũ trước khi bắt đầu quét mới
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (!isDetached && scanEventSink != null) {
+                    actualStartBluetoothScan(adapter)
+                }
+            }, 500L)
+        } else {
+            actualStartBluetoothScan(adapter)
+        }
+    }
+
+    private fun actualStartBluetoothScan(adapter: BluetoothAdapter) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
@@ -670,29 +694,11 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                                 intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                             }
                         device?.let {
-                            try {
-                                val name = it.name ?: ""
-                                val btClass = it.bluetoothClass
-                                val majorClass = btClass?.majorDeviceClass ?: 0
-                                val deviceClass = btClass?.deviceClass ?: 0
-
-                                // 1. Check if explicitly a printer class (Major: IMAGING = 1536, Device: IMAGING_PRINTER = 1664)
-                                val isPrinterClass = majorClass == 1536 || deviceClass == 1664
-
-                                // 2. Filter out known non-printer major classes
-                                // 256: COMPUTER, 512: PHONE, 1024: AUDIO_VIDEO, 768: WEARABLE, 1280: TOY, 2048: HEALTH
-                                val isNonPrinterMajor = majorClass == 256 || majorClass == 512 || majorClass == 1024 || majorClass == 768 || majorClass == 1280 || majorClass == 2048
-
-                                // We keep it if it is explicitly a printer, OR if it is not in a known non-printer major class (which includes uncategorized/misc)
-                                val shouldKeep = isPrinterClass || !isNonPrinterMajor
-
-                                if (shouldKeep) {
-                                    val map = mapOf("name" to (it.name ?: "Unknown"), "mac" to it.address)
-                                    Handler(Looper.getMainLooper()).post {
-                                        scanEventSink?.success(map)
-                                    }
+                            if (isPrinter(it)) {
+                                val map = mapOf("name" to (it.name ?: "Unknown"), "mac" to it.address)
+                                Handler(Looper.getMainLooper()).post {
+                                    scanEventSink?.success(map)
                                 }
-                            } catch (_: SecurityException) {
                             }
                         }
                     }
@@ -712,7 +718,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         mContext?.registerReceiver(receiver, filter)
         btScanReceiver = receiver
         try {
-            if (adapter.isDiscovering) adapter.cancelDiscovery()
             adapter.startDiscovery()
         } catch (_: SecurityException) {
             scanEventSink?.error("BT_PERMISSION", "Missing BLUETOOTH_SCAN permission", null)
@@ -736,17 +741,43 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             if (adapter == null || !adapter.isEnabled) {
                 result.error("BT_OFF", "Bluetooth is not enabled", null); return
             }
-            val list = adapter.bondedDevices.map {
-                mapOf(
-                    "name" to (it.name ?: "Unknown"),
-                    "mac" to it.address
-                )
-            }
+            val list = adapter.bondedDevices
+                .filter { isPrinter(it) }
+                .map {
+                    mapOf(
+                        "name" to (it.name ?: "Unknown"),
+                        "mac" to it.address
+                    )
+                }
             result.success(list)
         } catch (e: SecurityException) {
             result.error("BT_PERMISSION", "Missing BLUETOOTH_CONNECT permission", null)
         } catch (e: Exception) {
             result.error("BT_ERROR", e.message, null)
+        }
+    }
+
+    private fun isPrinter(device: BluetoothDevice): Boolean {
+        try {
+            val name = device.name ?: ""
+            val lowerName = name.lowercase()
+            if (lowerName.contains("printer") || lowerName.contains("mpt-") || lowerName.contains("pt-")) {
+                return true
+            }
+
+            val btClass = device.bluetoothClass ?: return true
+            val majorClass = btClass.majorDeviceClass
+            val deviceClass = btClass.deviceClass
+
+            // 1. Check if explicitly a printer class (Major: IMAGING = 1536, Device: IMAGING_PRINTER = 1664)
+            val isPrinterClass = majorClass == 1536 || deviceClass == 1664
+            if (isPrinterClass) return true
+
+            // 2. Filter out known non-printer major classes (256: COMPUTER, 512: PHONE, 1024: AUDIO_VIDEO, 768: WEARABLE, 1280: TOY, 2048: HEALTH)
+            val isNonPrinterMajor = majorClass == 256 || majorClass == 512 || majorClass == 1024 || majorClass == 768 || majorClass == 1280 || majorClass == 2048
+            return !isNonPrinterMajor
+        } catch (_: SecurityException) {
+            return true
         }
     }
 

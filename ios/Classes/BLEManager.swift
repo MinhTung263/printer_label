@@ -245,7 +245,6 @@ extension BLEManager: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard RSSI.intValue >= minScanRSSI else { return }
         let identifier = peripheral.identifier.uuidString
-        discoveredPeripherals[identifier] = peripheral
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? ""
         
         guard !name.isEmpty else { return }
@@ -273,6 +272,8 @@ extension BLEManager: CBCentralManagerDelegate {
         
         guard matchesLong || matchesShort else { return }
         
+        // ⭐ Chỉ lưu thiết bị vào danh sách phát hiện nếu thỏa mãn bộ lọc máy in
+        discoveredPeripherals[identifier] = peripheral
         scanEventSink?(["name": name, "identifier": identifier, "mac": identifier] as [String: Any])
     }
 

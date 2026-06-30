@@ -18,6 +18,10 @@ class _CupStickerTabState extends State<CupStickerTab> {
   int _previewCupCount = 1;
   bool _isPrinting = false;
 
+  void _showNoConnectionMsg() {
+    showTopNotification(context, 'Vui lòng kết nối máy in trước khi in!');
+  }
+
   // Sample data mirrors CupStickerExample.printOrderCupSticker
   static final _cupSampleData = [
     PreviewLabelModel(
@@ -221,6 +225,10 @@ class _CupStickerTabState extends State<CupStickerTab> {
                 onPressed: _isPrinting
                     ? null
                     : () async {
+                        if (widget.deviceId == null) {
+                          _showNoConnectionMsg();
+                          return;
+                        }
                         setState(() => _isPrinting = true);
                         try {
                           await CupStickerExample.printOrderCupSticker(

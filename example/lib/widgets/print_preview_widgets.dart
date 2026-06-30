@@ -129,15 +129,15 @@ class RawPrintBar extends StatelessWidget {
 
 class RawPrintButtonData {
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
-  const RawPrintButtonData({required this.label, required this.onPressed});
+  const RawPrintButtonData({required this.label, this.onPressed});
 }
 
 RawPrintBar buildRawPrintBar({
   required Color color,
   required String title,
-  required List<({String label, VoidCallback onPressed})> buttons,
+  required List<({String label, VoidCallback? onPressed})> buttons,
 }) {
   return RawPrintBar(
     color: color,
@@ -257,6 +257,156 @@ class PrintImageCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+OverlayEntry? _activeNotificationEntry;
+
+void showTopNotification(BuildContext context, String message, {bool isError = true, Color? customBgColor}) {
+  // Gỡ bỏ thông báo cũ nếu đang hiển thị
+  if (_activeNotificationEntry != null) {
+    try {
+      _activeNotificationEntry!.remove();
+    } catch (_) {}
+    _activeNotificationEntry = null;
+  }
+
+  final overlay = Overlay.of(context);
+  late OverlayEntry entry;
+  
+  entry = OverlayEntry(
+    builder: (context) {
+      return _TopNotificationWidget(
+        message: message,
+        isError: isError,
+        customBgColor: customBgColor,
+        onDismiss: () {
+          if (_activeNotificationEntry == entry) {
+            _activeNotificationEntry = null;
+          }
+          try {
+            entry.remove();
+          } catch (_) {}
+        },
+      );
+    },
+  );
+  
+  _activeNotificationEntry = entry;
+  overlay.insert(entry);
+}
+
+class _TopNotificationWidget extends StatefulWidget {
+  final String message;
+  final bool isError;
+  final Color? customBgColor;
+  final VoidCallback onDismiss;
+  
+  const _TopNotificationWidget({
+    required this.message,
+    required this.isError,
+    this.customBgColor,
+    required this.onDismiss,
+  });
+  
+  @override
+  State<_TopNotificationWidget> createState() => _TopNotificationWidgetState();
+}
+
+class _TopNotificationWidgetState extends State<_TopNotificationWidget> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _yAnimation;
+  late Animation<double> _opacityAnimation;
+  
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    
+    _yAnimation = Tween<double>(begin: -60, end: 0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
+    );
+    _opacityAnimation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
+    );
+    
+    _controller.forward();
+    
+    // Auto dismiss after 2 seconds
+    Future.delayed(const Duration(milliseconds: 2200), () {
+      if (mounted) {
+        _controller.reverse().then((_) {
+          widget.onDismiss();
+        });
+      }
+    });
+  }
+  
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    final topPadding = MediaQuery.of(context).padding.top;
+    final bgColor = widget.customBgColor ?? (widget.isError ? const Color(0xFFF43F5E) : const Color(0xFF0D9488));
+    
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Positioned(
+          top: topPadding + 16 + _yAnimation.value,
+          left: 16,
+          right: 16,
+          child: Opacity(
+            opacity: _opacityAnimation.value,
+            child: child,
+          ),
+        );
+      },
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Icon(
+                widget.isError ? Icons.error_outline : Icons.info_outline,
+                color: Colors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  widget.message,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

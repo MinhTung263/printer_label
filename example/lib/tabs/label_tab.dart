@@ -29,6 +29,10 @@ class _LabelTabState extends State<LabelTab> {
   int _previewProductCount = 1;
   bool _isPrintingLabel = false;
 
+  void _showNoConnectionMsg() {
+    showTopNotification(context, 'Vui lòng kết nối máy in trước khi in!');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -158,14 +162,11 @@ class _LabelTabState extends State<LabelTab> {
         sizeY: 1,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gửi lệnh in Text TSPL')),
-        );
+        showTopNotification(context, 'Đã gửi lệnh in Text TSPL', isError: false);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+        showTopNotification(context, 'Lỗi: $e');
       }
     }
   }
@@ -181,14 +182,11 @@ class _LabelTabState extends State<LabelTab> {
         type: '128',
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gửi lệnh in Barcode TSPL')),
-        );
+        showTopNotification(context, 'Đã gửi lệnh in Barcode TSPL', isError: false);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+        showTopNotification(context, 'Lỗi: $e');
       }
     }
   }
@@ -203,14 +201,11 @@ class _LabelTabState extends State<LabelTab> {
         size: 4,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gửi lệnh in QR Code TSPL')),
-        );
+        showTopNotification(context, 'Đã gửi lệnh in QR Code TSPL', isError: false);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+        showTopNotification(context, 'Lỗi: $e');
       }
     }
   }
@@ -325,9 +320,15 @@ class _LabelTabState extends State<LabelTab> {
               ElevatedButton.icon(
                 onPressed: _isPrintingLabel
                     ? null
-                    : () => _printLabels(
+                    : () {
+                        if (widget.deviceId == null) {
+                          _showNoConnectionMsg();
+                          return;
+                        }
+                        _printLabels(
                           widget.products.take(_previewProductCount).toList(),
-                        ),
+                        );
+                      },
                 icon: _isPrintingLabel
                     ? const SizedBox(
                         width: 14,
@@ -362,9 +363,9 @@ class _LabelTabState extends State<LabelTab> {
           color: Colors.blue.shade600,
           title: 'In thô TSPL (dev)',
           buttons: [
-            (label: 'In Text', onPressed: _printRawText),
-            (label: 'In Barcode', onPressed: _printRawBarcode),
-            (label: 'In QR', onPressed: _printRawQRCode),
+            (label: 'In Text', onPressed: () => widget.deviceId == null ? _showNoConnectionMsg() : _printRawText()),
+            (label: 'In Barcode', onPressed: () => widget.deviceId == null ? _showNoConnectionMsg() : _printRawBarcode()),
+            (label: 'In QR', onPressed: () => widget.deviceId == null ? _showNoConnectionMsg() : _printRawQRCode()),
           ],
         ),
       ],

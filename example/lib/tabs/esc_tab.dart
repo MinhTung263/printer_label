@@ -17,7 +17,12 @@ class _EscTabState extends State<EscTab> {
   bool _isPrintingEsc = false;
   TicketSize _selectedSize = TicketSize.mm80;
 
-  String get _targetDeviceId => widget.deviceId ?? DeviceId.lan(widget.ipAddress);
+  String get _targetDeviceId =>
+      widget.deviceId ?? DeviceId.lan(widget.ipAddress);
+
+  void _showNoConnectionMsg() {
+    showTopNotification(context, 'Vui lòng kết nối máy in trước khi in!');
+  }
 
   Future<void> _printExample() async {
     setState(() => _isPrintingEsc = true);
@@ -34,9 +39,7 @@ class _EscTabState extends State<EscTab> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi in: $e')),
-        );
+        showTopNotification(context, 'Lỗi in: $e');
       }
     } finally {
       if (mounted) setState(() => _isPrintingEsc = false);
@@ -51,14 +54,11 @@ class _EscTabState extends State<EscTab> {
             'Printer Label - Test Raw Text Printing ESC/POS\nLine 2 - Hello World!\n\n',
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gửi lệnh in Text ESC')),
-        );
+        showTopNotification(context, 'Đã gửi lệnh in Text ESC', isError: false);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+        showTopNotification(context, 'Lỗi: $e');
       }
     }
   }
@@ -71,14 +71,11 @@ class _EscTabState extends State<EscTab> {
         type: '128',
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gửi lệnh in Barcode ESC')),
-        );
+        showTopNotification(context, 'Đã gửi lệnh in Barcode ESC', isError: false);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+        showTopNotification(context, 'Lỗi: $e');
       }
     }
   }
@@ -91,14 +88,11 @@ class _EscTabState extends State<EscTab> {
         size: 8,
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã gửi lệnh in QR Code ESC')),
-        );
+        showTopNotification(context, 'Đã gửi lệnh in QR Code ESC', isError: false);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+        showTopNotification(context, 'Lỗi: $e');
       }
     }
   }
@@ -121,25 +115,6 @@ class _EscTabState extends State<EscTab> {
                   subtitle:
                       'Sử dụng giao thức in hoá đơn nhiệt ESC/POS thông thường.',
                 ),
-                const SizedBox(height: 20),
-
-                // Tiêu đề khu vực xem trước
-                Row(
-                  children: [
-                    const Icon(Icons.visibility_outlined,
-                        color: Colors.grey, size: 18),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Xem trước hóa đơn (Mô phỏng)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
 
                 // Khu vực hiển thị hóa đơn giả lập giống hệt ticket.png
                 Center(
@@ -213,7 +188,15 @@ class _EscTabState extends State<EscTab> {
               // Nút in thử
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: _isPrintingEsc ? null : _printExample,
+                  onPressed: _isPrintingEsc
+                      ? null
+                      : () {
+                          if (widget.deviceId == null) {
+                            _showNoConnectionMsg();
+                            return;
+                          }
+                          _printExample();
+                        },
                   icon: _isPrintingEsc
                       ? const SizedBox(
                           width: 16,
@@ -246,9 +229,24 @@ class _EscTabState extends State<EscTab> {
           color: Colors.indigo.shade600,
           title: 'In thô ESC/POS (dev)',
           buttons: [
-            (label: 'In Text', onPressed: _printRawText),
-            (label: 'In Barcode', onPressed: _printRawBarcode),
-            (label: 'In QR', onPressed: _printRawQRCode),
+            (
+              label: 'In Text',
+              onPressed: () => widget.deviceId == null
+                  ? _showNoConnectionMsg()
+                  : _printRawText()
+            ),
+            (
+              label: 'In Barcode',
+              onPressed: () => widget.deviceId == null
+                  ? _showNoConnectionMsg()
+                  : _printRawBarcode()
+            ),
+            (
+              label: 'In QR',
+              onPressed: () => widget.deviceId == null
+                  ? _showNoConnectionMsg()
+                  : _printRawQRCode()
+            ),
           ],
         ),
       ],
@@ -660,8 +658,6 @@ class _ReceiptRow extends StatelessWidget {
     );
   }
 }
-
-
 
 // ─── Clipper tạo mép răng cưa xé giấy của hóa đơn nhiệt ──────────────────────
 class TicketClipper extends CustomClipper<Path> {
