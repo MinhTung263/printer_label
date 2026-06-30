@@ -1,5 +1,4 @@
 import 'package:example/cup_sticker_example.dart';
-import 'package:example/select_size.dart';
 import 'package:example/widgets/print_preview_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:printer_label/printer_label.dart';
@@ -87,10 +86,11 @@ class _CupStickerTabState extends State<CupStickerTab> {
                       spacing: 16,
                       runSpacing: 16,
                       alignment: WrapAlignment.center,
-                      children: _cupSampleData.take(_previewCupCount).map((data) {
-                        final double aspectRatio = _selectedCupSize.widthMm / _selectedCupSize.heightMm;
+                      children:
+                          _cupSampleData.take(_previewCupCount).map((data) {
                         final double cardWidth = _selectedCupSize.widthMm * 4.5;
-                        final double cardHeight = _selectedCupSize.heightMm * 4.5;
+                        final double cardHeight =
+                            _selectedCupSize.heightMm * 4.5;
 
                         return Container(
                           width: cardWidth,
@@ -105,7 +105,8 @@ class _CupStickerTabState extends State<CupStickerTab> {
                                 offset: const Offset(0, 3),
                               ),
                             ],
-                            border: Border.all(color: Colors.grey.shade200, width: 0.5),
+                            border: Border.all(
+                                color: Colors.grey.shade200, width: 0.5),
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(6),
@@ -223,7 +224,8 @@ class _CupStickerTabState extends State<CupStickerTab> {
                         try {
                           await CupStickerExample.printOrderCupSticker(
                             _selectedCupSize,
-                            items: _cupSampleData.take(_previewCupCount).toList(),
+                            items:
+                                _cupSampleData.take(_previewCupCount).toList(),
                             context: context,
                             deviceId: DeviceId.lan(widget.ipAddress),
                           );
@@ -253,7 +255,8 @@ class _CupStickerTabState extends State<CupStickerTab> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF0D9488),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
