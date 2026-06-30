@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:example/select_type_label.dart';
 import 'package:example/widgets/print_preview_widgets.dart';
 import 'package:flutter/material.dart';
@@ -26,8 +24,6 @@ class LabelTab extends StatefulWidget {
 }
 
 class _LabelTabState extends State<LabelTab> {
-  List<Uint8List> _labelPreviews = [];
-  bool _labelPreviewLoading = false;
   int _previewProductCount = 1;
   bool _isPrintingLabel = false;
 
@@ -35,7 +31,6 @@ class _LabelTabState extends State<LabelTab> {
   void initState() {
     super.initState();
     _previewProductCount = widget.selectedRow.count;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshPreview());
   }
 
   @override
@@ -44,34 +39,97 @@ class _LabelTabState extends State<LabelTab> {
     if (old.selectedRow != widget.selectedRow ||
         old.products != widget.products) {
       _previewProductCount = widget.selectedRow.count.clamp(1, widget.products.length);
-      _refreshPreview();
     }
   }
 
-  Future<void> _refreshPreview() async {
-    if (!mounted) return;
-    setState(() => _labelPreviewLoading = true);
-    try {
-      final previewProducts =
-          widget.products.take(_previewProductCount).toList();
-      final images = await LabelFromWidget.captureImages<ProductBarcodeModel>(
-        previewProducts,
-        context,
-        labelPerRow: widget.selectedRow,
-        itemBuilder: (product) => BarcodeView<ProductBarcodeModel>(
-          data: product,
-          stampWidth: widget.selectedRow.stampWidth,
-          stampHeight: widget.selectedRow.stampHeight,
-          nameBuilder: (p) => p.name,
-          barcodeBuilder: (p) => p.barcode,
-          priceBuilder: (p) => p.price,
-        ),
-        quantity: (p) => p.quantity,
-      );
-      if (mounted) setState(() => _labelPreviews = images);
-    } finally {
-      if (mounted) setState(() => _labelPreviewLoading = false);
+  List<ProductBarcodeModel> _getExpandedProducts() {
+    final previewProducts = widget.products.take(_previewProductCount).toList();
+    final List<ProductBarcodeModel> expanded = [];
+    for (final p in previewProducts) {
+      for (int i = 0; i < p.quantity; i++) {
+        expanded.add(p);
+      }
     }
+    return expanded;
+  }
+
+  Widget _buildPreviewArea() {
+    final expanded = _getExpandedProducts();
+    if (expanded.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: Icon(Icons.image_not_supported, color: Colors.grey),
+        ),
+      );
+    }
+
+    final int itemsPerRow = widget.selectedRow.count;
+    final List<List<ProductBarcodeModel>> rows = [];
+    for (int i = 0; i < expanded.length; i += itemsPerRow) {
+      final end = (i + itemsPerRow < expanded.length) ? i + itemsPerRow : expanded.length;
+      rows.add(expanded.sublist(i, end));
+    }
+
+    final double leftPadding = widget.selectedRow.name.startsWith('double')
+        ? 10.0
+        : (widget.selectedRow.name.startsWith('triple') ? 8.0 : 8.0);
+    final double rightPadding = leftPadding;
+    final double spacer = widget.selectedRow.name.startsWith('double')
+        ? 10.0
+        : (widget.selectedRow.name.startsWith('triple') ? 12.0 : 0.0);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: rows.map((rowItems) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: FittedBox(
+              fit: BoxFit.contain,
+              child: Container(
+                color: Colors.white,
+                padding: EdgeInsets.fromLTRB(leftPadding, 10, rightPadding, 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(rowItems.length, (index) {
+                    final product = rowItems[index];
+                    final itemWidget = Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300, width: 0.5),
+                      ),
+                      child: BarcodeView<ProductBarcodeModel>(
+                        data: product,
+                        stampWidth: widget.selectedRow.stampWidth,
+                        stampHeight: widget.selectedRow.stampHeight,
+                        nameBuilder: (p) => p.name,
+                        barcodeBuilder: (p) => p.barcode,
+                        priceBuilder: (p) => p.price,
+                      ),
+                    );
+
+                    if (index < rowItems.length - 1) {
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          itemWidget,
+                          SizedBox(width: spacer),
+                        ],
+                      );
+                    }
+                    return itemWidget;
+                  }),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
 
   Future<void> _printLabels(List<ProductBarcodeModel> items) async {
@@ -172,25 +230,7 @@ class _LabelTabState extends State<LabelTab> {
                       'Tạo nhãn sản phẩm từ widget rồi gửi lệnh TSPL đến máy in.',
                 ),
                 const SizedBox(height: 10),
-                if (_labelPreviewLoading)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                  )
-                else if (_labelPreviews.isNotEmpty)
-                  LabelCarousel(
-                    images: _labelPreviews,
-                    accentColor: const Color(0xFF4F46E5),
-                  )
-                else
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Center(
-                      child:
-                          Icon(Icons.image_not_supported, color: Colors.grey),
-                    ),
-                  ),
+                _buildPreviewArea(),
               ],
             ),
           ),
@@ -271,7 +311,6 @@ class _LabelTabState extends State<LabelTab> {
                     onChanged: (val) {
                       if (val != null) {
                         setState(() => _previewProductCount = val);
-                        _refreshPreview();
                       }
                     },
                   ),
@@ -299,7 +338,7 @@ class _LabelTabState extends State<LabelTab> {
                 label: Text(
                   _isPrintingLabel
                       ? 'Đang in...'
-                      : 'In nhãn  •  ${_labelPreviews.length} tờ',
+                      : 'In nhãn  •  ${(_getExpandedProducts().length / widget.selectedRow.count).ceil()} tờ',
                   style: const TextStyle(fontSize: 13),
                 ),
                 style: ElevatedButton.styleFrom(

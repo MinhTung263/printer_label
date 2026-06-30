@@ -31,7 +31,7 @@ class _FunctionsTabState extends State<FunctionsTab>
   static const _tabs = [
     Tab(icon: Icon(Icons.label_outline, size: 20), text: 'Nhãn'),
     Tab(icon: Icon(Icons.receipt_long, size: 20), text: 'Hoá đơn'),
-    Tab(icon: Icon(Icons.local_drink_outlined, size: 20), text: 'Cốc'),
+    Tab(icon: Icon(Icons.local_drink_outlined, size: 20), text: 'Tem trà sữa'),
   ];
 
   @override

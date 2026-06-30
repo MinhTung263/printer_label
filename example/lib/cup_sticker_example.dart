@@ -6,11 +6,12 @@ class CupStickerExample {
 
   static Future<void> printOrderCupSticker(
     CupStickerSize size, {
+    List<PreviewLabelModel>? items,
     BuildContext? context,
     String? deviceId,
     PrinterConnectionType? connectionType,
   }) async {
-    final List<PreviewLabelModel> dataList = [
+    final List<PreviewLabelModel> dataList = items ?? [
       PreviewLabelModel(
         code: "1213",
         productName: "Trà sữa",
