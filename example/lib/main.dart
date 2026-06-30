@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:example/connected_device.dart';
 import 'package:example/context_extensions.dart';
 import 'package:example/devices_tab.dart';
@@ -7,8 +8,6 @@ import 'package:example/functions_tab.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
-
-import 'tabs/esc_tab.dart';
 
 void main() {
   runApp(const MyApp());
@@ -476,7 +475,6 @@ class _MyHomePageState extends State<MyHomePage>
                 await PrinterLabel.disconnectPrinter(deviceId: device.id);
                 _removeConnectedDevice(device.id);
               },
-
               onCheckPrinterStatus: isConnected
                   ? () => _checkPrinterStatus(
                         ipAddress: textEditingController.text,
