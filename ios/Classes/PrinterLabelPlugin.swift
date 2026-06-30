@@ -208,13 +208,6 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         case "print_image_esc":
             escPrinter.printImageESC(call: call, result: result)
 
-        // MARK: Print All
-        case "print_all":
-            guard let args = call.arguments as? [String: Any] else {
-                result(false)
-                return
-            }
-            printAll(args: args, result: result)
 
         // MARK: Check Connection
         case "checkConnect":
@@ -400,26 +393,28 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let targetHeight = labelHeightMM * 8
 
         for imageData in images {
-            let cmd = PTCommandTSPL()
-            cmd.encoding = String.Encoding.utf8.rawValue
-            cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
-            cmd.setGapWithDistance(gapWidthMM, offset: gapHeightMM)
-            cmd.setReferenceXPos(0, yPos: 0)
-            cmd.setPrintDirection(.normal, mirror: .normal)
-            cmd.setCLS()
+            autoreleasepool {
+                let cmd = PTCommandTSPL()
+                cmd.encoding = String.Encoding.utf8.rawValue
+                cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
+                cmd.setGapWithDistance(gapWidthMM, offset: gapHeightMM)
+                cmd.setReferenceXPos(0, yPos: 0)
+                cmd.setPrintDirection(.normal, mirror: .normal)
+                cmd.setCLS()
 
-            guard let uiImage = imageFromFlutter(imageData) else { continue }
-            // Compensate for printer's 20-dot hardware offset on the left.
-            let drawX: CGFloat = -20.0
-            guard let cgImage = resizeImage(uiImage, targetWidth: CGFloat(targetWidth), targetHeight: CGFloat(targetHeight), drawX: drawX) else { continue }
+                guard let uiImage = imageFromFlutter(imageData) else { return }
+                // Compensate for printer's 20-dot hardware offset on the left.
+                let drawX: CGFloat = -20.0
+                guard let cgImage = resizeImage(uiImage, targetWidth: CGFloat(targetWidth), targetHeight: CGFloat(targetHeight), drawX: drawX) else { return }
 
-            cmd.addBitmap(
-                withXPos: 0, yPos: 0,
-                mode: .OVERWRITE, image: cgImage,
-                bitmapMode: .binary, compress: .none
-            )
-            cmd.print(withSets: 1, copies: 1)
-            sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+                cmd.addBitmap(
+                    withXPos: 0, yPos: 0,
+                    mode: .OVERWRITE, image: cgImage,
+                    bitmapMode: .binary, compress: .none
+                )
+                cmd.print(withSets: 1, copies: 1)
+                sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+            }
         }
         result(true)
     }
@@ -671,50 +666,6 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         result(true)
     }
 
-    func printAll(args: [String: Any], result: @escaping FlutterResult) {
-        let connectionType = args["connection_type"] as? String
-
-        // Lấy command data — thử build ESC hoặc TSPL tuỳ args có sẵn
-        if let imageData = args["image"] as? FlutterStandardTypedData {
-            // ESC path
-            escPrinter.buildAndSendESC(imageData: imageData, args: args) { [weak self] data in
-                guard let self = self, let data = data else { result(false); return }
-                if connectionType == "Bluetooth" || connectionType == nil {
-                    self.sendToPrinter(data, deviceId: nil, connectionType: connectionType)
-                }
-                if connectionType == "LAN" || connectionType == nil {
-                    let ips = LANPrinterManager.shared.getConnectedPrinters()
-                    for ip in ips {
-                        LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
-                    }
-                }
-                result(true)
-            }
-        } else if let images = args["images"] as? [FlutterStandardTypedData], !images.isEmpty {
-            // TSPL path — send tới tất cả connections
-            let sizeMap = args["size"] as? [String: Any]
-            let w = sizeMap?["width"] as? Int ?? 100
-            let h = sizeMap?["height"] as? Int ?? 20
-            let x = args["x"] as? Int ?? 0
-            let y = args["y"] as? Int ?? 0
-
-            for imageData in images {
-                let cmd = PTCommandTSPL()
-                cmd.encoding = String.Encoding.utf8.rawValue
-                cmd.setPrintAreaSizeWithWidth(w, height: h)
-                cmd.setGapWithDistance(1, offset: 0)
-                cmd.setCLS()
-                guard let cg = imageFromFlutter(imageData)?.cgImage else { continue }
-                cmd.addBitmap(withXPos: x, yPos: y, mode: .OVERWRITE, image: cg, bitmapMode: .binary, compress: .none)
-                cmd.print(withSets: 1, copies: 1)
-                let data = cmd.cmdData as Data
-                sendToPrinter(data, deviceId: nil, connectionType: connectionType)
-            }
-            result(true)
-        } else {
-            result(false)
-        }
-    }
 
     // MARK: - Utilities
 

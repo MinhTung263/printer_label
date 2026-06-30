@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:example/context_extensions.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
+
+import 'tabs/esc_tab.dart';
 
 class PrinterScreen extends StatefulWidget {
   const PrinterScreen({super.key});
@@ -116,8 +116,8 @@ class _PrinterScreenState extends State<PrinterScreen> {
     await Future.delayed(const Duration(milliseconds: 300));
 
     // Check if already connected
-    final bool isConnected =
-        await PrinterLabel.checkConnect(deviceId: DeviceId.bluetooth(device.mac));
+    final bool isConnected = await PrinterLabel.checkConnect(
+        deviceId: DeviceId.bluetooth(device.mac));
     if (!mounted) return;
     if (isConnected) {
       setState(() => _connectedMacs.add(device.mac));
@@ -147,24 +147,23 @@ class _PrinterScreenState extends State<PrinterScreen> {
     );
   }
 
-  Future<Uint8List> _loadImageFromAssets(String path) async {
-    final byteData = await DefaultAssetBundle.of(context).load(path);
-    return byteData.buffer.asUint8List();
-  }
-
   Future<void> _printSample() async {
     if (_connectedMacs.isEmpty) {
-      context.showSnackBar("Chưa kết nối thiết bị nào. Chọn thiết bị để kết nối.");
+      context
+          .showSnackBar("Chưa kết nối thiết bị nào. Chọn thiết bị để kết nối.");
       return;
     }
 
-    final image = await _loadImageFromAssets("packages/printer_label/images/ticket.png");
-
     for (final mac in _connectedMacs) {
       try {
-        await ESCPrintService.instance.print(
+        await ESCPrintService.instance.printWidget(
           deviceId: DeviceId.bluetooth(mac),
-          model: PrintThermalModel(image: image, size: TicketSize.mm58),
+          widget: const ThermalReceiptPreview(
+            size: TicketSize.mm58,
+            isForPrinting: true,
+          ),
+          size: TicketSize.mm58,
+          pixelRatio: 2.5,
         );
       } catch (e) {
         if (!mounted) return;
@@ -243,12 +242,15 @@ class _PrinterScreenState extends State<PrinterScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xFFF43F5E), size: 48),
+                      const Icon(Icons.error_outline,
+                          color: Color(0xFFF43F5E), size: 48),
                       const SizedBox(height: 12),
                       Text(
                         _errorMessage!,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(color: Color(0xFFF43F5E), fontWeight: FontWeight.w500),
+                        style: const TextStyle(
+                            color: Color(0xFFF43F5E),
+                            fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 16),
                       ElevatedButton(
@@ -276,14 +278,19 @@ class _PrinterScreenState extends State<PrinterScreen> {
                           const SizedBox(height: 16),
                           const Text(
                             "Đang tìm kiếm thiết bị...",
-                            style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                                color: Colors.grey,
+                                fontWeight: FontWeight.w500),
                           ),
                         ] else ...[
-                          Icon(Icons.bluetooth_disabled, size: 64, color: Colors.grey[300]),
+                          Icon(Icons.bluetooth_disabled,
+                              size: 64, color: Colors.grey[300]),
                           const SizedBox(height: 12),
                           const Text(
                             "Không tìm thấy thiết bị nào",
-                            style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                                color: Colors.grey,
+                                fontWeight: FontWeight.w500),
                           ),
                           const SizedBox(height: 16),
                           ElevatedButton.icon(
@@ -304,11 +311,14 @@ class _PrinterScreenState extends State<PrinterScreen> {
                       Container(
                         width: double.infinity,
                         color: Colors.indigo.shade50,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
                         child: Row(
                           children: [
                             Icon(
-                              _isScanning ? Icons.search : Icons.bluetooth_audio,
+                              _isScanning
+                                  ? Icons.search
+                                  : Icons.bluetooth_audio,
                               size: 16,
                               color: Colors.indigo,
                             ),
@@ -358,21 +368,33 @@ class _PrinterScreenState extends State<PrinterScreen> {
                                       ? Colors.indigo.shade50
                                       : Colors.grey.shade50,
                                   child: Icon(
-                                    isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
-                                    color: isConnected ? Colors.indigo : Colors.grey,
+                                    isConnected
+                                        ? Icons.bluetooth_connected
+                                        : Icons.bluetooth,
+                                    color: isConnected
+                                        ? Colors.indigo
+                                        : Colors.grey,
                                   ),
                                 ),
                                 title: Text(
-                                  d.name.isEmpty ? "Thiết bị không tên" : d.name,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  d.name.isEmpty
+                                      ? "Thiết bị không tên"
+                                      : d.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14),
                                 ),
                                 subtitle: Text(
                                   d.mac,
-                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                  style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 12),
                                 ),
                                 trailing: isConnected
-                                    ? const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 24)
-                                    : const Icon(Icons.chevron_right, color: Colors.grey),
+                                    ? const Icon(Icons.check_circle,
+                                        color: Color(0xFF10B981), size: 24)
+                                    : const Icon(Icons.chevron_right,
+                                        color: Colors.grey),
                                 onTap: () => _connectDevice(d),
                               ),
                             );

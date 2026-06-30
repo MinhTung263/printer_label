@@ -90,15 +90,6 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required PrintThermalModel printThermalModel,
   });
 
-  /// Broadcasts print commands to all active connections (or filtered by [connectionType]).
-  ///
-  /// Supports both label printing [labelModel] (TSPL) and thermal receipt printing [escModel] (ESC/POS).
-  Future<void> printAll({
-    LabelModel? labelModel,
-    PrintThermalModel? escModel,
-    PrinterConnectionType? connectionType,
-  });
-
   /// Connects to a Bluetooth printer using its identifier [macAddress].
   ///
   /// - iOS: [macAddress] represents the CBPeripheral UUID string.

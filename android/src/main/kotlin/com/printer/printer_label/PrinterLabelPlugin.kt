@@ -746,7 +746,11 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 val canvas = android.graphics.Canvas(shifted)
                 canvas.drawColor(android.graphics.Color.WHITE)
                 canvas.drawBitmap(scaledBitmap, shiftX, 0f, null)
-                scaledBitmap.recycle()
+                
+                if (scaledBitmap != bitmap) {
+                    scaledBitmap.recycle()
+                }
+                bitmap.recycle()
  
                 printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
                     .gapMm(gapWidth, gapHeight)
@@ -762,6 +766,8 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                         AlgorithmType.Threshold
                     )
                     .print(1)
+
+                shifted.recycle()
             }
             result.success(true)
         } catch (e: Exception) {

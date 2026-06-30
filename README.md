@@ -215,20 +215,26 @@ await PrinterLabel.printBarcode(
 
 ---
 
-### 5. ESC/POS Receipt Printing
+### 5. ESC/POS Receipt Printing (Thermal Receipts)
 
-To print standard receipt layouts, load your image assets or render widgets and output them to thermal printers:
+To print standard receipt layouts, you can print a Flutter widget directly (which automatically measures the widget's natural height to prevent cutoff or overflows) or send pre-rendered image bytes:
 
+#### Option A: Print Directly from a Flutter Widget (Recommended)
 ```dart
-// Load receipt rasterized template
-final Uint8List imageBytes = await ESCPrintService.instance.loadImageFromAssets(
-  "assets/images/receipt_ticket.png",
-);
-
-await PrinterLabel.printESC(
+await ESCPrintService.instance.printWidget(
   deviceId: DeviceId.lan('192.168.1.56'),
-  printThermalModel: PrintThermalModel(
-    image: imageBytes,
+  widget: MyReceiptWidget(), // Any Flutter widget
+  size: TicketSize.mm80, // Options: mm58, mm80
+  pixelRatio: 2.5, // Resolution scale (2.5 is ideal for thermal printers)
+);
+```
+
+#### Option B: Print from Image Bytes
+```dart
+await ESCPrintService.instance.print(
+  deviceId: DeviceId.lan('192.168.1.56'),
+  model: PrintThermalModel(
+    image: rawImageBytes, // Uint8List of PNG image
     size: TicketSize.mm80, // Options: mm58, mm80
   ),
 );
@@ -265,6 +271,29 @@ await CupStickerPrinter.printWithWidgets(
 * `CupStickerSize.s60x40`: 60 x 40 mm (Standard size / Most popular)
 * `CupStickerSize.s70x50`: 70 x 50 mm (Large cups)
 * `CupStickerSize.s80x60`: 80 x 60 mm (Extra large labels)
+
+---
+
+### 7. Widget Capture Utility
+
+If you need to capture Flutter widgets as images for custom printing pipelines or other purposes, you can use the `WidgetCaptureHelper` utility class. It handles offscreen rendering, proper text directionality, and scaling safety:
+
+```dart
+import 'package:printer_label/printer_label.dart';
+
+// 1. Capture a standard widget (e.g. for label stickers)
+final Uint8List labelBytes = await WidgetCaptureHelper.captureFromWidget(
+  MyLabelWidget(),
+  pixelRatio: 5.0, // High resolution for print clarity
+);
+
+// 2. Capture a potentially long widget (e.g. for long receipts)
+// Automatically measures the widget's natural height to prevent cutoffs or overflows
+final Uint8List receiptBytes = await WidgetCaptureHelper.captureFromLongWidget(
+  MyReceiptWidget(),
+  pixelRatio: 2.5,
+);
+```
 
 ---
 

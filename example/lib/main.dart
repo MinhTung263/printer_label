@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:example/bt_picker.dart';
 import 'package:example/connected_device.dart';
@@ -11,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'tabs/esc_tab.dart';
 
 void main() {
   runApp(const MyApp());
@@ -324,61 +325,6 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-  Future<List<Uint8List>> _captureProductLabels() async {
-    return await LabelFromWidget.captureImages<ProductBarcodeModel>(
-      products,
-      context,
-      labelPerRow: _selectedRow,
-      itemBuilder: _buildBarcodeView,
-      quantity: (p) => p.quantity,
-    );
-  }
-
-  Future<LabelModel?> _buildLabelModel() async {
-    final images = await _captureProductLabels();
-    if (images.isEmpty) return null;
-    return LabelModel(images: images, labelPerRow: _selectedRow);
-  }
-
-  Future<void> _printAllLan() async {
-    if (!_connectedDevices.any((d) => d.type == 'LAN')) {
-      context.showSnackBar('Không có máy in LAN nào đang kết nối',
-          backgroundColor: Colors.amber[800]!);
-      return;
-    }
-    final model = await _buildLabelModel();
-    if (model == null) return;
-    await PrinterLabel.printAll(
-      labelModel: model,
-      connectionType: PrinterConnectionType.lan,
-    );
-  }
-
-  Future<void> _printAll() async {
-    if (_connectedDevices.isEmpty) {
-      context.showSnackBar('Chưa có thiết bị nào được kết nối',
-          backgroundColor: Colors.amber[800]!);
-      return;
-    }
-    final model = await _buildLabelModel();
-    if (model == null) return;
-    await PrinterLabel.printAll(labelModel: model);
-  }
-
-  Future<void> _printAllEsc() async {
-    if (_connectedDevices.isEmpty) {
-      context.showSnackBar('Chưa có thiết bị nào được kết nối',
-          backgroundColor: Colors.amber[800]!);
-      return;
-    }
-    final image = await _loadImageFromAssets(
-      "packages/printer_label/images/ticket.png",
-    );
-    await PrinterLabel.printAll(
-      escModel: PrintThermalModel(image: image, size: TicketSize.mm80),
-    );
-  }
-
   Future<void> _checkPrinterStatus({required String ipAddress}) async {
     setState(() => isCheckingStatus = true);
     context.showSnackBar('Đang kiểm tra máy in...',
@@ -570,9 +516,6 @@ class _MyHomePageState extends State<MyHomePage>
                     backgroundColor: Colors.blueGrey);
               },
               onAddBluetooth: _handleBluetoothButtonPressed,
-              onPrintAllLan: _printAllLan,
-              onPrintAll: _printAll,
-              onPrintAllEsc: _printAllEsc,
               onDisconnectDevice: (device) async {
                 await PrinterLabel.disconnectPrinter(deviceId: device.id);
                 _removeConnectedDevice(device.id);
@@ -588,7 +531,17 @@ class _MyHomePageState extends State<MyHomePage>
                   quantity: (p) => p.quantity,
                 );
               },
-              onPrintDeviceEsc: (device) => _printExampleESC(device.id),
+              onPrintDeviceEsc: (device) async {
+                await ESCPrintService.instance.printWidget(
+                  deviceId: device.id,
+                  widget: const ThermalReceiptPreview(
+                    size: TicketSize.mm80,
+                    isForPrinting: true,
+                  ),
+                  size: TicketSize.mm80,
+                  pixelRatio: 2.5,
+                );
+              },
               onCheckPrinterStatus: isConnected
                   ? () => _checkPrinterStatus(
                         ipAddress: textEditingController.text,
@@ -609,20 +562,6 @@ class _MyHomePageState extends State<MyHomePage>
           ],
         ),
       ),
-    );
-  }
-
-  Future<Uint8List> _loadImageFromAssets(String path) async {
-    final byteData = await DefaultAssetBundle.of(context).load(path);
-    return byteData.buffer.asUint8List();
-  }
-
-  Future<void> _printExampleESC(String deviceId) async {
-    final image =
-        await _loadImageFromAssets("packages/printer_label/images/ticket.png");
-    await ESCPrintService.instance.print(
-      deviceId: deviceId,
-      model: PrintThermalModel(image: image, size: TicketSize.mm58),
     );
   }
 }

@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:example/widgets/print_preview_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:printer_label/printer_label.dart';
@@ -15,21 +13,27 @@ class EscTab extends StatefulWidget {
 
 class _EscTabState extends State<EscTab> {
   bool _isPrintingEsc = false;
-
-  Future<Uint8List> _loadImageFromAssets(String path) async {
-    final byteData = await DefaultAssetBundle.of(context).load(path);
-    return byteData.buffer.asUint8List();
-  }
+  TicketSize _selectedSize = TicketSize.mm80;
 
   Future<void> _printExample() async {
     setState(() => _isPrintingEsc = true);
     try {
-      final image = await _loadImageFromAssets(
-          'packages/printer_label/images/ticket.png');
-      await ESCPrintService.instance.print(
+      // Gọi trực tiếp hàm printWidget mới viết để chụp và in trong một bước duy nhất
+      await ESCPrintService.instance.printWidget(
         deviceId: DeviceId.lan(widget.ipAddress),
-        model: PrintThermalModel(image: image, size: TicketSize.mm58),
+        widget: ThermalReceiptPreview(
+          size: _selectedSize,
+          isForPrinting: true,
+        ),
+        size: _selectedSize,
+        pixelRatio: 2.5,
       );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi in: $e')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isPrintingEsc = false);
     }
@@ -113,33 +117,38 @@ class _EscTabState extends State<EscTab> {
                   subtitle:
                       'Sử dụng giao thức in hoá đơn nhiệt ESC/POS thông thường.',
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
+
+                // Tiêu đề khu vực xem trước
+                Row(
+                  children: [
+                    const Icon(Icons.visibility_outlined,
+                        color: Colors.grey, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Xem trước hóa đơn (Mô phỏng)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Khu vực hiển thị hóa đơn giả lập giống hệt ticket.png
                 Center(
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 240),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(4),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.14),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Image.asset(
-                      'packages/printer_label/images/ticket.png',
-                      fit: BoxFit.fitWidth,
-                    ),
+                  child: ThermalReceiptPreview(
+                    size: _selectedSize,
                   ),
                 ),
+                const SizedBox(height: 20),
               ],
             ),
           ),
         ),
-        // ─── Print button ──────────────────────────────────────────────────
+        // ─── Print button & Dropdown ───────────────────────────────────────
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -148,38 +157,84 @@ class _EscTabState extends State<EscTab> {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Colors.black.withOpacity(0.05),
                 offset: const Offset(0, -4),
                 blurRadius: 8,
               ),
             ],
           ),
           padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isPrintingEsc ? null : _printExample,
-              icon: _isPrintingEsc
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.print),
-              label: Text(
-                  _isPrintingEsc ? 'Đang in...' : 'In thử hoá đơn ESC'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
+          child: Row(
+            children: [
+              // Dropdown chọn khổ giấy
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<TicketSize>(
+                    value: _selectedSize,
+                    icon: const Icon(Icons.arrow_drop_down,
+                        color: Color(0xFF6366F1)),
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    onChanged: (TicketSize? newSize) {
+                      if (newSize != null) {
+                        setState(() {
+                          _selectedSize = newSize;
+                        });
+                      }
+                    },
+                    items: const [
+                      DropdownMenuItem(
+                        value: TicketSize.mm80,
+                        child: Text('K80 (80mm)'),
+                      ),
+                      DropdownMenuItem(
+                        value: TicketSize.mm58,
+                        child: Text('K57 (58mm)'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(width: 12),
+              // Nút in thử
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _isPrintingEsc ? null : _printExample,
+                  icon: _isPrintingEsc
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.print),
+                  label: Text(
+                      _isPrintingEsc ? 'Đang in...' : 'In thử hoá đơn ESC'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         // ─── Raw print (dev) ───────────────────────────────────────────────
@@ -195,4 +250,562 @@ class _EscTabState extends State<EscTab> {
       ],
     );
   }
+}
+
+// ─── Hóa đơn nhiệt giả lập giống hệt ticket.png ───────────────────────────────
+class ThermalReceiptPreview extends StatelessWidget {
+  final TicketSize size;
+  final bool isForPrinting; // Cờ xác định khi chụp ảnh in ấn
+
+  const ThermalReceiptPreview({
+    super.key,
+    required this.size,
+    this.isForPrinting = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Chiều rộng động theo khổ giấy để tạo cảm giác thực tế
+    final double width = size == TicketSize.mm58 ? 240.0 : 320.0;
+
+    final content = Container(
+      color: Colors
+          .white, // Bắt buộc phải có nền trắng để ảnh chụp không bị trong suốt
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+      child: DefaultTextStyle(
+        style: const TextStyle(
+          color: Colors.black,
+          fontFamily: 'serif',
+          fontSize: 12,
+          height: 1.3,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header cửa hàng
+            const Text(
+              'PRINTER LABEL',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                fontFamily: 'serif',
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 2),
+            const Text(
+              'Hotline: 0202122223332',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const Text(
+              'Hà Nội',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '15-01-2026 17:07:19',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const Text(
+              'Ngày 15 tháng 01 năm 2026',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const Text(
+              '15/01/2026',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const Text(
+              '15-01-2026',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const SizedBox(height: 14),
+
+            // Tên hóa đơn
+            const Text(
+              'HÓA ĐƠN BÁN HÀNG',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                fontFamily: 'serif',
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Thông tin chi tiết hóa đơn
+            const _ReceiptRow(
+              left: 'DH1558',
+              right: '15-01-2026 17:07:19',
+              isLeftBold: true,
+            ),
+            const _ReceiptRow(
+              left: 'Mã cơ quan thuế',
+              right: 'M1-26-J1PP1-11031611359',
+            ),
+            const _ReceiptRow(
+              left: 'Khách hàng',
+              right: 'Khách lẻ không lấy hóa đơn',
+            ),
+            const SizedBox(height: 10),
+
+            // Bảng danh sách sản phẩm canh chỉnh cột hoàn hảo
+            Table(
+              columnWidths: const {
+                0: FlexColumnWidth(5), // Sản phẩm
+                1: FlexColumnWidth(2), // Số lượng
+                2: FlexColumnWidth(3), // Thành tiền
+              },
+              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+              children: const [
+                // Header của bảng
+                TableRow(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: Colors.black, width: 1),
+                      bottom: BorderSide(color: Colors.black, width: 1),
+                    ),
+                  ),
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('Sản phẩm',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'serif')),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('SL',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'serif')),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('T.Tiền',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'serif')),
+                    ),
+                  ],
+                ),
+
+                // Sản phẩm 1
+                TableRow(
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Cà phê muối đặc biệt',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'serif')),
+                          Text('Đơn giá: 35,000',
+                              style:
+                                  TextStyle(fontSize: 10, fontFamily: 'serif')),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('1',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontFamily: 'serif')),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('35,000',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(fontFamily: 'serif')),
+                    ),
+                  ],
+                ),
+
+                // Sản phẩm 2
+                TableRow(
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Trà lài đác thơm',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'serif')),
+                          Text('Đơn giá: 45,000',
+                              style:
+                                  TextStyle(fontSize: 10, fontFamily: 'serif')),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('2',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontFamily: 'serif')),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('90,000',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(fontFamily: 'serif')),
+                    ),
+                  ],
+                ),
+
+                // Sản phẩm 3
+                TableRow(
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Bánh sừng bò trứng muối',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'serif')),
+                          Text('Đơn giá: 39,000',
+                              style:
+                                  TextStyle(fontSize: 10, fontFamily: 'serif')),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('1',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontFamily: 'serif')),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text('39,000',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(fontFamily: 'serif')),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+
+            const Divider(color: Colors.black, height: 1, thickness: 0.5),
+            const SizedBox(height: 8),
+
+            // Phần tính tiền tổng cộng
+            const _ReceiptRow(left: 'Tạm tính', right: '164,000'),
+            const _ReceiptRow(left: 'Tổng cộng', right: '164,000'),
+            const _ReceiptRow(
+                left: 'Tổng tiền thuế (VAT 10%)', right: '16,400'),
+            const _ReceiptRow(left: 'Giảm trừ thuế', right: ''),
+            const _ReceiptRow(
+              left: 'Khách phải trả',
+              right: '180,400',
+              isRightBold: true,
+            ),
+
+            const SizedBox(height: 12),
+            const Text(
+              'Thanh toán Chuyển khoản',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const Text(
+              'CẢM ƠN QUÝ KHÁCH',
+              textAlign: TextAlign.center,
+              style:
+                  TextStyle(fontWeight: FontWeight.bold, fontFamily: 'serif'),
+            ),
+            const SizedBox(height: 8),
+            const Divider(color: Colors.black, height: 1, thickness: 1),
+            const SizedBox(height: 12),
+
+            // Mã QR tra cứu vẽ bằng CustomPaint
+            const Text(
+              'Mã QR tra cứu',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const SizedBox(height: 8),
+            const Center(
+              child: SimulatedQrCode(size: 100),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Mã tra cứu',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const Text(
+              '4u2gzeq367i8',
+              textAlign: TextAlign.center,
+              style:
+                  TextStyle(fontWeight: FontWeight.bold, fontFamily: 'serif'),
+            ),
+            const Text(
+              'Tra cứu hóa đơn tại',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontFamily: 'serif'),
+            ),
+            const Text(
+              'https://github.com/MinhTung263/printer_label',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                decoration: TextDecoration.underline,
+                fontFamily: 'serif',
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Khi in, chỉ trả về nội dung phẳng, không có răng cưa hay bóng đổ
+    if (isForPrinting) {
+      return SizedBox(
+        width: width,
+        child: content,
+      );
+    }
+
+    // Khi hiển thị trên màn hình, bọc ngoài bằng răng cưa và đổ bóng
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      width: width,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: PhysicalShape(
+        clipper: TicketClipper(),
+        color: Colors.white,
+        elevation: 3,
+        shadowColor: Colors.black.withOpacity(0.15),
+        clipBehavior: Clip.antiAlias,
+        child: content,
+      ),
+    );
+  }
+}
+
+class _ReceiptRow extends StatelessWidget {
+  final String left;
+  final String right;
+  final bool isLeftBold;
+  final bool isRightBold;
+
+  const _ReceiptRow({
+    required this.left,
+    required this.right,
+    this.isLeftBold = false,
+    this.isRightBold = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text(
+              left,
+              style: TextStyle(
+                fontFamily: 'serif',
+                fontWeight: isLeftBold ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 5,
+            child: Text(
+              right,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontFamily: 'serif',
+                fontWeight: isRightBold ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Widget mô phỏng mã QR code thực tế bằng CustomPainter ──────────────────
+class SimulatedQrCode extends StatelessWidget {
+  final double size;
+
+  const SimulatedQrCode({super.key, this.size = 100.0});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      color: Colors.white,
+      child: CustomPaint(
+        painter: _QrPainter(),
+      ),
+    );
+  }
+}
+
+class _QrPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.fill;
+
+    final double moduleSize = size.width / 21; // Lưới QR chuẩn 21x21 dòng/cột
+
+    // Vẽ 3 ô vuông định vị lớn ở 3 góc (7x7 mô-đun)
+    _drawPositionPattern(canvas, paint, 0, 0, moduleSize); // Góc trên - trái
+    _drawPositionPattern(canvas, paint, 14, 0, moduleSize); // Góc trên - phải
+    _drawPositionPattern(canvas, paint, 0, 14, moduleSize); // Góc dưới - trái
+
+    // Vẽ ô vuông căn chỉnh nhỏ (Alignment Pattern) ở góc dưới - phải (5x5 mô-đun)
+    _drawAlignmentPattern(canvas, paint, 14, 14, moduleSize);
+
+    // Vẽ các điểm dữ liệu giả lập (được thiết kế ngẫu nhiên giống mã QR thực tế)
+    final points = [
+      [7, 0], [8, 0], [9, 0], [11, 0],
+      [7, 1], [9, 1], [10, 1], [12, 1],
+      [7, 2], [8, 2], [11, 2], [13, 2],
+      [7, 3], [10, 3], [12, 3],
+      [7, 4], [8, 4], [9, 4], [11, 4], [13, 4],
+      [7, 5], [10, 5], [12, 5],
+      [7, 6], [9, 6], [11, 6], [13, 6],
+      // Đường định thời (Timing patterns - xen kẽ đen trắng)
+      [8, 6], [10, 6], [12, 6],
+      [6, 8], [6, 10], [6, 12],
+      // Khối dữ liệu trung tâm
+      [8, 7], [9, 8], [11, 9], [12, 10], [13, 11],
+      [8, 9], [10, 8], [12, 7], [13, 9],
+      [9, 10], [10, 11], [11, 12], [12, 13],
+      [7, 12], [8, 11], [9, 13], [10, 12], [13, 13],
+      [7, 13], [8, 13], [11, 10], [12, 12],
+      // Khối dữ liệu góc dưới bên phải
+      [18, 8], [19, 9], [20, 10], [17, 11], [15, 12],
+      [16, 7], [17, 8], [19, 10], [20, 11], [18, 12],
+      [15, 9], [16, 10], [17, 13], [19, 12], [20, 13],
+      [8, 15], [9, 16], [10, 17], [11, 18], [13, 20],
+      [7, 16], [8, 18], [10, 19], [12, 20],
+      [7, 19], [9, 18], [11, 17], [13, 19],
+      [19, 19], [20, 18], [19, 20], [20, 20],
+    ];
+
+    for (final pt in points) {
+      final x = pt[0];
+      final y = pt[1];
+      canvas.drawRect(
+        Rect.fromLTWH(x * moduleSize, y * moduleSize, moduleSize, moduleSize),
+        paint,
+      );
+    }
+  }
+
+  // Hàm vẽ ô định vị lớn (7x7)
+  void _drawPositionPattern(Canvas canvas, Paint paint, double gridX,
+      double gridY, double moduleSize) {
+    final x = gridX * moduleSize;
+    final y = gridY * moduleSize;
+
+    // Khung ngoài 7x7
+    canvas.drawRect(Rect.fromLTWH(x, y, 7 * moduleSize, 7 * moduleSize), paint);
+    // Khung trắng bên trong 5x5
+    final whitePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawRect(
+        Rect.fromLTWH(
+            x + moduleSize, y + moduleSize, 5 * moduleSize, 5 * moduleSize),
+        whitePaint);
+    // Nhân đen 3x3 ở giữa
+    canvas.drawRect(
+        Rect.fromLTWH(x + 2 * moduleSize, y + 2 * moduleSize, 3 * moduleSize,
+            3 * moduleSize),
+        paint);
+  }
+
+  // Hàm vẽ ô căn chỉnh nhỏ (5x5)
+  void _drawAlignmentPattern(Canvas canvas, Paint paint, double gridX,
+      double gridY, double moduleSize) {
+    final x = gridX * moduleSize;
+    final y = gridY * moduleSize;
+
+    // Khung ngoài 5x5
+    canvas.drawRect(Rect.fromLTWH(x, y, 5 * moduleSize, 5 * moduleSize), paint);
+    // Khung trắng bên trong 3x3
+    final whitePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawRect(
+        Rect.fromLTWH(
+            x + moduleSize, y + moduleSize, 3 * moduleSize, 3 * moduleSize),
+        whitePaint);
+    // Nhân đen 1x1 ở giữa
+    canvas.drawRect(
+        Rect.fromLTWH(
+            x + 2 * moduleSize, y + 2 * moduleSize, moduleSize, moduleSize),
+        paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ─── Clipper tạo mép răng cưa xé giấy của hóa đơn nhiệt ──────────────────────
+class TicketClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    final path = Path();
+
+    // Răng cưa mép trên
+    path.moveTo(0, 0);
+    double x = 0;
+    double y = 0;
+    const double increment = 4.0; // Kích thước răng cưa
+
+    while (x < size.width) {
+      x += increment;
+      y = (y == 0) ? increment : 0;
+      path.lineTo(x, y);
+    }
+
+    // Cạnh phải đi thẳng xuống
+    path.lineTo(size.width, size.height);
+
+    // Răng cưa mép dưới (vẽ ngược từ phải qua trái)
+    x = size.width;
+    y = size.height;
+    while (x > 0) {
+      x -= increment;
+      y = (y == size.height) ? size.height - increment : size.height;
+      path.lineTo(x, y);
+    }
+
+    // Cạnh trái đi thẳng lên
+    path.lineTo(0, 0);
+
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldReclip(CustomClipper<Path> oldClipper) => false;
 }

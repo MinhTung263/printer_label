@@ -145,27 +145,6 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<void> printAll({
-    LabelModel? labelModel,
-    PrintThermalModel? escModel,
-    PrinterConnectionType? connectionType,
-  }) async {
-    final Map<String, dynamic> baseData;
-    if (escModel != null) {
-      baseData = escModel.toJson();
-    } else if (labelModel != null) {
-      baseData = labelModel.toJson();
-    } else {
-      return;
-    }
-    final data = {
-      ...baseData,
-      if (connectionType != null) "connection_type": connectionType.value,
-    };
-    await _channel.invokeMethod<void>(PrinterMethod.printAll.value, data);
-  }
-
-  @override
   Future<bool> connectBluetooth({required String macAddress}) async {
     final targetMac = macAddress.trim();
     if (targetMac.isEmpty) return false;

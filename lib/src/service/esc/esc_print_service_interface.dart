@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import '../../enums/enum.src.dart';
 import '../../models/src.dart';
@@ -16,6 +17,15 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
     PlatformInterface.verifyToken(instance, _token);
     _instance = instance;
   }
+
+  /// Captures the given [widget] as an image and prints it using ESC/POS protocol.
+  Future<void> printWidget({
+    required Widget widget,
+    required TicketSize size,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    double pixelRatio = 2.5,
+  });
 
   Future<void> print({
     String? deviceId,

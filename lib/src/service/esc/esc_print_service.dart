@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import '../../enums/enum.src.dart';
 import '../../models/src.dart';
 import 'esc_print_service_interface.dart';
@@ -8,6 +9,23 @@ class ESCPrintService {
 
   /// The singleton instance of the [ESCPrintService].
   static final ESCPrintService instance = ESCPrintService._();
+
+  /// Captures the given [widget] as an image and prints it using ESC/POS protocol.
+  Future<void> printWidget({
+    required Widget widget,
+    required TicketSize size,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+    double pixelRatio = 2.5,
+  }) {
+    return ESCPrintServicePlatform.instance.printWidget(
+      widget: widget,
+      size: size,
+      deviceId: deviceId,
+      connectionType: connectionType,
+      pixelRatio: pixelRatio,
+    );
+  }
 
   /// Prints a thermal receipt from the specified [model].
   Future<void> print({

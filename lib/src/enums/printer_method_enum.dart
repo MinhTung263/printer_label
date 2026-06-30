@@ -10,7 +10,6 @@ enum PrinterMethod {
   printLabel('print_label'),
   printImage('print_image'),
   printImageEsc('print_image_esc'),
-  printAll('print_all'),
   bluetoothEnabled('bluetooth_enabled'),
   printText('print_text'),
   printTextESC('print_text_esc'),

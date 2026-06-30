@@ -154,15 +154,31 @@ final class BLEManager: NSObject {
             return
         }
         let (characteristic, writeType) = charTuple
-        let chunkSize = 182
-        var offset = 0
-        while offset < data.count {
-            let end = min(offset + chunkSize, data.count)
-            let chunk = data.subdata(in: offset..<end)
-            peripheral.writeValue(chunk, for: characteristic, type: writeType)
-            offset = end
+        
+        // Lấy kích thước tối đa của MTU được thương lượng giữa iOS và máy in
+        let chunkSize = peripheral.maximumWriteValueLength(for: writeType)
+        
+        // Đưa việc ghi dữ liệu vào Background Thread để tránh block Main Thread (gây khựng UI)
+        DispatchQueue.global(qos: .userInitiated).async {
+            var offset = 0
+            while offset < data.count {
+                let end = min(offset + chunkSize, data.count)
+                let chunk = data.subdata(in: offset..<end)
+                
+                peripheral.writeValue(chunk, for: characteristic, type: writeType)
+                offset = end
+                
+                // Nếu ghi không cần phản hồi, nghỉ 5ms để tránh làm tràn bộ nhớ đệm máy in
+                if writeType == .withoutResponse {
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+            }
+            
+            // Trả kết quả về Main Thread cho Flutter
+            DispatchQueue.main.async {
+                result(true)
+            }
         }
-        result(true)
     }
 
     func writeDataToFirstConnected(_ data: Data, result: @escaping FlutterResult) {
@@ -269,11 +285,12 @@ extension BLEManager: CBPeripheralDelegate {
         let identifier = peripheral.identifier.uuidString
         if let chars = service.characteristics {
             for char in chars {
-                if char.properties.contains(.write) {
-                    writableCharacteristics[identifier] = (char, .withResponse)
-                    break
-                } else if char.properties.contains(.writeWithoutResponse), writableCharacteristics[identifier] == nil {
+                // Ưu tiên chọn writeWithoutResponse trước để tăng tốc độ in tối đa
+                if char.properties.contains(.writeWithoutResponse) {
                     writableCharacteristics[identifier] = (char, .withoutResponse)
+                    break
+                } else if char.properties.contains(.write), writableCharacteristics[identifier] == nil {
+                    writableCharacteristics[identifier] = (char, .withResponse)
                 }
             }
         }

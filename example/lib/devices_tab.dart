@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'connected_device.dart';
 import 'main.dart';
 
-enum PrintAction { lan, all, esc }
 
 class DevicesTab extends StatelessWidget {
   final bool isConnected;
@@ -14,9 +13,6 @@ class DevicesTab extends StatelessWidget {
   final VoidCallback onConnect;
   final VoidCallback onDisconnectMain;
   final VoidCallback onAddBluetooth;
-  final VoidCallback onPrintAllLan;
-  final VoidCallback onPrintAll;
-  final VoidCallback onPrintAllEsc;
   final Function(ConnectedDevice device) onDisconnectDevice;
   final Function(ConnectedDevice device) onPrintDeviceLabel;
   final Function(ConnectedDevice device) onPrintDeviceEsc;
@@ -39,9 +35,6 @@ class DevicesTab extends StatelessWidget {
     required this.onConnect,
     required this.onDisconnectMain,
     required this.onAddBluetooth,
-    required this.onPrintAllLan,
-    required this.onPrintAll,
-    required this.onPrintAllEsc,
     required this.onDisconnectDevice,
     required this.onPrintDeviceLabel,
     required this.onPrintDeviceEsc,
@@ -244,48 +237,6 @@ class DevicesTab extends StatelessWidget {
               icon: const Icon(Icons.bluetooth,
                   color: Color(0xFF4F46E5)),
               tooltip: 'Kết nối Bluetooth',
-            ),
-            PopupMenuButton<PrintAction>(
-              icon: const Icon(Icons.print, color: Color(0xFF4F46E5)),
-              tooltip: 'In hàng loạt',
-              enabled: connectedDevices.isNotEmpty,
-              onSelected: (action) {
-                switch (action) {
-                  case PrintAction.lan:
-                    onPrintAllLan();
-                  case PrintAction.all:
-                    onPrintAll();
-                  case PrintAction.esc:
-                    onPrintAllEsc();
-                }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: PrintAction.lan,
-                  enabled: connectedDevices.any((d) => d.type == 'LAN'),
-                  child: const ListTile(
-                    dense: true,
-                    leading: Icon(Icons.lan),
-                    title: Text('In tất cả máy LAN'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: PrintAction.all,
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.print_outlined),
-                    title: Text('In tất cả thiết bị'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: PrintAction.esc,
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.receipt_long),
-                    title: Text('In ESC trên tất cả'),
-                  ),
-                ),
-              ],
             ),
           ],
         ),

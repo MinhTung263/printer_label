@@ -70,3 +70,45 @@ Future<Uint8List> resizeImage({
 int mmToPx(double mm, {int dpi = _defaultPrinterDpi}) {
   return (mm * dpi / 25.4).round();
 }
+
+/// Resizes a thermal receipt image to the exact pixel width of the target paper size.
+/// - mm58 (K57/K58) -> 384 px width
+/// - mm80 (K80) -> 576 px width
+Future<Uint8List> resizeThermalImage({
+  required Uint8List imageBytes,
+  required TicketSize size,
+}) async {
+  final int targetWidth = size.value;
+
+  // Sử dụng ui.instantiateImageCodec để giải mã và scale ảnh ở tầng C++ (rất nhanh và mượt)
+  final codec = await ui.instantiateImageCodec(
+    imageBytes,
+    targetWidth: targetWidth,
+  );
+
+  final frame = await codec.getNextFrame();
+  final ui.Image contentImage = frame.image;
+
+  // Vẽ ảnh lên canvas với nền trắng để loại bỏ các kênh trong suốt (transparent) dễ gây lỗi in
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  final paint = ui.Paint()..color = const ui.Color(0xFFFFFFFF);
+  
+  canvas.drawRect(
+    ui.Rect.fromLTWH(
+      0,
+      0,
+      targetWidth.toDouble(),
+      contentImage.height.toDouble(),
+    ),
+    paint,
+  );
+
+  canvas.drawImage(contentImage, ui.Offset.zero, ui.Paint());
+
+  final picture = recorder.endRecording();
+  final finalImage = await picture.toImage(targetWidth, contentImage.height);
+  final byteData = await finalImage.toByteData(format: ui.ImageByteFormat.png);
+
+  return byteData!.buffer.asUint8List();
+}

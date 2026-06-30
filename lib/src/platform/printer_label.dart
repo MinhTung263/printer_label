@@ -115,21 +115,6 @@ class PrinterLabel {
     );
   }
 
-  /// Broadcasts print commands to all active connections (or filtered by [connectionType]).
-  ///
-  /// Supports both label printing [labelModel] (TSPL) and thermal receipt printing [escModel] (ESC/POS).
-  static Future<void> printAll({
-    LabelModel? labelModel,
-    PrintThermalModel? escModel,
-    PrinterConnectionType? connectionType,
-  }) async {
-    return await _platform.printAll(
-      labelModel: labelModel,
-      escModel: escModel,
-      connectionType: connectionType,
-    );
-  }
-
   // ==========================================
   // BLUETOOTH SECTION
   // ==========================================

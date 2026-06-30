@@ -137,20 +137,4 @@ class LabelFromWidget {
     }
     return images;
   }
-
-  /// Captures a single [widget] and converts it directly into a PNG image byte array.
-  ///
-  /// The [pixelRatio] parameter determines the export resolution scale (defaults to `5` for print clarity).
-  static Future<Uint8List> captureFromWidget(
-    Widget widget, {
-    BuildContext? context,
-    double? pixelRatio,
-  }) async {
-    final imageBytes = await ScreenshotController().captureFromWidget(
-      widget,
-      context: context,
-      pixelRatio: pixelRatio ?? 5,
-    );
-    return imageBytes;
-  }
 }

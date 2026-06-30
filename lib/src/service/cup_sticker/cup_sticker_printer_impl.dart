@@ -4,7 +4,7 @@ import '../../enums/enum.src.dart';
 import '../../models/src.dart';
 import '../../platform/printer_label.dart';
 import '../../utils/image_resize.dart';
-import '../label/label_from_widget.dart';
+import '../../utils/widget_capture_helper.dart';
 import 'cup_sticker_printer_interface.dart';
 
 class CupStickerPrinterImpl extends CupStickerPrinterPlatform {
@@ -49,7 +49,7 @@ class CupStickerPrinterImpl extends CupStickerPrinterPlatform {
 
     for (final widget in widgets) {
       if (context != null && !context.mounted) return;
-      final bytes = await LabelFromWidget.captureFromWidget(
+      final bytes = await WidgetCaptureHelper.captureFromWidget(
         widget,
         context: context,
       );
@@ -84,7 +84,7 @@ class CupStickerPrinterImpl extends CupStickerPrinterPlatform {
     BuildContext? context,
     double? paddingMm,
   }) async {
-    final raw = await LabelFromWidget.captureFromWidget(
+    final raw = await WidgetCaptureHelper.captureFromWidget(
       widget,
       context: context,
     );
