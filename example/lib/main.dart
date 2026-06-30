@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-
-import 'package:example/bt_picker.dart';
 import 'package:example/connected_device.dart';
 import 'package:example/context_extensions.dart';
 import 'package:example/devices_tab.dart';
@@ -9,19 +7,11 @@ import 'package:example/functions_tab.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'tabs/esc_tab.dart';
 
 void main() {
   runApp(const MyApp());
-}
-
-// ⭐ Model cho thiết bị BT đã lưu trong SharedPreferences
-class _SavedBtDevice {
-  final String id; // UUID (iOS) hoặc MAC (Android)
-  final String name; // Tên hiển thị
-  const _SavedBtDevice({required this.id, required this.name});
 }
 
 class MyApp extends StatelessWidget {
@@ -107,6 +97,13 @@ class _MyHomePageState extends State<MyHomePage>
   final List<ConnectedDevice> _connectedDevices = [];
   StreamSubscription<UsbConnectionEvent>? _usbSub;
 
+  // Trạng thái quét Bluetooth inline
+  List<BluetoothDeviceModel> _btDevices = [];
+  bool _isScanningBt = false;
+  bool _hasScannedBt = false;
+  StreamSubscription<BluetoothDeviceModel>? _btScanSub;
+  final Set<String> _connectingBtMacs = {};
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +118,10 @@ class _MyHomePageState extends State<MyHomePage>
     textEditingController.dispose();
     focusNode.dispose();
     _usbSub?.cancel();
+    _btScanSub?.cancel();
+    if (Platform.isIOS) {
+      PrinterLabel.stopBluetoothScan();
+    }
     super.dispose();
   }
 
@@ -152,16 +153,7 @@ class _MyHomePageState extends State<MyHomePage>
     });
   }
 
-  Future<void> _handleBluetoothButtonPressed() async {
-    final savedList = await _getSavedBtDevices();
-    if (savedList.isNotEmpty) {
-      await _showSavedBtPicker();
-    } else {
-      await _scanAndConnectBluetooth();
-    }
-  }
-
-  Future<void> _scanAndConnectBluetooth() async {
+  Future<void> _startBtScan() async {
     if (Platform.isAndroid) {
       final statuses = await [
         Permission.bluetoothConnect,
@@ -176,141 +168,102 @@ class _MyHomePageState extends State<MyHomePage>
       }
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => BtPicker(
-        onConnected: (device) {
-          if (!mounted) return;
-          final id = DeviceId.bluetooth(device.mac);
-          _addConnectedDevice(ConnectedDevice(
-            id: id,
-            label: device.name.isEmpty ? 'Bluetooth Printer' : device.name,
-            type: 'BT',
-          ));
-          _saveBtIdentifier(device.mac, device.name);
-          context.showSnackBar(
-            'Kết nối Bluetooth thành công: ${device.name}',
-            backgroundColor: const Color(0xFF10B981),
-          );
-        },
-      ),
-    );
-  }
+    setState(() {
+      _isScanningBt = true;
+      _hasScannedBt = true;
+      _btDevices.clear();
+    });
 
-  // ⭐ Lưu danh sách thiết bị BT đã kết nối (lưu nhiều máy)
-  static const String _prefsBtListKey = 'saved_bt_devices';
-
-  Future<void> _saveBtIdentifier(String id, String name) async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_prefsBtListKey) ?? [];
-    // Format: "id|name"
-    final entry = '$id|$name';
-    // Nếu đã có thiết bị này thì cập nhật lại, không thêm trùng
-    final idx = list.indexWhere((e) => e.startsWith('$id|'));
-    if (idx >= 0) {
-      list[idx] = entry;
-    } else {
-      list.add(entry);
-    }
-    await prefs.setStringList(_prefsBtListKey, list);
-  }
-
-  /// Đọc danh sách thiết bị BT đã lưu
-  Future<List<_SavedBtDevice>> _getSavedBtDevices() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_prefsBtListKey) ?? [];
-    final result = <_SavedBtDevice>[];
-    for (final entry in list) {
-      final parts = entry.split('|');
-      if (parts.length >= 2) {
-        result.add(_SavedBtDevice(id: parts[0], name: parts[1]));
+    // Tải các thiết bị đã ghép đôi trước
+    try {
+      final paired = await PrinterLabel.getBluetoothDevices();
+      if (mounted) {
+        setState(() {
+          for (final d in paired) {
+            if (!_btDevices.any((e) => e.mac == d.mac)) {
+              _btDevices.add(d);
+            }
+          }
+        });
       }
+    } catch (_) {}
+
+    _btScanSub?.cancel();
+    _btScanSub = PrinterLabel.bluetoothScanStream.listen(
+      (d) {
+        if (!mounted) return;
+        setState(() {
+          if (!_btDevices.any((e) => e.mac == d.mac)) {
+            _btDevices.add(d);
+          }
+        });
+      },
+      onDone: () {
+        if (mounted) setState(() => _isScanningBt = false);
+      },
+      onError: (_) {
+        if (mounted) setState(() => _isScanningBt = false);
+      },
+    );
+
+    if (Platform.isIOS) {
+      await PrinterLabel.startBluetoothScan();
     }
-    return result;
   }
 
-  /// Xóa 1 thiết bị khỏi danh sách đã lưu
-  Future<void> _removeSavedBtDevice(String id) async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_prefsBtListKey) ?? [];
-    list.removeWhere((e) => e.startsWith('$id|'));
-    await prefs.setStringList(_prefsBtListKey, list);
+  void _stopBtScan() async {
+    _btScanSub?.cancel();
+    if (Platform.isIOS) {
+      await PrinterLabel.stopBluetoothScan();
+    }
+    if (mounted) {
+      setState(() => _isScanningBt = false);
+    }
   }
 
-  // ⭐ Mở dialog chọn thiết bị BT đã lưu để reconnect
-  Future<void> _showSavedBtPicker() async {
-    final savedList = await _getSavedBtDevices();
+  Future<void> _connectBtDevice(BluetoothDeviceModel device) async {
     if (!mounted) return;
-    if (savedList.isEmpty) {
-      context.showSnackBar(
-        'Chưa có thiết bị BT nào được lưu. Hãy scan và kết nối trước.',
-        backgroundColor: Colors.orange,
-      );
+    final isAlreadyConnected = _connectedDevices.any(
+      (d) =>
+          d.type == 'BT' && (d.id == device.mac || d.id == 'BT:${device.mac}'),
+    );
+    if (isAlreadyConnected) {
+      context.showSnackBar('Thiết bị này đã được kết nối');
       return;
     }
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => _SavedBtPicker(
-        devices: savedList,
-        onConnect: (device) => _reconnectBtFromSaved(device),
-        onDelete: (device) async {
-          await _removeSavedBtDevice(device.id);
-          if (!mounted) return;
-          setState(() {});
-          context.showSnackBar('Đã xóa ${device.name} khỏi danh sách',
-              backgroundColor: Colors.orange);
-        },
-        onScanNewDevice: _scanAndConnectBluetooth,
-      ),
-    );
-  }
 
-  // ⭐ Thử reconnect BLE từ identifier đã lưu — KHÔNG CẦN SCAN TRÊN iOS
-  Future<void> _reconnectBtFromSaved(_SavedBtDevice device) async {
-    if (Platform.isAndroid) {
-      final statuses = await [
-        Permission.bluetoothConnect,
-        Permission.bluetoothScan,
-      ].request();
-      if (!statuses.values.every((s) => s.isGranted)) {
-        if (!mounted) return;
-        context.showSnackBar('Cần cấp quyền Bluetooth',
-            backgroundColor: Colors.orange);
-        return;
-      }
-    }
+    setState(() => _connectingBtMacs.add(device.mac));
+    _stopBtScan();
 
-    if (!mounted) return;
-    context.showSnackBar('Đang kết nối lại ${device.name}...',
-        backgroundColor: Colors.blue);
     try {
-      final ok = await PrinterLabel.connectBluetooth(macAddress: device.id);
+      final ok = await PrinterLabel.connectBluetooth(macAddress: device.mac);
       if (!mounted) return;
       if (ok) {
-        setState(() {
-          final id = DeviceId.bluetooth(device.id);
-          _addConnectedDevice(ConnectedDevice(
-            id: id,
-            label: device.name.isEmpty ? 'Bluetooth Printer' : device.name,
-            type: 'BT',
-          ));
-        });
-        context.showSnackBar('Kết nối lại thành công: ${device.name}',
-            backgroundColor: Colors.green);
+        final id = DeviceId.bluetooth(device.mac);
+        _addConnectedDevice(ConnectedDevice(
+          id: id,
+          label: device.name.isEmpty ? 'Bluetooth Printer' : device.name,
+          type: 'BT',
+        ));
+        context.showSnackBar(
+          'Kết nối Bluetooth thành công: ${device.name.isEmpty ? "máy in" : device.name}',
+          backgroundColor: const Color(0xFF10B981),
+        );
       } else {
-        context.showSnackBar('Kết nối lại thất bại. Hãy scan lại.',
-            backgroundColor: Colors.red);
+        context.showSnackBar(
+          'Không thể kết nối ${device.name.isEmpty ? 'máy in' : device.name}',
+          backgroundColor: const Color(0xFFF43F5E),
+        );
+        _startBtScan();
       }
     } catch (e) {
-      if (!mounted) return;
-      context.showSnackBar('Lỗi kết nối: $e', backgroundColor: Colors.red);
+      if (mounted) {
+        context.showSnackBar('Lỗi kết nối: $e',
+            backgroundColor: const Color(0xFFF43F5E));
+        _startBtScan();
+      }
+    } finally {
+      if (mounted) setState(() => _connectingBtMacs.remove(device.mac));
     }
   }
 
@@ -410,10 +363,14 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   Future<void> _printProductLabels(List<ProductBarcodeModel> items) async {
+    final deviceId = _connectedDevices.isNotEmpty
+        ? _connectedDevices.last.id
+        : DeviceId.lan(textEditingController.text);
+
     await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
       items: items,
       context: context,
-      deviceId: DeviceId.lan(textEditingController.text),
+      deviceId: deviceId,
       labelPerRow: _selectedRow,
       itemBuilder: _buildBarcodeView,
       quantity: (p) => p.quantity,
@@ -515,38 +472,28 @@ class _MyHomePageState extends State<MyHomePage>
                 context.showSnackBar('Đã tắt kết nối chính',
                     backgroundColor: Colors.blueGrey);
               },
-              onAddBluetooth: _handleBluetoothButtonPressed,
               onDisconnectDevice: (device) async {
                 await PrinterLabel.disconnectPrinter(deviceId: device.id);
                 _removeConnectedDevice(device.id);
               },
-              onPrintDeviceLabel: (device) async {
-                await LabelPrintService.instance
-                    .printLabels<ProductBarcodeModel>(
-                  items: products,
-                  context: context,
-                  deviceId: device.id,
-                  labelPerRow: _selectedRow,
-                  itemBuilder: _buildBarcodeView,
-                  quantity: (p) => p.quantity,
-                );
-              },
-              onPrintDeviceEsc: (device) async {
-                await ESCPrintService.instance.printWidget(
-                  deviceId: device.id,
-                  widget: const ThermalReceiptPreview(
-                    size: TicketSize.mm80,
-                    isForPrinting: true,
-                  ),
-                  size: TicketSize.mm80,
-                  pixelRatio: 2.5,
-                );
-              },
+
               onCheckPrinterStatus: isConnected
                   ? () => _checkPrinterStatus(
                         ipAddress: textEditingController.text,
                       )
                   : null,
+              btDevices: _btDevices,
+              isScanningBt: _isScanningBt,
+              hasScannedBt: _hasScannedBt,
+              connectingBtMacs: _connectingBtMacs,
+              onConnectBtDevice: _connectBtDevice,
+              onRefreshBtScan: () {
+                if (_isScanningBt) {
+                  _stopBtScan();
+                } else {
+                  _startBtScan();
+                }
+              },
             ),
             FunctionsTab(
               products: products,
@@ -558,156 +505,12 @@ class _MyHomePageState extends State<MyHomePage>
               },
               onPrintLabels: _printProductLabels,
               ipAddress: textEditingController.text,
+              deviceId: _connectedDevices.isNotEmpty
+                  ? _connectedDevices.last.id
+                  : null,
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ⭐ Saved BT Picker bottom sheet — chọn máy in đã lưu để reconnect
-class _SavedBtPicker extends StatefulWidget {
-  final List<_SavedBtDevice> devices;
-  final void Function(_SavedBtDevice device) onConnect;
-  final void Function(_SavedBtDevice device) onDelete;
-  final VoidCallback onScanNewDevice;
-
-  const _SavedBtPicker({
-    required this.devices,
-    required this.onConnect,
-    required this.onDelete,
-    required this.onScanNewDevice,
-  });
-
-  @override
-  State<_SavedBtPicker> createState() => _SavedBtPickerState();
-}
-
-class _SavedBtPickerState extends State<_SavedBtPicker> {
-  final Set<String> _connecting = {};
-
-  Future<void> _connect(_SavedBtDevice device) async {
-    setState(() => _connecting.add(device.id));
-    try {
-      widget.onConnect(device);
-    } finally {
-      if (mounted) setState(() => _connecting.remove(device.id));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.4,
-      minChildSize: 0.3,
-      maxChildSize: 0.7,
-      builder: (_, controller) => Column(
-        children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                const Icon(Icons.history, size: 20),
-                const SizedBox(width: 8),
-                const Text(
-                  'Máy in đã lưu',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    widget.onScanNewDevice();
-                  },
-                  icon: const Icon(Icons.bluetooth_searching, size: 16),
-                  label: const Text('Quét mới', style: TextStyle(fontSize: 13)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF4F46E5),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: widget.devices.isEmpty
-                ? const Center(child: Text('Chưa có thiết bị nào được lưu'))
-                : ListView.builder(
-                    controller: controller,
-                    itemCount: widget.devices.length,
-                    itemBuilder: (_, i) {
-                      final d = widget.devices[i];
-                      final isConnecting = _connecting.contains(d.id);
-                      return ListTile(
-                        leading: CircleAvatar(
-                          radius: 18,
-                          backgroundColor:
-                              Colors.indigo.withValues(alpha: 0.12),
-                          child: const Icon(Icons.bluetooth_rounded,
-                              color: Colors.indigo, size: 18),
-                        ),
-                        title: Text(
-                          d.name,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        subtitle: Text(
-                          d.id,
-                          style: const TextStyle(fontSize: 10),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline,
-                                  color: Colors.red, size: 20),
-                              tooltip: 'Xóa khỏi danh sách',
-                              onPressed: () => widget.onDelete(d),
-                            ),
-                            if (isConnecting)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 12),
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              )
-                            else
-                              ElevatedButton.icon(
-                                onPressed: () => _connect(d),
-                                icon:
-                                    const Icon(Icons.wifi_tethering, size: 16),
-                                label: const Text('Kết nối'),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
-                                  textStyle: const TextStyle(fontSize: 12),
-                                ),
-                              ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
       ),
     );
   }

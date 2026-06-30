@@ -155,22 +155,36 @@ final class BLEManager: NSObject {
         }
         let (characteristic, writeType) = charTuple
         
-        // Lấy kích thước tối đa của MTU được thương lượng giữa iOS và máy in
-        let chunkSize = peripheral.maximumWriteValueLength(for: writeType)
+        // Giới hạn kích thước gói gửi xuống máy in ở mức tối ưu cho vi xử lý máy in (120 bytes)
+        // Gói nhỏ giúp máy in vừa nhận vừa in nhịp nhàng, tránh nghẽn CPU dẫn đến tràn bộ đệm.
+        let safeMaxChunkSize = 120
+        let chunkSize = min(peripheral.maximumWriteValueLength(for: writeType), safeMaxChunkSize)
         
         // Đưa việc ghi dữ liệu vào Background Thread để tránh block Main Thread (gây khựng UI)
         DispatchQueue.global(qos: .userInitiated).async {
             var offset = 0
+            var bytesSentInBlock = 0
+            
             while offset < data.count {
                 let end = min(offset + chunkSize, data.count)
                 let chunk = data.subdata(in: offset..<end)
                 
                 peripheral.writeValue(chunk, for: characteristic, type: writeType)
                 offset = end
+                bytesSentInBlock += chunk.count
                 
-                // Nếu ghi không cần phản hồi, nghỉ 5ms để tránh làm tràn bộ nhớ đệm máy in
+                // Khoảng nghỉ siêu ngắn giữa các gói tin để duy trì hàng đợi gửi của iOS ổn định
                 if writeType == .withoutResponse {
-                    Thread.sleep(forTimeInterval: 0.005)
+                    Thread.sleep(forTimeInterval: 0.003) // 3ms nghỉ giữa các gói
+                } else {
+                    Thread.sleep(forTimeInterval: 0.001) // 1ms nghỉ
+                }
+                
+                // Chiến lược chống tràn bộ đệm phần cứng (Block-based Flow Control):
+                // Cứ sau mỗi 1500 bytes dữ liệu gửi đi, ta nghỉ thêm 60ms để máy in giải phóng bộ đệm và thực hiện in vật lý.
+                if bytesSentInBlock >= 1500 {
+                    Thread.sleep(forTimeInterval: 0.060)
+                    bytesSentInBlock = 0
                 }
             }
             
@@ -232,7 +246,33 @@ extension BLEManager: CBCentralManagerDelegate {
         guard RSSI.intValue >= minScanRSSI else { return }
         let identifier = peripheral.identifier.uuidString
         discoveredPeripherals[identifier] = peripheral
-        let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
+        let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? ""
+        
+        guard !name.isEmpty else { return }
+        
+        let nameLower = name.lowercased()
+        
+        // Danh sách từ khóa dài tự động khớp nếu xuất hiện ở bất kỳ đâu trong tên
+        let longKeywords = [
+            "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
+            "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
+            "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang"
+        ]
+        let matchesLong = longKeywords.contains { nameLower.contains($0) }
+        
+        // Danh sách tiền tố ngắn (chỉ khớp nếu ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới)
+        let shortPrefixes = [
+            "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc"
+        ]
+        let matchesShort = shortPrefixes.contains { prefix in
+            nameLower.hasPrefix(prefix) ||
+            nameLower.contains("\(prefix)-") ||
+            nameLower.contains("\(prefix) ") ||
+            nameLower.contains("_\(prefix)")
+        }
+        
+        guard matchesLong || matchesShort else { return }
+        
         scanEventSink?(["name": name, "identifier": identifier, "mac": identifier] as [String: Any])
     }
 

@@ -163,7 +163,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
             isForPrinting: true,
           ),
           size: TicketSize.mm58,
-          pixelRatio: 2.5,
+          pixelRatio: 3.5,
         );
       } catch (e) {
         if (!mounted) return;

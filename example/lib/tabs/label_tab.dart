@@ -9,6 +9,7 @@ class LabelTab extends StatefulWidget {
   final ValueChanged<LabelPerRow> onLabelPerRowChanged;
   final Function(List<ProductBarcodeModel> filteredProducts) onPrintLabels;
   final String ipAddress;
+  final String? deviceId;
 
   const LabelTab({
     super.key,
@@ -17,6 +18,7 @@ class LabelTab extends StatefulWidget {
     required this.onLabelPerRowChanged,
     required this.onPrintLabels,
     required this.ipAddress,
+    this.deviceId,
   });
 
   @override
@@ -141,10 +143,12 @@ class _LabelTabState extends State<LabelTab> {
     }
   }
 
+  String get _targetDeviceId => widget.deviceId ?? DeviceId.lan(widget.ipAddress);
+
   Future<void> _printRawText() async {
     try {
       await LabelPrintService.instance.printText(
-        deviceId: DeviceId.lan(widget.ipAddress),
+        deviceId: _targetDeviceId,
         text: 'Printer Label - Test Raw Text Printing TSPL',
         x: 10,
         y: 10,
@@ -169,7 +173,7 @@ class _LabelTabState extends State<LabelTab> {
   Future<void> _printRawBarcode() async {
     try {
       await LabelPrintService.instance.printBarcode(
-        deviceId: DeviceId.lan(widget.ipAddress),
+        deviceId: _targetDeviceId,
         code: '123456789012',
         x: 10,
         y: 10,
@@ -192,7 +196,7 @@ class _LabelTabState extends State<LabelTab> {
   Future<void> _printRawQRCode() async {
     try {
       await LabelPrintService.instance.printQRCode(
-        deviceId: DeviceId.lan(widget.ipAddress),
+        deviceId: _targetDeviceId,
         code: 'https://github.com/MinhTung263/printer_label',
         x: 10,
         y: 10,

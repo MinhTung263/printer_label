@@ -1,11 +1,13 @@
 import 'package:example/widgets/print_preview_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:printer_label/printer_label.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class EscTab extends StatefulWidget {
   final String ipAddress;
+  final String? deviceId;
 
-  const EscTab({super.key, required this.ipAddress});
+  const EscTab({super.key, required this.ipAddress, this.deviceId});
 
   @override
   State<EscTab> createState() => _EscTabState();
@@ -15,18 +17,20 @@ class _EscTabState extends State<EscTab> {
   bool _isPrintingEsc = false;
   TicketSize _selectedSize = TicketSize.mm80;
 
+  String get _targetDeviceId => widget.deviceId ?? DeviceId.lan(widget.ipAddress);
+
   Future<void> _printExample() async {
     setState(() => _isPrintingEsc = true);
     try {
-      // Gọi trực tiếp hàm printWidget mới viết để chụp và in trong một bước duy nhất
+      // In toàn bộ hóa đơn dưới dạng hình ảnh (bao gồm cả mã QR và chân trang)
       await ESCPrintService.instance.printWidget(
-        deviceId: DeviceId.lan(widget.ipAddress),
+        deviceId: _targetDeviceId,
         widget: ThermalReceiptPreview(
           size: _selectedSize,
           isForPrinting: true,
         ),
         size: _selectedSize,
-        pixelRatio: 2.5,
+        pixelRatio: 3.5,
       );
     } catch (e) {
       if (mounted) {
@@ -42,7 +46,7 @@ class _EscTabState extends State<EscTab> {
   Future<void> _printRawText() async {
     try {
       await ESCPrintService.instance.printText(
-        deviceId: DeviceId.lan(widget.ipAddress),
+        deviceId: _targetDeviceId,
         text:
             'Printer Label - Test Raw Text Printing ESC/POS\nLine 2 - Hello World!\n\n',
       );
@@ -62,7 +66,7 @@ class _EscTabState extends State<EscTab> {
   Future<void> _printRawBarcode() async {
     try {
       await ESCPrintService.instance.printBarcode(
-        deviceId: DeviceId.lan(widget.ipAddress),
+        deviceId: _targetDeviceId,
         code: '123456789012',
         type: '128',
       );
@@ -82,7 +86,7 @@ class _EscTabState extends State<EscTab> {
   Future<void> _printRawQRCode() async {
     try {
       await ESCPrintService.instance.printQRCode(
-        deviceId: DeviceId.lan(widget.ipAddress),
+        deviceId: _targetDeviceId,
         code: 'https://github.com/MinhTung263/printer_label',
         size: 8,
       );
@@ -271,7 +275,12 @@ class ThermalReceiptPreview extends StatelessWidget {
     final content = Container(
       color: Colors
           .white, // Bắt buộc phải có nền trắng để ảnh chụp không bị trong suốt
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+      padding: EdgeInsets.fromLTRB(
+        isForPrinting ? 2.0 : 16.0,
+        24,
+        isForPrinting ? 2.0 : 16.0,
+        24,
+      ),
       child: DefaultTextStyle(
         style: const TextStyle(
           color: Colors.black,
@@ -515,6 +524,8 @@ class ThermalReceiptPreview extends StatelessWidget {
               isRightBold: true,
             ),
 
+            const SizedBox(height: 8),
+            const Divider(color: Colors.black, height: 1, thickness: 1),
             const SizedBox(height: 12),
             const Text(
               'Thanh toán Chuyển khoản',
@@ -530,16 +541,21 @@ class ThermalReceiptPreview extends StatelessWidget {
             const SizedBox(height: 8),
             const Divider(color: Colors.black, height: 1, thickness: 1),
             const SizedBox(height: 12),
-
-            // Mã QR tra cứu vẽ bằng CustomPaint
+            // Mã QR tra cứu vẽ bằng QrImageView
             const Text(
               'Mã QR tra cứu',
               textAlign: TextAlign.center,
               style: TextStyle(fontFamily: 'serif'),
             ),
             const SizedBox(height: 8),
-            const Center(
-              child: SimulatedQrCode(size: 100),
+            Center(
+              child: QrImageView(
+                data: 'https://github.com/MinhTung263/printer_label',
+                version: QrVersions.auto,
+                size: 100.0,
+                gapless: false,
+                foregroundColor: Colors.black,
+              ),
             ),
             const SizedBox(height: 10),
             const Text(
@@ -645,129 +661,7 @@ class _ReceiptRow extends StatelessWidget {
   }
 }
 
-// ─── Widget mô phỏng mã QR code thực tế bằng CustomPainter ──────────────────
-class SimulatedQrCode extends StatelessWidget {
-  final double size;
 
-  const SimulatedQrCode({super.key, this.size = 100.0});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      color: Colors.white,
-      child: CustomPaint(
-        painter: _QrPainter(),
-      ),
-    );
-  }
-}
-
-class _QrPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.fill;
-
-    final double moduleSize = size.width / 21; // Lưới QR chuẩn 21x21 dòng/cột
-
-    // Vẽ 3 ô vuông định vị lớn ở 3 góc (7x7 mô-đun)
-    _drawPositionPattern(canvas, paint, 0, 0, moduleSize); // Góc trên - trái
-    _drawPositionPattern(canvas, paint, 14, 0, moduleSize); // Góc trên - phải
-    _drawPositionPattern(canvas, paint, 0, 14, moduleSize); // Góc dưới - trái
-
-    // Vẽ ô vuông căn chỉnh nhỏ (Alignment Pattern) ở góc dưới - phải (5x5 mô-đun)
-    _drawAlignmentPattern(canvas, paint, 14, 14, moduleSize);
-
-    // Vẽ các điểm dữ liệu giả lập (được thiết kế ngẫu nhiên giống mã QR thực tế)
-    final points = [
-      [7, 0], [8, 0], [9, 0], [11, 0],
-      [7, 1], [9, 1], [10, 1], [12, 1],
-      [7, 2], [8, 2], [11, 2], [13, 2],
-      [7, 3], [10, 3], [12, 3],
-      [7, 4], [8, 4], [9, 4], [11, 4], [13, 4],
-      [7, 5], [10, 5], [12, 5],
-      [7, 6], [9, 6], [11, 6], [13, 6],
-      // Đường định thời (Timing patterns - xen kẽ đen trắng)
-      [8, 6], [10, 6], [12, 6],
-      [6, 8], [6, 10], [6, 12],
-      // Khối dữ liệu trung tâm
-      [8, 7], [9, 8], [11, 9], [12, 10], [13, 11],
-      [8, 9], [10, 8], [12, 7], [13, 9],
-      [9, 10], [10, 11], [11, 12], [12, 13],
-      [7, 12], [8, 11], [9, 13], [10, 12], [13, 13],
-      [7, 13], [8, 13], [11, 10], [12, 12],
-      // Khối dữ liệu góc dưới bên phải
-      [18, 8], [19, 9], [20, 10], [17, 11], [15, 12],
-      [16, 7], [17, 8], [19, 10], [20, 11], [18, 12],
-      [15, 9], [16, 10], [17, 13], [19, 12], [20, 13],
-      [8, 15], [9, 16], [10, 17], [11, 18], [13, 20],
-      [7, 16], [8, 18], [10, 19], [12, 20],
-      [7, 19], [9, 18], [11, 17], [13, 19],
-      [19, 19], [20, 18], [19, 20], [20, 20],
-    ];
-
-    for (final pt in points) {
-      final x = pt[0];
-      final y = pt[1];
-      canvas.drawRect(
-        Rect.fromLTWH(x * moduleSize, y * moduleSize, moduleSize, moduleSize),
-        paint,
-      );
-    }
-  }
-
-  // Hàm vẽ ô định vị lớn (7x7)
-  void _drawPositionPattern(Canvas canvas, Paint paint, double gridX,
-      double gridY, double moduleSize) {
-    final x = gridX * moduleSize;
-    final y = gridY * moduleSize;
-
-    // Khung ngoài 7x7
-    canvas.drawRect(Rect.fromLTWH(x, y, 7 * moduleSize, 7 * moduleSize), paint);
-    // Khung trắng bên trong 5x5
-    final whitePaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawRect(
-        Rect.fromLTWH(
-            x + moduleSize, y + moduleSize, 5 * moduleSize, 5 * moduleSize),
-        whitePaint);
-    // Nhân đen 3x3 ở giữa
-    canvas.drawRect(
-        Rect.fromLTWH(x + 2 * moduleSize, y + 2 * moduleSize, 3 * moduleSize,
-            3 * moduleSize),
-        paint);
-  }
-
-  // Hàm vẽ ô căn chỉnh nhỏ (5x5)
-  void _drawAlignmentPattern(Canvas canvas, Paint paint, double gridX,
-      double gridY, double moduleSize) {
-    final x = gridX * moduleSize;
-    final y = gridY * moduleSize;
-
-    // Khung ngoài 5x5
-    canvas.drawRect(Rect.fromLTWH(x, y, 5 * moduleSize, 5 * moduleSize), paint);
-    // Khung trắng bên trong 3x3
-    final whitePaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawRect(
-        Rect.fromLTWH(
-            x + moduleSize, y + moduleSize, 3 * moduleSize, 3 * moduleSize),
-        whitePaint);
-    // Nhân đen 1x1 ở giữa
-    canvas.drawRect(
-        Rect.fromLTWH(
-            x + 2 * moduleSize, y + 2 * moduleSize, moduleSize, moduleSize),
-        paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
 
 // ─── Clipper tạo mép răng cưa xé giấy của hóa đơn nhiệt ──────────────────────
 class TicketClipper extends CustomClipper<Path> {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'connected_device.dart';
 import 'main.dart';
-
+import 'package:printer_label/printer_label.dart';
 
 class DevicesTab extends StatelessWidget {
   final bool isConnected;
@@ -12,17 +12,20 @@ class DevicesTab extends StatelessWidget {
   final VoidCallback onCheckConnect;
   final VoidCallback onConnect;
   final VoidCallback onDisconnectMain;
-  final VoidCallback onAddBluetooth;
   final Function(ConnectedDevice device) onDisconnectDevice;
-  final Function(ConnectedDevice device) onPrintDeviceLabel;
-  final Function(ConnectedDevice device) onPrintDeviceEsc;
   final VoidCallback? onCheckPrinterStatus;
 
   final bool isCheckingStatus;
   final bool isCheckingConnection;
   final bool isPrinting;
 
-
+  // Bluetooth inline parameters
+  final List<BluetoothDeviceModel> btDevices;
+  final bool isScanningBt;
+  final bool hasScannedBt;
+  final Set<String> connectingBtMacs;
+  final Function(BluetoothDeviceModel device) onConnectBtDevice;
+  final VoidCallback onRefreshBtScan;
 
   const DevicesTab({
     super.key,
@@ -34,17 +37,18 @@ class DevicesTab extends StatelessWidget {
     required this.onCheckConnect,
     required this.onConnect,
     required this.onDisconnectMain,
-    required this.onAddBluetooth,
     required this.onDisconnectDevice,
-    required this.onPrintDeviceLabel,
-    required this.onPrintDeviceEsc,
     this.onCheckPrinterStatus,
-
     this.isCheckingStatus = false,
     this.isCheckingConnection = false,
     this.isPrinting = false,
+    required this.btDevices,
+    required this.isScanningBt,
+    required this.hasScannedBt,
+    required this.connectingBtMacs,
+    required this.onConnectBtDevice,
+    required this.onRefreshBtScan,
   });
-
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +64,6 @@ class DevicesTab extends StatelessWidget {
       ],
     );
   }
-
 
   Widget _buildConnectionStatusCard() {
     return Card(
@@ -232,27 +235,74 @@ class DevicesTab extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const Spacer(),
-             IconButton(
-              onPressed: onAddBluetooth,
-              icon: const Icon(Icons.bluetooth,
-                  color: Color(0xFF4F46E5)),
-              tooltip: 'Kết nối Bluetooth',
-            ),
+            if (hasScannedBt && isScanningBt)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF4F46E5),
+                ),
+              ),
+            if (hasScannedBt)
+              IconButton(
+                icon: Icon(
+                  isScanningBt ? Icons.stop_circle_outlined : Icons.refresh,
+                  color: const Color(0xFF4F46E5),
+                ),
+                onPressed: onRefreshBtScan,
+                tooltip: isScanningBt ? 'Dừng quét' : 'Quét thiết bị',
+              ),
           ],
         ),
         const SizedBox(height: 8),
-        if (connectedDevices.isEmpty)
+        
+        // 1. Hiển thị các thiết bị LAN hoặc USB đang kết nối
+        ...connectedDevices
+            .where((d) => d.type != 'BT')
+            .map((d) => _buildDeviceCard(d)),
+
+        // 2. Hiển thị danh sách thiết bị Bluetooth (Quét được + Đã kết nối)
+        if (!hasScannedBt)
           Card(
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
               child: Center(
                 child: Column(
                   children: [
-                    Icon(Icons.print_disabled,
+                    Icon(Icons.bluetooth,
+                        size: 40, color: Colors.grey.shade300),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: onRefreshBtScan,
+                      icon: const Icon(Icons.bluetooth_searching),
+                      label: const Text('Quét thiết bị Bluetooth'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4F46E5),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else if (btDevices.isEmpty && !isScanningBt)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.bluetooth_searching,
                         size: 40, color: Colors.grey.shade300),
                     const SizedBox(height: 8),
                     const Text(
-                      'Chưa có thiết bị nào kết nối thành công',
+                      'Không tìm thấy máy in Bluetooth nào. Thử quét lại.',
                       style: TextStyle(color: Colors.grey, fontSize: 13),
                     ),
                   ],
@@ -261,12 +311,96 @@ class DevicesTab extends StatelessWidget {
             ),
           )
         else
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: connectedDevices.length,
-            itemBuilder: (_, i) => _buildDeviceCard(connectedDevices[i]),
-          ),
+          ...btDevices.map((d) {
+            final isConnecting = connectingBtMacs.contains(d.mac);
+            final connectedDevice = connectedDevices.firstWhere(
+              (cd) => cd.type == 'BT' && (cd.id == d.mac || cd.id == 'BT:${d.mac}'),
+              orElse: () => const ConnectedDevice(id: '', label: '', type: ''),
+            );
+            final isAlreadyConnected = connectedDevice.id.isNotEmpty;
+
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              color: isAlreadyConnected ? const Color(0xFFF0FDF4) : null,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(
+                  color: isAlreadyConnected
+                      ? const Color(0xFFDCFCE7)
+                      : Colors.grey.shade200,
+                  width: 1,
+                ),
+              ),
+              child: ListTile(
+                leading: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: isAlreadyConnected
+                      ? const Color(0xFFDCFCE7)
+                      : const Color(0xFFEEF2FF),
+                  child: Icon(
+                    Icons.bluetooth,
+                    color: isAlreadyConnected
+                        ? const Color(0xFF16A34A)
+                        : const Color(0xFF6366F1),
+                    size: 20,
+                  ),
+                ),
+                title: Text(
+                  d.name.isEmpty ? "Máy in không tên" : d.name,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: isAlreadyConnected ? const Color(0xFF14532D) : Colors.black87,
+                  ),
+                ),
+                subtitle: Text(
+                  d.mac,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isAlreadyConnected ? const Color(0xFF166534) : const Color(0xFF64748B),
+                  ),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isAlreadyConnected) ...[
+                      const Icon(Icons.check_circle, color: Color(0xFF16A34A), size: 20),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.link_off, size: 18),
+                        color: const Color(0xFFF43F5E),
+                        tooltip: 'Ngắt kết nối',
+                        onPressed: () => onDisconnectDevice(connectedDevice),
+                      ),
+                    ] else if (isConnecting) ...[
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFF4F46E5),
+                        ),
+                      ),
+                    ] else ...[
+                      ElevatedButton(
+                        onPressed: () => onConnectBtDevice(d),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF4F46E5),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          minimumSize: const Size(60, 30),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text('Kết nối', style: TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }),
       ],
     );
   }
@@ -295,36 +429,13 @@ class DevicesTab extends StatelessWidget {
           style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.print, color: Color(0xFF4F46E5), size: 20),
-              tooltip: 'Kiểm thử in',
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'label', child: Text('In nhãn (Label)')),
-                PopupMenuItem(value: 'esc', child: Text('In hoá đơn (ESC)')),
-              ],
-              onSelected: (action) {
-                switch (action) {
-                  case 'label':
-                    onPrintDeviceLabel(device);
-                  case 'esc':
-                    onPrintDeviceEsc(device);
-                }
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.link_off, size: 18),
-              color: const Color(0xFFF43F5E),
-              tooltip: 'Ngắt kết nối',
-              onPressed: () => onDisconnectDevice(device),
-            ),
-          ],
+        trailing: IconButton(
+          icon: const Icon(Icons.link_off, size: 18),
+          color: const Color(0xFFF43F5E),
+          tooltip: 'Ngắt kết nối',
+          onPressed: () => onDisconnectDevice(device),
         ),
       ),
     );
   }
 }
-
-

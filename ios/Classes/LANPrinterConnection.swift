@@ -173,40 +173,19 @@ public final class LANPrinterConnection {
         let data = writeQueue.removeFirst()
         print("[LANPrinterConnection] 📨 Sending \(data.count) bytes to \(ip)...")
 
-        // chunk size: 8 KB
-        let chunkSize = 8 * 1024
-        var offset = 0
-
-        func sendNextChunk() {
-            guard offset < data.count else {
-                // finished this data
-                print("[LANPrinterConnection] ✅ Finished sending all chunks")
-                self.isWriting = false
-                // continue with next queued item
+        self.connection?.send(content: data, completion: .contentProcessed({ [weak self] error in
+            guard let self = self else { return }
+            self.isWriting = false
+            if let err = error {
+                print("[LANPrinterConnection] ❌ Send error: \(err)")
+                self.connection?.cancel()
+                self.connection = nil
+                self.state = .failed
+                self.onDisconnected?(err)
+            } else {
+                print("[LANPrinterConnection] ✅ Finished sending data")
                 self.flushQueue()
-                return
             }
-            let length = min(chunkSize, data.count - offset)
-            let chunk = data.subdata(in: offset..<(offset + length))
-            offset += length
-
-            self.connection?.send(content: chunk, completion: .contentProcessed({ [weak self] error in
-                guard let self = self else { return }
-                if let err = error {
-                    // on send error, cancel connection and schedule reconnect
-                    print("[LANPrinterConnection] ❌ Send chunk error: \(err)")
-                    self.isWriting = false
-                    self.connection?.cancel()
-                    self.connection = nil
-                    self.state = .failed
-                    self.onDisconnected?(err)
-                } else {
-                    // continue sending next chunk
-                    sendNextChunk()
-                }
-            }))
-        }
-
-        sendNextChunk()
+        }))
     }
 }

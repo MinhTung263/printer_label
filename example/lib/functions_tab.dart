@@ -10,6 +10,7 @@ class FunctionsTab extends StatefulWidget {
   final ValueChanged<LabelPerRow> onLabelPerRowChanged;
   final Function(List<ProductBarcodeModel> filteredProducts) onPrintLabels;
   final String ipAddress;
+  final String? deviceId;
 
   const FunctionsTab({
     super.key,
@@ -18,6 +19,7 @@ class FunctionsTab extends StatefulWidget {
     required this.onLabelPerRowChanged,
     required this.onPrintLabels,
     required this.ipAddress,
+    this.deviceId,
   });
 
   @override
@@ -74,9 +76,10 @@ class _FunctionsTabState extends State<FunctionsTab>
                 onLabelPerRowChanged: widget.onLabelPerRowChanged,
                 onPrintLabels: widget.onPrintLabels,
                 ipAddress: widget.ipAddress,
+                deviceId: widget.deviceId,
               ),
-              EscTab(ipAddress: widget.ipAddress),
-              CupStickerTab(ipAddress: widget.ipAddress),
+              EscTab(ipAddress: widget.ipAddress, deviceId: widget.deviceId),
+              CupStickerTab(ipAddress: widget.ipAddress, deviceId: widget.deviceId),
             ],
           ),
         ),

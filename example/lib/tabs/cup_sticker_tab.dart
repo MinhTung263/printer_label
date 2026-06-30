@@ -5,8 +5,9 @@ import 'package:printer_label/printer_label.dart';
 
 class CupStickerTab extends StatefulWidget {
   final String ipAddress;
+  final String? deviceId;
 
-  const CupStickerTab({super.key, required this.ipAddress});
+  const CupStickerTab({super.key, required this.ipAddress, this.deviceId});
 
   @override
   State<CupStickerTab> createState() => _CupStickerTabState();
@@ -227,7 +228,7 @@ class _CupStickerTabState extends State<CupStickerTab> {
                             items:
                                 _cupSampleData.take(_previewCupCount).toList(),
                             context: context,
-                            deviceId: DeviceId.lan(widget.ipAddress),
+                            deviceId: widget.deviceId ?? DeviceId.lan(widget.ipAddress),
                           );
                         } finally {
                           if (mounted) {

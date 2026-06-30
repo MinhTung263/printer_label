@@ -600,11 +600,34 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     private val usbEventStreamHandler = object : EventChannel.StreamHandler {
         override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
             usbEventSink = events
+            scanAndConnectExistingUsbDevices()
         }
 
         override fun onCancel(arguments: Any?) {
             usbEventSink = null
         }
+    }
+
+    private fun scanAndConnectExistingUsbDevices() {
+        try {
+            val deviceList = usbManager.deviceList
+            for (device in deviceList.values) {
+                if (isUsbPrinter(device)) {
+                    handleUsbDeviceAttached(device)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun isUsbPrinter(device: UsbDevice): Boolean {
+        if (device.deviceClass == 7) return true
+        for (i in 0 until device.interfaceCount) {
+            val intf = device.getInterface(i)
+            if (intf.interfaceClass == 7) return true
+        }
+        return false
     }
 
     /** Emit USB connect/disconnect events to Flutter. */
@@ -648,10 +671,26 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                             }
                         device?.let {
                             try {
-                                val map =
-                                    mapOf("name" to (it.name ?: "Unknown"), "mac" to it.address)
-                                Handler(Looper.getMainLooper()).post {
-                                    scanEventSink?.success(map)
+                                val name = it.name ?: ""
+                                val btClass = it.bluetoothClass
+                                val majorClass = btClass?.majorDeviceClass ?: 0
+                                val deviceClass = btClass?.deviceClass ?: 0
+
+                                // 1. Check if explicitly a printer class (Major: IMAGING = 1536, Device: IMAGING_PRINTER = 1664)
+                                val isPrinterClass = majorClass == 1536 || deviceClass == 1664
+
+                                // 2. Filter out known non-printer major classes
+                                // 256: COMPUTER, 512: PHONE, 1024: AUDIO_VIDEO, 768: WEARABLE, 1280: TOY, 2048: HEALTH
+                                val isNonPrinterMajor = majorClass == 256 || majorClass == 512 || majorClass == 1024 || majorClass == 768 || majorClass == 1280 || majorClass == 2048
+
+                                // We keep it if it is explicitly a printer, OR if it is not in a known non-printer major class (which includes uncategorized/misc)
+                                val shouldKeep = isPrinterClass || !isNonPrinterMajor
+
+                                if (shouldKeep) {
+                                    val map = mapOf("name" to (it.name ?: "Unknown"), "mac" to it.address)
+                                    Handler(Looper.getMainLooper()).post {
+                                        scanEventSink?.success(map)
+                                    }
                                 }
                             } catch (_: SecurityException) {
                             }
