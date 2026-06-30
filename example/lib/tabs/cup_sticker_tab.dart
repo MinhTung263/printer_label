@@ -1,3 +1,4 @@
+import 'package:example/connected_device.dart';
 import 'package:example/cup_sticker_example.dart';
 import 'package:example/widgets/print_preview_widgets.dart';
 import 'package:flutter/material.dart';
@@ -5,9 +6,9 @@ import 'package:printer_label/printer_label.dart';
 
 class CupStickerTab extends StatefulWidget {
   final String ipAddress;
-  final String? deviceId;
+  final List<ConnectedDevice> connectedDevices;
 
-  const CupStickerTab({super.key, required this.ipAddress, this.deviceId});
+  const CupStickerTab({super.key, required this.ipAddress, required this.connectedDevices});
 
   @override
   State<CupStickerTab> createState() => _CupStickerTabState();
@@ -225,19 +226,29 @@ class _CupStickerTabState extends State<CupStickerTab> {
                 onPressed: _isPrinting
                     ? null
                     : () async {
-                        if (widget.deviceId == null) {
+                        if (widget.connectedDevices.isEmpty) {
                           _showNoConnectionMsg();
                           return;
                         }
                         setState(() => _isPrinting = true);
                         try {
-                          await CupStickerExample.printOrderCupSticker(
-                            _selectedCupSize,
-                            items:
-                                _cupSampleData.take(_previewCupCount).toList(),
-                            context: context,
-                            deviceId: widget.deviceId ?? DeviceId.lan(widget.ipAddress),
-                          );
+                          final targets = widget.connectedDevices.map((d) => d.id).toList();
+                          for (final targetId in targets) {
+                            try {
+                              await CupStickerExample.printOrderCupSticker(
+                                _selectedCupSize,
+                                items:
+                                    _cupSampleData.take(_previewCupCount).toList(),
+                                context: context,
+                                deviceId: targetId,
+                              );
+                            } catch (e) {
+                              debugPrint('Lỗi in tem trà sữa trên $targetId: $e');
+                              if (mounted) {
+                                showTopNotification(context, 'Lỗi in trên $targetId: $e');
+                              }
+                            }
+                          }
                         } finally {
                           if (mounted) {
                             setState(() => _isPrinting = false);

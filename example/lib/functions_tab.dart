@@ -1,3 +1,4 @@
+import 'package:example/connected_device.dart';
 import 'package:example/tabs/cup_sticker_tab.dart';
 import 'package:example/tabs/esc_tab.dart';
 import 'package:example/tabs/label_tab.dart';
@@ -10,7 +11,7 @@ class FunctionsTab extends StatefulWidget {
   final ValueChanged<LabelPerRow> onLabelPerRowChanged;
   final Function(List<ProductBarcodeModel> filteredProducts) onPrintLabels;
   final String ipAddress;
-  final String? deviceId;
+  final List<ConnectedDevice> connectedDevices;
 
   const FunctionsTab({
     super.key,
@@ -19,7 +20,7 @@ class FunctionsTab extends StatefulWidget {
     required this.onLabelPerRowChanged,
     required this.onPrintLabels,
     required this.ipAddress,
-    this.deviceId,
+    required this.connectedDevices,
   });
 
   @override
@@ -76,10 +77,10 @@ class _FunctionsTabState extends State<FunctionsTab>
                 onLabelPerRowChanged: widget.onLabelPerRowChanged,
                 onPrintLabels: widget.onPrintLabels,
                 ipAddress: widget.ipAddress,
-                deviceId: widget.deviceId,
+                connectedDevices: widget.connectedDevices,
               ),
-              EscTab(ipAddress: widget.ipAddress, deviceId: widget.deviceId),
-              CupStickerTab(ipAddress: widget.ipAddress, deviceId: widget.deviceId),
+              EscTab(ipAddress: widget.ipAddress, connectedDevices: widget.connectedDevices),
+              CupStickerTab(ipAddress: widget.ipAddress, connectedDevices: widget.connectedDevices),
             ],
           ),
         ),

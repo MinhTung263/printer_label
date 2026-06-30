@@ -182,8 +182,13 @@ public final class LANPrinterConnection {
                 self.connection = nil
                 self.state = .failed
                 self.onDisconnected?(err)
+                
+                // Đẩy dữ liệu lỗi ngược lại đầu hàng đợi để gửi lại sau khi kết nối lại
+                self.writeQueue.insert(data, at: 0)
+                print("[LANPrinterConnection] 🔄 Re-queued data for retry. Reconnecting to \(self.ip)...")
+                self.connect()
             } else {
-                print("[LANPrinterConnection] ✅ Finished sending data")
+                print("[LANPrinterConnection] ✅ Finished sending data to \(self.ip)")
                 self.flushQueue()
             }
         }))

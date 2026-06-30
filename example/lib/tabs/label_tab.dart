@@ -1,4 +1,5 @@
 import 'package:example/select_type_label.dart';
+import 'package:example/connected_device.dart';
 import 'package:example/widgets/print_preview_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:printer_label/printer_label.dart';
@@ -9,7 +10,7 @@ class LabelTab extends StatefulWidget {
   final ValueChanged<LabelPerRow> onLabelPerRowChanged;
   final Function(List<ProductBarcodeModel> filteredProducts) onPrintLabels;
   final String ipAddress;
-  final String? deviceId;
+  final List<ConnectedDevice> connectedDevices;
 
   const LabelTab({
     super.key,
@@ -18,7 +19,7 @@ class LabelTab extends StatefulWidget {
     required this.onLabelPerRowChanged,
     required this.onPrintLabels,
     required this.ipAddress,
-    this.deviceId,
+    required this.connectedDevices,
   });
 
   @override
@@ -147,65 +148,73 @@ class _LabelTabState extends State<LabelTab> {
     }
   }
 
-  String get _targetDeviceId => widget.deviceId ?? DeviceId.lan(widget.ipAddress);
+  List<String> get _targetDeviceIds => widget.connectedDevices.isNotEmpty
+      ? widget.connectedDevices.map((d) => d.id).toList()
+      : [DeviceId.lan(widget.ipAddress)];
 
   Future<void> _printRawText() async {
-    try {
-      await LabelPrintService.instance.printText(
-        deviceId: _targetDeviceId,
-        text: 'Printer Label - Test Raw Text Printing TSPL',
-        x: 10,
-        y: 10,
-        font: 0,
-        rotation: 0,
-        sizeX: 1,
-        sizeY: 1,
-      );
-      if (mounted) {
-        showTopNotification(context, 'Đã gửi lệnh in Text TSPL', isError: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi: $e');
+    for (final deviceId in _targetDeviceIds) {
+      try {
+        await LabelPrintService.instance.printText(
+          deviceId: deviceId,
+          text: 'Printer Label - Test Raw Text Printing TSPL',
+          x: 10,
+          y: 10,
+          font: 0,
+          rotation: 0,
+          sizeX: 1,
+          sizeY: 1,
+        );
+        if (mounted) {
+          showTopNotification(context, 'Đã gửi lệnh in Text TSPL tới $deviceId', isError: false);
+        }
+      } catch (e) {
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in Text trên $deviceId: $e');
+        }
       }
     }
   }
 
   Future<void> _printRawBarcode() async {
-    try {
-      await LabelPrintService.instance.printBarcode(
-        deviceId: _targetDeviceId,
-        code: '123456789012',
-        x: 10,
-        y: 10,
-        height: 80,
-        type: '128',
-      );
-      if (mounted) {
-        showTopNotification(context, 'Đã gửi lệnh in Barcode TSPL', isError: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi: $e');
+    for (final deviceId in _targetDeviceIds) {
+      try {
+        await LabelPrintService.instance.printBarcode(
+          deviceId: deviceId,
+          code: '123456789012',
+          x: 10,
+          y: 10,
+          height: 80,
+          type: '128',
+        );
+        if (mounted) {
+          showTopNotification(context, 'Đã gửi lệnh in Barcode TSPL tới $deviceId', isError: false);
+        }
+      } catch (e) {
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in Barcode trên $deviceId: $e');
+        }
       }
     }
   }
 
   Future<void> _printRawQRCode() async {
-    try {
-      await LabelPrintService.instance.printQRCode(
-        deviceId: _targetDeviceId,
-        code: 'https://github.com/MinhTung263/printer_label',
-        x: 10,
-        y: 10,
-        size: 4,
-      );
-      if (mounted) {
-        showTopNotification(context, 'Đã gửi lệnh in QR Code TSPL', isError: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi: $e');
+    for (final deviceId in _targetDeviceIds) {
+      try {
+        await LabelPrintService.instance.printQRCode(
+          deviceId: deviceId,
+          code: 'https://github.com/MinhTung263/printer_label',
+          x: 10,
+          y: 10,
+          size: 4,
+        );
+        if (mounted) {
+          showTopNotification(context, 'Đã gửi lệnh in QR Code TSPL tới $deviceId', isError: false);
+        }
+      } catch (e) {
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in QR trên $deviceId: $e');
+        }
       }
     }
   }
@@ -321,7 +330,7 @@ class _LabelTabState extends State<LabelTab> {
                 onPressed: _isPrintingLabel
                     ? null
                     : () {
-                        if (widget.deviceId == null) {
+                        if (widget.connectedDevices.isEmpty) {
                           _showNoConnectionMsg();
                           return;
                         }
@@ -363,9 +372,9 @@ class _LabelTabState extends State<LabelTab> {
           color: Colors.blue.shade600,
           title: 'In thô TSPL (dev)',
           buttons: [
-            (label: 'In Text', onPressed: () => widget.deviceId == null ? _showNoConnectionMsg() : _printRawText()),
-            (label: 'In Barcode', onPressed: () => widget.deviceId == null ? _showNoConnectionMsg() : _printRawBarcode()),
-            (label: 'In QR', onPressed: () => widget.deviceId == null ? _showNoConnectionMsg() : _printRawQRCode()),
+            (label: 'In Text', onPressed: () => widget.connectedDevices.isEmpty ? _showNoConnectionMsg() : _printRawText()),
+            (label: 'In Barcode', onPressed: () => widget.connectedDevices.isEmpty ? _showNoConnectionMsg() : _printRawBarcode()),
+            (label: 'In QR', onPressed: () => widget.connectedDevices.isEmpty ? _showNoConnectionMsg() : _printRawQRCode()),
           ],
         ),
       ],

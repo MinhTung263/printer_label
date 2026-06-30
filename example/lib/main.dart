@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
 
+import 'widgets/print_preview_widgets.dart';
+
 void main() {
   runApp(const MyApp());
 }
@@ -362,18 +364,36 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   Future<void> _printProductLabels(List<ProductBarcodeModel> items) async {
-    final deviceId = _connectedDevices.isNotEmpty
-        ? _connectedDevices.last.id
-        : DeviceId.lan(textEditingController.text);
+    if (_connectedDevices.isEmpty) {
+      final fallbackId = DeviceId.lan(textEditingController.text);
+      await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
+        items: items,
+        context: context,
+        deviceId: fallbackId,
+        labelPerRow: _selectedRow,
+        itemBuilder: _buildBarcodeView,
+        quantity: (p) => p.quantity,
+      );
+      return;
+    }
 
-    await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
-      items: items,
-      context: context,
-      deviceId: deviceId,
-      labelPerRow: _selectedRow,
-      itemBuilder: _buildBarcodeView,
-      quantity: (p) => p.quantity,
-    );
+    for (final device in _connectedDevices) {
+      try {
+        await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
+          items: items,
+          context: context,
+          deviceId: device.id,
+          labelPerRow: _selectedRow,
+          itemBuilder: _buildBarcodeView,
+          quantity: (p) => p.quantity,
+        );
+      } catch (e) {
+        debugPrint('Lỗi in trên thiết bị ${device.label}: $e');
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in trên ${device.label}: $e');
+        }
+      }
+    }
   }
 
   Future<void> _connectLanPrinter() async {
@@ -499,9 +519,7 @@ class _MyHomePageState extends State<MyHomePage>
               },
               onPrintLabels: _printProductLabels,
               ipAddress: textEditingController.text,
-              deviceId: _connectedDevices.isNotEmpty
-                  ? _connectedDevices.last.id
-                  : null,
+              connectedDevices: _connectedDevices,
             ),
           ],
         ),

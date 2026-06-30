@@ -1,3 +1,4 @@
+import 'package:example/connected_device.dart';
 import 'package:example/widgets/print_preview_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:printer_label/printer_label.dart';
@@ -5,9 +6,9 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 class EscTab extends StatefulWidget {
   final String ipAddress;
-  final String? deviceId;
+  final List<ConnectedDevice> connectedDevices;
 
-  const EscTab({super.key, required this.ipAddress, this.deviceId});
+  const EscTab({super.key, required this.ipAddress, required this.connectedDevices});
 
   @override
   State<EscTab> createState() => _EscTabState();
@@ -17,29 +18,39 @@ class _EscTabState extends State<EscTab> {
   bool _isPrintingEsc = false;
   TicketSize _selectedSize = TicketSize.mm80;
 
-  String get _targetDeviceId =>
-      widget.deviceId ?? DeviceId.lan(widget.ipAddress);
+  List<String> get _targetDeviceIds => widget.connectedDevices.isNotEmpty
+      ? widget.connectedDevices.map((d) => d.id).toList()
+      : [DeviceId.lan(widget.ipAddress)];
 
   void _showNoConnectionMsg() {
     showTopNotification(context, 'Vui lòng kết nối máy in trước khi in!');
   }
 
   Future<void> _printExample() async {
+    if (widget.connectedDevices.isEmpty) {
+      _showNoConnectionMsg();
+      return;
+    }
     setState(() => _isPrintingEsc = true);
     try {
-      // In toàn bộ hóa đơn dưới dạng hình ảnh (bao gồm cả mã QR và chân trang)
-      await ESCPrintService.instance.printWidget(
-        deviceId: _targetDeviceId,
-        widget: ThermalReceiptPreview(
-          size: _selectedSize,
-          isForPrinting: true,
-        ),
-        size: _selectedSize,
-        pixelRatio: 3.5,
-      );
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi in: $e');
+      // In toàn bộ hóa đơn dưới dạng hình ảnh trên tất cả thiết bị đang kết nối
+      for (final deviceId in _targetDeviceIds) {
+        try {
+          await ESCPrintService.instance.printWidget(
+            deviceId: deviceId,
+            widget: ThermalReceiptPreview(
+              size: _selectedSize,
+              isForPrinting: true,
+            ),
+            size: _selectedSize,
+            pixelRatio: 3.5,
+          );
+        } catch (e) {
+          debugPrint('Lỗi in hóa đơn trên $deviceId: $e');
+          if (mounted) {
+            showTopNotification(context, 'Lỗi in trên $deviceId: $e');
+          }
+        }
       }
     } finally {
       if (mounted) setState(() => _isPrintingEsc = false);
@@ -47,52 +58,58 @@ class _EscTabState extends State<EscTab> {
   }
 
   Future<void> _printRawText() async {
-    try {
-      await ESCPrintService.instance.printText(
-        deviceId: _targetDeviceId,
-        text:
-            'Printer Label - Test Raw Text Printing ESC/POS\nLine 2 - Hello World!\n\n',
-      );
-      if (mounted) {
-        showTopNotification(context, 'Đã gửi lệnh in Text ESC', isError: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi: $e');
+    for (final deviceId in _targetDeviceIds) {
+      try {
+        await ESCPrintService.instance.printText(
+          deviceId: deviceId,
+          text:
+              'Printer Label - Test Raw Text Printing ESC/POS\nLine 2 - Hello World!\n\n',
+        );
+        if (mounted) {
+          showTopNotification(context, 'Đã gửi lệnh in Text ESC tới $deviceId', isError: false);
+        }
+      } catch (e) {
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in Text trên $deviceId: $e');
+        }
       }
     }
   }
 
   Future<void> _printRawBarcode() async {
-    try {
-      await ESCPrintService.instance.printBarcode(
-        deviceId: _targetDeviceId,
-        code: '123456789012',
-        type: '128',
-      );
-      if (mounted) {
-        showTopNotification(context, 'Đã gửi lệnh in Barcode ESC', isError: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi: $e');
+    for (final deviceId in _targetDeviceIds) {
+      try {
+        await ESCPrintService.instance.printBarcode(
+          deviceId: deviceId,
+          code: '123456789012',
+          type: '128',
+        );
+        if (mounted) {
+          showTopNotification(context, 'Đã gửi lệnh in Barcode ESC tới $deviceId', isError: false);
+        }
+      } catch (e) {
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in Barcode trên $deviceId: $e');
+        }
       }
     }
   }
 
   Future<void> _printRawQRCode() async {
-    try {
-      await ESCPrintService.instance.printQRCode(
-        deviceId: _targetDeviceId,
-        code: 'https://github.com/MinhTung263/printer_label',
-        size: 8,
-      );
-      if (mounted) {
-        showTopNotification(context, 'Đã gửi lệnh in QR Code ESC', isError: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi: $e');
+    for (final deviceId in _targetDeviceIds) {
+      try {
+        await ESCPrintService.instance.printQRCode(
+          deviceId: deviceId,
+          code: 'https://github.com/MinhTung263/printer_label',
+          size: 8,
+        );
+        if (mounted) {
+          showTopNotification(context, 'Đã gửi lệnh in QR Code ESC tới $deviceId', isError: false);
+        }
+      } catch (e) {
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in QR trên $deviceId: $e');
+        }
       }
     }
   }
@@ -191,7 +208,7 @@ class _EscTabState extends State<EscTab> {
                   onPressed: _isPrintingEsc
                       ? null
                       : () {
-                          if (widget.deviceId == null) {
+                          if (widget.connectedDevices.isEmpty) {
                             _showNoConnectionMsg();
                             return;
                           }
@@ -231,19 +248,19 @@ class _EscTabState extends State<EscTab> {
           buttons: [
             (
               label: 'In Text',
-              onPressed: () => widget.deviceId == null
+              onPressed: () => widget.connectedDevices.isEmpty
                   ? _showNoConnectionMsg()
                   : _printRawText()
             ),
             (
               label: 'In Barcode',
-              onPressed: () => widget.deviceId == null
+              onPressed: () => widget.connectedDevices.isEmpty
                   ? _showNoConnectionMsg()
                   : _printRawBarcode()
             ),
             (
               label: 'In QR',
-              onPressed: () => widget.deviceId == null
+              onPressed: () => widget.connectedDevices.isEmpty
                   ? _showNoConnectionMsg()
                   : _printRawQRCode()
             ),
