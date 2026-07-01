@@ -156,7 +156,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     result.success(false)
                     return
                 }
-                // Gọi hàm connectBt và truyền result để trả về cho Flutter
                 connectBt(macAddress, result)
             }
 
@@ -201,14 +200,13 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                 printThermal.printQRCodeESC(call, conn, result)
             }
 
-
             "print_image_esc" -> {
                 val conn = resolveConn(call, result) ?: return
                 printThermal.printImageESC(call, conn, result)
             }
 
             "check_printer_status" -> {
-                val conn = resolveConn(call, result)
+                val conn = getConn(call)
                 if (conn == null || !conn.isConnect) {
                     result.success("offline")
                     return
@@ -323,18 +321,27 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     // ─── Connection helpers ───────────────────────────────────────────────────
 
-    private fun resolveConn(call: MethodCall, result: Result): IDeviceConnection? {
+    private fun getConn(call: MethodCall): IDeviceConnection? {
         val deviceId = call.argument<String>("device_id")
 
         if (!deviceId.isNullOrEmpty()) {
             val conn = connections[deviceId]
             if (conn != null && conn.isConnect) return conn
-            // device_id was provided but not connected — do not silently fall through to another printer
-            result.error("NO_CONNECTION", "Device $deviceId is not connected", null)
-            return null
+            
+            // Thử khớp khóa phụ (không có tiền tố hoặc tự thêm tiền tố LAN/BT)
+            val altKey = if (deviceId.contains(":")) deviceId.substringAfter(":") else deviceId
+            val conn2 = connections[altKey] ?: connections["LAN:$deviceId"] ?: connections["BT:$deviceId"]
+            if (conn2 != null && conn2.isConnect) return conn2
         }
 
-        result.error("NO_CONNECTION", "No device_id provided", null)
+        return connections.values.firstOrNull { it.isConnect }
+    }
+
+    private fun resolveConn(call: MethodCall, result: Result): IDeviceConnection? {
+        val conn = getConn(call)
+        if (conn != null) return conn
+
+        result.error("NO_CONNECTION", "No connected printer found", null)
         return null
     }
 
@@ -761,23 +768,39 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         try {
             val name = device.name ?: ""
             val lowerName = name.lowercase()
-            if (lowerName.contains("printer") || lowerName.contains("mpt-") || lowerName.contains("pt-")) {
+            if (lowerName.isEmpty()) return false
+
+            // Danh sách từ khóa dài tự động khớp nếu xuất hiện ở bất kỳ đâu trong tên (giống iOS)
+            val longKeywords = listOf(
+                "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
+                "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
+                "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang"
+            )
+            val matchesLong = longKeywords.any { lowerName.contains(it) }
+
+            // Danh sách tiền tố ngắn (khớp ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới - giống iOS)
+            val shortPrefixes = listOf(
+                "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc"
+            )
+            val matchesShort = shortPrefixes.any { prefix ->
+                lowerName.startsWith(prefix) ||
+                lowerName.contains("$prefix-") ||
+                lowerName.contains("$prefix ") ||
+                lowerName.contains("_$prefix")
+            }
+
+            if (matchesLong || matchesShort) {
                 return true
             }
 
-            val btClass = device.bluetoothClass ?: return true
+            // Nếu không khớp tên, kiểm tra lớp Bluetooth (chỉ chấp nhận nếu là IMAGING hoặc IMAGING_PRINTER)
+            val btClass = device.bluetoothClass ?: return false
             val majorClass = btClass.majorDeviceClass
             val deviceClass = btClass.deviceClass
-
-            // 1. Check if explicitly a printer class (Major: IMAGING = 1536, Device: IMAGING_PRINTER = 1664)
-            val isPrinterClass = majorClass == 1536 || deviceClass == 1664
-            if (isPrinterClass) return true
-
-            // 2. Filter out known non-printer major classes (256: COMPUTER, 512: PHONE, 1024: AUDIO_VIDEO, 768: WEARABLE, 1280: TOY, 2048: HEALTH)
-            val isNonPrinterMajor = majorClass == 256 || majorClass == 512 || majorClass == 1024 || majorClass == 768 || majorClass == 1280 || majorClass == 2048
-            return !isNonPrinterMajor
+            
+            return majorClass == 1536 || deviceClass == 1664
         } catch (_: SecurityException) {
-            return true
+            return false
         }
     }
 

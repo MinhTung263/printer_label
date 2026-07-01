@@ -8,7 +8,8 @@ class EscTab extends StatefulWidget {
   final String ipAddress;
   final List<ConnectedDevice> connectedDevices;
 
-  const EscTab({super.key, required this.ipAddress, required this.connectedDevices});
+  const EscTab(
+      {super.key, required this.ipAddress, required this.connectedDevices});
 
   @override
   State<EscTab> createState() => _EscTabState();
@@ -66,7 +67,8 @@ class _EscTabState extends State<EscTab> {
               'Printer Label - Test Raw Text Printing ESC/POS\nLine 2 - Hello World!\n\n',
         );
         if (mounted) {
-          showTopNotification(context, 'Đã gửi lệnh in Text ESC tới $deviceId', isError: false);
+          showTopNotification(context, 'Đã gửi lệnh in Text ESC tới $deviceId',
+              isError: false);
         }
       } catch (e) {
         if (mounted) {
@@ -85,7 +87,9 @@ class _EscTabState extends State<EscTab> {
           type: '128',
         );
         if (mounted) {
-          showTopNotification(context, 'Đã gửi lệnh in Barcode ESC tới $deviceId', isError: false);
+          showTopNotification(
+              context, 'Đã gửi lệnh in Barcode ESC tới $deviceId',
+              isError: false);
         }
       } catch (e) {
         if (mounted) {
@@ -104,7 +108,9 @@ class _EscTabState extends State<EscTab> {
           size: 8,
         );
         if (mounted) {
-          showTopNotification(context, 'Đã gửi lệnh in QR Code ESC tới $deviceId', isError: false);
+          showTopNotification(
+              context, 'Đã gửi lệnh in QR Code ESC tới $deviceId',
+              isError: false);
         }
       } catch (e) {
         if (mounted) {
