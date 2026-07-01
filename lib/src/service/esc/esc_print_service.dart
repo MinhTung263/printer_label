@@ -16,14 +16,14 @@ class ESCPrintService {
     required TicketSize size,
     String? deviceId,
     PrinterConnectionType? connectionType,
-    double pixelRatio = 2.5,
+    double? pixelRatio,
   }) {
     return ESCPrintServicePlatform.instance.printWidget(
       widget: widget,
       size: size,
       deviceId: deviceId,
       connectionType: connectionType,
-      pixelRatio: pixelRatio,
+      pixelRatio: pixelRatio ?? (size == TicketSize.mm58 ? 1.6 : 1.8),
     );
   }
 

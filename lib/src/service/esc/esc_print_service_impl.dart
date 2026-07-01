@@ -13,11 +13,11 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
     required TicketSize size,
     String? deviceId,
     PrinterConnectionType? connectionType,
-    double pixelRatio = 2.5,
+    double? pixelRatio,
   }) async {
     final imageBytes = await WidgetCaptureHelper.captureFromLongWidget(
       widget,
-      pixelRatio: pixelRatio,
+      pixelRatio: pixelRatio ?? (size == TicketSize.mm58 ? 1.6 : 1.8),
     );
     return print(
       deviceId: deviceId,

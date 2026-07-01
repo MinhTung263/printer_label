@@ -24,7 +24,7 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
     required TicketSize size,
     String? deviceId,
     PrinterConnectionType? connectionType,
-    double pixelRatio = 2.5,
+    double? pixelRatio,
   });
 
   Future<void> print({

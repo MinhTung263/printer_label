@@ -23,7 +23,7 @@ class PrinterThermal {
             return
         }
         
-        // Chạy toàn bộ luồng in trong background thread để tránh khóa UI Thread, giải quyết triệt để lỗi cảnh báo APP_SCOUT_HANG (ANR)
+        // Chạy toàn bộ quá trình in trên luồng nền để tránh khóa UI
         kotlin.concurrent.thread {
             try {
                 val image: ByteArray? = call.argument<ByteArray>("image")
@@ -36,7 +36,7 @@ class PrinterThermal {
                 val bitmap = BitmapFactory.decodeByteArray(image, 0, image.size)
                 val isBluetooth = curConnect.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH
 
-                // Compile image into ESC/POS Raster bytes (GS v 0) using high-quality simple thresholding
+                // Dựng dữ liệu ảnh thô (GS v 0) sử dụng bộ nhị phân hóa chất lượng cao (threshold 200) để giữ nguyên chất lượng ảnh gốc của Flutter
                 val rasterBytes = getEscPosRasterBytes(bitmap)
                 bitmap.recycle()
 
@@ -60,7 +60,7 @@ class PrinterThermal {
                 val allBytes = stream.toByteArray()
 
                 if (isBluetooth) {
-                    // Đưa về cấu hình an toàn tuyệt đối: Gói 120 bytes, delay 5ms, nghỉ 100ms mỗi 1500 bytes để bảo vệ bộ đệm phần QR cuối hóa đơn
+                    // Cấu hình vừa tầm cân bằng: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
                     val chunkSize = 120
                     var offset = 0
                     var bytesSentInBlock = 0
@@ -71,9 +71,9 @@ class PrinterThermal {
                         offset += count
                         bytesSentInBlock += count
                         
-                        Thread.sleep(5)
+                        Thread.sleep(4)
                         if (bytesSentInBlock >= 1500) {
-                            Thread.sleep(100)
+                            Thread.sleep(80)
                             bytesSentInBlock = 0
                         }
                     }
@@ -123,7 +123,7 @@ class PrinterThermal {
                             val green = (pixel shr 8) and 0xff
                             val blue = pixel and 0xff
                             val gray = (0.299 * red + 0.587 * green + 0.114 * blue).toInt()
-                            // Tăng ngưỡng lên 200 giúp thu các nét chuyển sắc rìa chữ, làm chữ in ra đen đậm và rõ ràng hơn
+                            // Tăng ngưỡng lên 200 giúp giữ nguyên chất lượng ảnh gốc, làm chữ in ra đen đậm, sắc nét
                             if (gray < 200) {
                                 byteVal = byteVal or (1 shl (7 - bit))
                             }

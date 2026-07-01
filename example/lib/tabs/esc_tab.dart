@@ -44,7 +44,6 @@ class _EscTabState extends State<EscTab> {
               isForPrinting: true,
             ),
             size: _selectedSize,
-            pixelRatio: 3.5,
           );
         } catch (e) {
           debugPrint('Lỗi in hóa đơn trên $deviceId: $e');
