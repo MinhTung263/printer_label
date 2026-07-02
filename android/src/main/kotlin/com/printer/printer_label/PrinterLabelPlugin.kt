@@ -302,42 +302,54 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         val deviceId = call.argument<String>("device_id")
         val targets = mutableListOf<IDeviceConnection>()
 
+        // 1. Nếu thiết bị hỗ trợ in trực tiếp (Built-in Printer), luôn ưu tiên kết nối và thêm nó vào targets đầu tiên
+        if (isBuiltInPrinter()) {
+            val isConnected = connections.values.any { bluetoothManager.isConnectionToBuiltInPrinter(it) && it.isConnect }
+            if (!isConnected) {
+                bluetoothManager.autoConnectBuiltInSync()
+            }
+            val builtInConn = connections.entries.firstOrNull { 
+                bluetoothManager.isConnectionToBuiltInPrinter(it.value) && isConnectionActive(it.key) 
+            }?.value
+            if (builtInConn != null) {
+                targets.add(builtInConn)
+            }
+        }
+
+        // 2. Thêm thiết bị được chỉ định cụ thể qua deviceId (nếu có)
         if (!deviceId.isNullOrEmpty()) {
-            val conn = connections[deviceId]
-            if (conn != null && isConnectionActive(deviceId)) {
-                targets.add(conn)
-            } else {
+            var specificConn = connections[deviceId]
+            if (specificConn == null || !isConnectionActive(deviceId)) {
                 val altKey = if (deviceId.contains(":")) deviceId.substringAfter(":") else deviceId
                 val conn2 = connections[altKey] ?: connections["LAN:$deviceId"] ?: connections["BT:$deviceId"]
                 if (conn2 != null && isConnectionActive(altKey)) {
-                    targets.add(conn2)
+                    specificConn = conn2
                 } else {
                     val keyLan = "LAN:$deviceId"
                     if (connections.containsKey(keyLan) && isConnectionActive(keyLan)) {
-                        connections[keyLan]?.let { targets.add(it) }
+                        specificConn = connections[keyLan]
                     } else {
                         val keyBt = "BT:$deviceId"
                         if (connections.containsKey(keyBt) && isConnectionActive(keyBt)) {
-                            connections[keyBt]?.let { targets.add(it) }
+                            specificConn = connections[keyBt]
                         }
                     }
                 }
             }
+            // Chỉ thêm nếu specificConn khác null, đang hoạt động, và không bị trùng với builtInConn đã thêm trước đó
+            if (specificConn != null && specificConn.isConnect) {
+                if (!targets.contains(specificConn)) {
+                    targets.add(specificConn)
+                }
+            }
         } else {
+            // 3. Nếu không chỉ định deviceId, thêm tất cả các kết nối ngoại vi khác đang hoạt động
             if (isBuiltInPrinter()) {
-                val isConnected = connections.values.any { bluetoothManager.isConnectionToBuiltInPrinter(it) && it.isConnect }
-                if (!isConnected) {
-                    bluetoothManager.autoConnectBuiltInSync()
-                }
-                val builtInConn = connections.entries.firstOrNull { 
-                    bluetoothManager.isConnectionToBuiltInPrinter(it.value) && isConnectionActive(it.key) 
-                }?.value
-                if (builtInConn != null) {
-                    targets.add(builtInConn)
-                }
                 connections.entries.forEach { (key, conn) ->
                     if (isConnectionActive(key) && !bluetoothManager.isConnectionToBuiltInPrinter(conn)) {
-                        targets.add(conn)
+                        if (!targets.contains(conn)) {
+                            targets.add(conn)
+                        }
                     }
                 }
             } else {
@@ -347,6 +359,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 }
             }
         }
+
         return targets
     }
 

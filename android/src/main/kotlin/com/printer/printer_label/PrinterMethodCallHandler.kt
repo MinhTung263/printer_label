@@ -186,11 +186,59 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 return@thread
             }
 
-            Handler(Looper.getMainLooper()).post {
-                conns.forEachIndexed { index, conn ->
-                    val isLast = index == conns.size - 1
-                    val targetResult = if (isLast) result else NoOpResult
-                    job(conn, targetResult)
+            val total = conns.size
+            val successCount = java.util.concurrent.atomic.AtomicInteger(0)
+            val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
+            val isResultDelivered = java.util.concurrent.atomic.AtomicBoolean(false)
+            val lastError = java.util.concurrent.atomic.AtomicReference<Pair<String, String?>>(Pair("PRINT_ERROR", "Printing failed"))
+
+            conns.forEach { conn ->
+                kotlin.concurrent.thread {
+                    val jobResult = object : Result {
+                        override fun success(res: Any?) {
+                            successCount.incrementAndGet()
+                            finishCount.incrementAndGet()
+                            
+                            // Nếu có ít nhất 1 thiết bị in thành công, phản hồi thành công ngay lập tức cho Flutter
+                            if (isResultDelivered.compareAndSet(false, true)) {
+                                Handler(Looper.getMainLooper()).post {
+                                    result.success(true)
+                                }
+                            }
+                        }
+
+                        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                            lastError.set(Pair(errorCode, errorMessage))
+                            val currentFinished = finishCount.incrementAndGet()
+                            
+                            // Chỉ trả về lỗi nếu TẤT CẢ các thiết bị đều thất bại
+                            if (currentFinished == total && successCount.get() == 0) {
+                                if (isResultDelivered.compareAndSet(false, true)) {
+                                    Handler(Looper.getMainLooper()).post {
+                                        val err = lastError.get()
+                                        result.error(err.first, err.second ?: "Printing failed", null)
+                                    }
+                                }
+                            }
+                        }
+
+                        override fun notImplemented() {
+                            val currentFinished = finishCount.incrementAndGet()
+                            if (currentFinished == total && successCount.get() == 0) {
+                                if (isResultDelivered.compareAndSet(false, true)) {
+                                    Handler(Looper.getMainLooper()).post {
+                                        val err = lastError.get()
+                                        result.error(err.first, err.second ?: "Printing failed", null)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    try {
+                        job(conn, jobResult)
+                    } catch (e: Exception) {
+                        jobResult.error("PRINT_ERROR", e.message, null)
+                    }
                 }
             }
         }
