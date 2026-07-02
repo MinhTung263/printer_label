@@ -62,6 +62,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
     // Type label for each connection: "USB" | "LAN" | "BT"
     internal val connectionTypes = mutableMapOf<String, ConnectionType>()
+    internal val printerModes = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     // Maps stable USB id → actual device path (e.g. /dev/bus/usb/001/002)
     // Updated each time the device is attached so rawId() always has the current path.
@@ -192,6 +193,10 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                         4 -> "outOfPaper" // Paper empty
                         else -> "normal"
                     }
+                    val deviceId = connections.entries.find { it.value == conn }?.key
+                    if (deviceId != null) {
+                        printerModes[deviceId] = "ESC"
+                    }
                     handler.post {
                         result.success(status)
                     }
@@ -240,6 +245,10 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                         16 -> "pause"
                         32 -> "printing"
                         else -> "normal"
+                    }
+                    val deviceId = connections.entries.find { it.value == conn }?.key
+                    if (deviceId != null) {
+                        printerModes[deviceId] = "TSPL"
                     }
                     handler.post {
                         result.success(status)
@@ -372,6 +381,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             when (code) {
                 POSConnect.CONNECT_SUCCESS -> {
                     pending?.result?.success(true)
+                    connections[deviceId]?.let { detectPrinterMode(deviceId, it) }
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thành công!")
                     }
@@ -412,6 +422,37 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 }
             }
         }
+
+    internal fun detectPrinterMode(deviceId: String, conn: IDeviceConnection) {
+        if (bluetoothManager.isConnectionToBuiltInPrinter(conn)) {
+            printerModes[deviceId] = "ESC"
+            return
+        }
+
+        kotlin.concurrent.thread {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            try {
+                val posPrinter = POSPrinter(conn)
+                posPrinter.printerStatus { _ ->
+                    printerModes[deviceId] = "ESC"
+                    latch.countDown()
+                }
+            } catch (_: Exception) {}
+            
+            val escResponded = latch.await(800, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (escResponded) return@thread
+
+            try {
+                val tsplPrinter = TSPLPrinter(conn)
+                val latchTspl = java.util.concurrent.CountDownLatch(1)
+                tsplPrinter.printerStatus(800) { _ ->
+                    printerModes[deviceId] = "TSPL"
+                    latchTspl.countDown()
+                }
+                latchTspl.await(800, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (_: Exception) {}
+        }
+    }
 
     internal fun getFilteredConnections(type: ConnectionType? = null): List<IDeviceConnection> =
         connections.entries
