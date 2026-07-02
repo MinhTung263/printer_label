@@ -15,7 +15,8 @@ class PrinterThermal {
     fun printImageESC(
         call: MethodCall,
         curConnect: IDeviceConnection,
-        result: MethodChannel.Result
+        result: MethodChannel.Result,
+        isTargetBuiltIn: Boolean = false
     ) {
         val type = call.argument<String>("type")
         if (type != "ESC") {
@@ -34,6 +35,12 @@ class PrinterThermal {
                     return@thread
                 }
                 val bitmap = BitmapFactory.decodeByteArray(image, 0, image.size)
+                if (bitmap == null) {
+                    Handler(Looper.getMainLooper()).post {
+                        result.error("PRINT_ERROR", "Failed to decode bitmap image", null)
+                    }
+                    return@thread
+                }
                 val isBluetooth = curConnect.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH
 
                 // Dựng dữ liệu ảnh thô (GS v 0) sử dụng bộ nhị phân hóa chất lượng cao (threshold 200) để giữ nguyên chất lượng ảnh gốc của Flutter
@@ -59,8 +66,8 @@ class PrinterThermal {
                 
                 val allBytes = stream.toByteArray()
 
-                if (isBluetooth) {
-                    // Cấu hình vừa tầm cân bằng: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
+                if (isBluetooth && !isTargetBuiltIn) {
+                    // Cấu hình vừa tầm cân bằng cho máy in Bluetooth ngoài: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
                     val chunkSize = 120
                     var offset = 0
                     var bytesSentInBlock = 0
@@ -78,6 +85,7 @@ class PrinterThermal {
                         }
                     }
                 } else {
+                    // In lập tức không trễ đối với cổng USB, LAN hoặc máy in tích hợp sẵn
                     curConnect.sendSync(allBytes)
                 }
 

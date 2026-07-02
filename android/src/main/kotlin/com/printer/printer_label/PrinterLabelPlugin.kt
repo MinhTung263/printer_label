@@ -20,6 +20,9 @@ import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.annotation.RequiresApi
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import android.app.Activity
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -36,7 +39,9 @@ import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
 
 /** PrinterLabelPlugin — Multi-connection manager */
-class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
+class PrinterLabelPlugin : FlutterPlugin, ActivityAware {
+    internal var activity: Activity? = null
+    internal val bluetoothManager = BluetoothPrinterManager(this)
 
     private lateinit var channel: MethodChannel
     private lateinit var scanEventChannel: EventChannel
@@ -50,38 +55,38 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     // ─── Multi-connection store ───────────────────────────────────────────────
     // Key   = device id: MAC address | IP address | stable USB id (USB:v{vid}_p{pid}_s{serial})
     // Value = active IDeviceConnection
-    private val connections = mutableMapOf<String, IDeviceConnection>()
+    internal val connections = mutableMapOf<String, IDeviceConnection>()
 
     // Type label for each connection: "USB" | "LAN" | "BT"
-    private val connectionTypes = mutableMapOf<String, ConnectionType>()
+    internal val connectionTypes = mutableMapOf<String, ConnectionType>()
 
     // Maps stable USB id → actual device path (e.g. /dev/bus/usb/001/002)
     // Updated each time the device is attached so rawId() always has the current path.
     private val usbDevicePaths = mutableMapOf<String, String>()
 
     // Pending connect state — keyed by deviceId so parallel connects don't clash
-    private data class PendingConnect(
+    internal data class PendingConnect(
         val result: Result,
         val type: ConnectionType,
         val deviceId: String
     )
 
-    private val pendingConnects = mutableMapOf<String, PendingConnect>()
+    internal val pendingConnects = mutableMapOf<String, PendingConnect>()
 
-    @Volatile private var isDetached = false
+    @Volatile internal var isDetached = false
 
     private lateinit var usbReceiver: UsbConnectionReceiver
-    private var printThermal = PrinterThermal()
-    private var scanEventSink: EventChannel.EventSink? = null
-    private var btScanReceiver: BroadcastReceiver? = null
+    internal var printThermal = PrinterThermal()
+    private lateinit var methodCallHandler: PrinterMethodCallHandler
 
     override fun onAttachedToEngine(
         @NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding
     ) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL)
-        channel.setMethodCallHandler(this)
+        methodCallHandler = PrinterMethodCallHandler(this)
+        channel.setMethodCallHandler(methodCallHandler)
         scanEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, SCAN_CHANNEL)
-        scanEventChannel.setStreamHandler(btScanStreamHandler)
+        scanEventChannel.setStreamHandler(bluetoothManager.btScanStreamHandler)
         usbEventChannel = EventChannel(flutterPluginBinding.binaryMessenger, USB_CHANNEL)
         usbEventChannel.setStreamHandler(usbEventStreamHandler)
         isDetached = false
@@ -99,7 +104,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         channel.setMethodCallHandler(null)
         scanEventChannel.setStreamHandler(null)
         usbEventChannel.setStreamHandler(null)
-        stopBluetoothScan()
+        bluetoothManager.stopBluetoothScan()
         connections.values.forEach { runCatching { it.close() } }
         connections.clear()
         connectionTypes.clear()
@@ -108,220 +113,113 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         runCatching { binding.applicationContext.unregisterReceiver(permissionReceiver) }
     }
 
-    // ─── Method dispatch ──────────────────────────────────────────────────────
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        this.activity = binding.activity
+    }
 
-    @RequiresApi(Build.VERSION_CODES.HONEYCOMB_MR1)
-    override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
-        when (call.method) {
-            "getPlatformVersion" -> result.success("Android ${Build.VERSION.RELEASE}")
+    override fun onDetachedFromActivityForConfigChanges() {
+        this.activity = null
+    }
 
-            "bluetooth_enabled" -> {
-                val adapter = getBluetoothAdapter()
-                result.success(adapter?.isEnabled == true)
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        this.activity = binding.activity
+    }
+
+    override fun onDetachedFromActivity() {
+        this.activity = null
+    }
+
+    internal fun checkStatusESC(conn: IDeviceConnection, result: Result) {
+        val handler = Handler(Looper.getMainLooper())
+        var isDelivered = false
+
+        val timeoutRunnable = Runnable {
+            if (!isDelivered) {
+                isDelivered = true
+                result.success("unknown")
             }
+        }
+        handler.postDelayed(timeoutRunnable, 2000)
 
-            "checkConnect" -> {
-                val deviceId = call.argument<String>("device_id")
-                if (deviceId != null) {
-                    result.success(connections[deviceId]?.isConnect ?: false)
-                } else {
-                    // Return all active connections as map { deviceId: true/false }
-                    val map = connections.mapValues { (_, conn) -> conn.isConnect }
-                    result.success(map)
-                }
-            }
-
-            "disconnect" -> {
-                val deviceId = call.argument<String>("device_id")
-                if (deviceId.isNullOrEmpty()) {
-                    // Disconnect ALL
-                    disconnectAll(result)
-                } else {
-                    disconnectPrinter(deviceId, result)
-                }
-            }
-
-            "connect_lan" -> {
-                val ipAddress = call.argument<String>("ip_address")
-                if (ipAddress.isNullOrEmpty()) {
-                    result.success(false)
-                    return
-                }
-                connectNet(ipAddress, result)
-            }
-
-            "connect_bt" -> {
-                val macAddress = call.argument<String>("mac_address")
-                if (macAddress.isNullOrEmpty()) {
-                    result.success(false)
-                    return
-                }
-                connectBt(macAddress, result)
-            }
-
-            "get_bluetooth_devices" -> {
-                getBluetoothDevices(result)
-            }
-
-
-            "print_label" -> {
-                toast("[print_label] nhận lệnh in")
-                val conn = resolveConn(call, result) ?: return
-                printLabel(call, conn, result)
-            }
-
-            "print_text" -> {
-                val conn = resolveConn(call, result) ?: return
-                printText(call, conn, result)
-            }
-
-            "print_text_esc" -> {
-                val conn = resolveConn(call, result) ?: return
-                printThermal.printTextESC(call, conn, result)
-            }
-
-            "print_barcode" -> {
-                val conn = resolveConn(call, result) ?: return
-                printBarcode(call, conn, result)
-            }
-
-            "print_qrcode" -> {
-                val conn = resolveConn(call, result) ?: return
-                printQRCode(call, conn, result)
-            }
-
-            "print_barcode_esc" -> {
-                val conn = resolveConn(call, result) ?: return
-                printThermal.printBarcodeESC(call, conn, result)
-            }
-
-            "print_qrcode_esc" -> {
-                val conn = resolveConn(call, result) ?: return
-                printThermal.printQRCodeESC(call, conn, result)
-            }
-
-            "print_image_esc" -> {
-                val conn = resolveConn(call, result) ?: return
-                printThermal.printImageESC(call, conn, result)
-            }
-
-            "check_printer_status" -> {
-                val conn = getConn(call)
-                if (conn == null || !conn.isConnect) {
-                    result.success("offline")
-                    return
-                }
-                val type = call.argument<String>("type") ?: "TSPL"
-                val handler = Handler(Looper.getMainLooper())
-                var isDelivered = false
-
-                val timeoutRunnable = Runnable {
-                    if (!isDelivered) {
-                        isDelivered = true
-                        result.success("unknown")
+        try {
+            val posPrinter = POSPrinter(conn)
+            posPrinter.printerStatus { code ->
+                if (!isDelivered) {
+                    isDelivered = true
+                    handler.removeCallbacks(timeoutRunnable)
+                    val status = when (code) {
+                        0 -> "normal"
+                        1 -> "headOpened" // Cover open
+                        2 -> "paperJam"
+                        4 -> "outOfPaper" // Paper empty
+                        else -> "normal"
                     }
-                }
-                handler.postDelayed(timeoutRunnable, 2000)
-
-                if (type == "ESC") {
-                    try {
-                        val posPrinter = POSPrinter(conn)
-                        posPrinter.printerStatus { code ->
-                            if (!isDelivered) {
-                                isDelivered = true
-                                handler.removeCallbacks(timeoutRunnable)
-                                val status = when (code) {
-                                    0 -> "normal"
-                                    1 -> "headOpened" // Cover open
-                                    2 -> "paperJam"
-                                    4 -> "outOfPaper" // Paper empty
-                                    else -> "normal"
-                                }
-                                handler.post {
-                                    result.success(status)
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        if (!isDelivered) {
-                            isDelivered = true
-                            handler.removeCallbacks(timeoutRunnable)
-                            result.success("normal")
-                        }
-                    }
-                } else {
-                    try {
-                        val tsplPrinter = TSPLPrinter(conn)
-                        tsplPrinter.printerStatus(1500) { code ->
-                            if (!isDelivered) {
-                                isDelivered = true
-                                handler.removeCallbacks(timeoutRunnable)
-                                val status = when (code) {
-                                    0 -> "normal"
-                                    1 -> "headOpened"
-                                    2 -> "paperJam"
-                                    3 -> "paperJam"
-                                    4 -> "outOfPaper"
-                                    5 -> "outOfPaper"
-                                    8 -> "outOfRibbon"
-                                    9 -> "outOfRibbon"
-                                    10 -> "outOfRibbon"
-                                    11 -> "outOfRibbon"
-                                    12 -> "outOfRibbon"
-                                    13 -> "outOfRibbon"
-                                    16 -> "pause"
-                                    32 -> "printing"
-                                    else -> "normal"
-                                }
-                                handler.post {
-                                    result.success(status)
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        if (!isDelivered) {
-                            isDelivered = true
-                            handler.removeCallbacks(timeoutRunnable)
-                            result.success("normal")
-                        }
+                    handler.post {
+                        result.success(status)
                     }
                 }
             }
-
-            "print_all" -> {
-                val connectionTypeStr = call.argument<String>("connection_type")
-                val filterType = connectionTypeStr?.let { str ->
-                    ConnectionType.values().find { it.displayName() == str }
-                }
-                val targetConns = getFilteredConnections(filterType)
-                if (targetConns.isEmpty()) {
-                    result.error("NO_ACTIVE", "No active connections", null); return
-                }
-                when (call.argument<String>("type")) {
-                    "TSPL" -> targetConns.forEach { conn -> printLabel(call, conn, NoOpResult) }
-                    "ESC" -> targetConns.forEach { conn ->
-                        printThermal.printImageESC(
-                            call,
-                            conn,
-                            NoOpResult
-                        )
-                    }
-
-                    else -> {
-                        result.error("UNKNOWN_TYPE", "Unknown print type", null); return
-                    }
-                }
-                result.success(true)
+        } catch (e: Exception) {
+            if (!isDelivered) {
+                isDelivered = true
+                handler.removeCallbacks(timeoutRunnable)
+                result.success("normal")
             }
-
-            else -> result.notImplemented()
         }
     }
 
+    internal fun checkStatusTSPL(conn: IDeviceConnection, result: Result) {
+        val handler = Handler(Looper.getMainLooper())
+        var isDelivered = false
+
+        val timeoutRunnable = Runnable {
+            if (!isDelivered) {
+                isDelivered = true
+                result.success("unknown")
+            }
+        }
+        handler.postDelayed(timeoutRunnable, 2000)
+
+        try {
+            val tsplPrinter = TSPLPrinter(conn)
+            tsplPrinter.printerStatus(1500) { code ->
+                if (!isDelivered) {
+                    isDelivered = true
+                    handler.removeCallbacks(timeoutRunnable)
+                    val status = when (code) {
+                        0 -> "normal"
+                        1 -> "headOpened"
+                        2 -> "paperJam"
+                        3 -> "paperJam"
+                        4 -> "outOfPaper"
+                        5 -> "outOfPaper"
+                        8 -> "outOfRibbon"
+                        9 -> "outOfRibbon"
+                        10 -> "outOfRibbon"
+                        11 -> "outOfRibbon"
+                        12 -> "outOfRibbon"
+                        13 -> "outOfRibbon"
+                        16 -> "pause"
+                        32 -> "printing"
+                        else -> "normal"
+                    }
+                    handler.post {
+                        result.success(status)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            if (!isDelivered) {
+                isDelivered = true
+                handler.removeCallbacks(timeoutRunnable)
+                result.success("normal")
+            }
+        }
+    }
 
     // ─── Connection helpers ───────────────────────────────────────────────────
 
-    private fun getConn(call: MethodCall): IDeviceConnection? {
+    internal fun getConn(call: MethodCall): IDeviceConnection? {
         val deviceId = call.argument<String>("device_id")
 
         if (!deviceId.isNullOrEmpty()) {
@@ -337,7 +235,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         return connections.values.firstOrNull { it.isConnect }
     }
 
-    private fun resolveConn(call: MethodCall, result: Result): IDeviceConnection? {
+    internal fun resolveConn(call: MethodCall, result: Result): IDeviceConnection? {
         val conn = getConn(call)
         if (conn != null) return conn
 
@@ -346,13 +244,17 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     /** Build a per-device IConnectListener so parallel connects don't race. */
-    private fun makeConnectListener(deviceId: String): IConnectListener =
+    internal fun makeConnectListener(deviceId: String): IConnectListener =
         IConnectListener { code, _, _ ->
             val pending = pendingConnects[deviceId]
+            val isBuiltIn = isBuiltInPrinter()
+
             when (code) {
                 POSConnect.CONNECT_SUCCESS -> {
                     pending?.result?.success(true)
-                    toast("Kết nối ${pending?.type ?: deviceId} thành công!")
+                    if (!isBuiltIn) {
+                        toast("Kết nối ${pending?.type ?: deviceId} thành công!")
+                    }
                     if (pending?.type == ConnectionType.USB) emitUsbEvent(deviceId, true)
                     pendingConnects.remove(deviceId)
                 }
@@ -362,24 +264,36 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     connections.remove(deviceId)
                     connectionTypes.remove(deviceId)
                     pending?.result?.success(false)
-                    toast("Kết nối ${pending?.type ?: deviceId} thất bại hoặc bị gián đoạn")
+                    if (!isBuiltIn) {
+                        toast("Kết nối ${pending?.type ?: deviceId} thất bại hoặc bị gián đoạn")
+                    }
                     pendingConnects.remove(deviceId)
                 }
 
-                POSConnect.SEND_FAIL -> toast("SEND_FAIL [$deviceId]")
+                POSConnect.SEND_FAIL -> {
+                    if (!isBuiltIn) {
+                        toast("SEND_FAIL [$deviceId]")
+                    }
+                }
                 POSConnect.USB_DETACHED -> {
                     runCatching { connections[deviceId]?.close() }
                     connections.remove(deviceId)
                     connectionTypes.remove(deviceId)
                     emitUsbEvent(deviceId, false)
-                    toast("USB bị ngắt kết nối [$deviceId]")
+                    if (!isBuiltIn) {
+                        toast("USB bị ngắt kết nối [$deviceId]")
+                    }
                 }
 
-                POSConnect.USB_ATTACHED -> toast("USB được gắn [$deviceId]")
+                POSConnect.USB_ATTACHED -> {
+                    if (!isBuiltIn) {
+                        toast("USB được gắn [$deviceId]")
+                    }
+                }
             }
         }
 
-    private fun getFilteredConnections(type: ConnectionType? = null): List<IDeviceConnection> =
+    internal fun getFilteredConnections(type: ConnectionType? = null): List<IDeviceConnection> =
         connections.entries
             .filter { (id, conn) ->
                 conn.isConnect && (type == null || connectionTypes[id] == type)
@@ -390,7 +304,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
                     Log.w("PRINTER_LOG", "Không có thiết bị phù hợp để in (filter=$type).")
             }
 
-    private fun disconnectPrinter(deviceId: String, result: Result) {
+    internal fun disconnectPrinter(deviceId: String, result: Result) {
         try {
             connections[deviceId]?.close()
             connections.remove(deviceId)
@@ -401,7 +315,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    private fun disconnectAll(result: Result) {
+    internal fun disconnectAll(result: Result) {
         try {
             connections.values.forEach { runCatching { it.close() } }
             connections.clear()
@@ -415,7 +329,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
 
     // For USB: returns the current device path from usbDevicePaths (updates each attach).
     // For BT/LAN: strips the "TYPE:" prefix to get the raw address.
-    private fun rawId(deviceId: String): String =
+    internal fun rawId(deviceId: String): String =
         if (deviceId.startsWith("USB:")) usbDevicePaths[deviceId] ?: deviceId.substringAfter(':')
         else deviceId.substringAfter(':')
 
@@ -428,7 +342,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             "USB:v${device.vendorId}_p${device.productId}"
     }
 
-    private fun scheduleConnectTimeout(deviceId: String) {
+    internal fun scheduleConnectTimeout(deviceId: String) {
         Handler(Looper.getMainLooper()).postDelayed({
             if (isDetached || !pendingConnects.containsKey(deviceId)) return@postDelayed
             runCatching { connections[deviceId]?.close() }
@@ -436,11 +350,14 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             connectionTypes.remove(deviceId)
             pendingConnects[deviceId]?.result?.success(false)
             pendingConnects.remove(deviceId)
-            toast("Kết nối $deviceId hết thời gian chờ")
+            
+            if (!isBuiltInPrinter()) {
+                toast("Kết nối $deviceId hết thời gian chờ")
+            }
         }, CONNECT_TIMEOUT_MS)
     }
 
-    private fun connectNet(ipAddress: String, result: Result) {
+    internal fun connectNet(ipAddress: String, result: Result) {
         val deviceId = "LAN:$ipAddress"
         try {
             pendingConnects[deviceId] = PendingConnect(result, ConnectionType.LAN, deviceId)
@@ -455,41 +372,6 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
             device.connect(ipAddress, makeConnectListener(deviceId))
             scheduleConnectTimeout(deviceId)
         } catch (e: Exception) {
-            connections.remove(deviceId)
-            connectionTypes.remove(deviceId)
-            pendingConnects.remove(deviceId)
-            result.error("CONNECT_ERROR", e.message, null)
-        }
-    }
-
-    private fun connectBt(macAddress: String, result: Result) {
-        val deviceId = "BT:$macAddress"
-        try {
-            if (macAddress.isEmpty()) {
-                result.error("INVALID_MAC", "Mac address is empty", null); return
-            }
-
-            val adapter = getBluetoothAdapter()
-            if (adapter == null || !adapter.isEnabled) {
-                result.error("BT_OFF", "Bluetooth is not enabled", null); return
-            }
-
-            stopBluetoothScan()
-
-            pendingConnects[deviceId] = PendingConnect(result, ConnectionType.BT, deviceId)
-            runCatching { connections[deviceId]?.close() }
-
-            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_BLUETOOTH) ?: run {
-                pendingConnects.remove(deviceId)
-                result.error("CREATE_DEVICE_FAIL", "Cannot create device", null)
-                return
-            }
-            connections[deviceId] = device
-            connectionTypes[deviceId] = ConnectionType.BT
-            device.connect(rawId(deviceId), makeConnectListener(deviceId))
-            scheduleConnectTimeout(deviceId)
-        } catch (e: Exception) {
-            e.printStackTrace()
             connections.remove(deviceId)
             connectionTypes.remove(deviceId)
             pendingConnects.remove(deviceId)
@@ -644,167 +526,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    // ─── Bluetooth scan ───────────────────────────────────────────────────────
-
-    private val btScanStreamHandler = object : EventChannel.StreamHandler {
-        override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-            scanEventSink = events; startBluetoothScan()
-        }
-
-        override fun onCancel(arguments: Any?) {
-            stopBluetoothScan(); scanEventSink = null
-        }
-    }
-
-    private fun startBluetoothScan() {
-        val adapter = getBluetoothAdapter() ?: return
-        if (!adapter.isEnabled) {
-            scanEventSink?.error("BT_OFF", "Bluetooth is not enabled", null)
-            return
-        }
-
-        val isDiscovering = try {
-            adapter.isDiscovering
-        } catch (_: SecurityException) {
-            false
-        }
-
-        if (isDiscovering) {
-            try {
-                adapter.cancelDiscovery()
-            } catch (_: SecurityException) {}
-
-            // Trì hoãn 500ms để đảm bảo Bluetooth stack hoàn tất việc hủy quét cũ trước khi bắt đầu quét mới
-            Handler(Looper.getMainLooper()).postDelayed({
-                if (!isDetached && scanEventSink != null) {
-                    actualStartBluetoothScan(adapter)
-                }
-            }, 500L)
-        } else {
-            actualStartBluetoothScan(adapter)
-        }
-    }
-
-    private fun actualStartBluetoothScan(adapter: BluetoothAdapter) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                when (intent?.action) {
-                    BluetoothDevice.ACTION_FOUND -> {
-                        val device: BluetoothDevice? =
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                intent.getParcelableExtra(
-                                    BluetoothDevice.EXTRA_DEVICE,
-                                    BluetoothDevice::class.java
-                                )
-                            } else {
-                                @Suppress("DEPRECATION")
-                                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                            }
-                        device?.let {
-                            if (isPrinter(it)) {
-                                val map = mapOf("name" to (it.name ?: "Unknown"), "mac" to it.address)
-                                Handler(Looper.getMainLooper()).post {
-                                    scanEventSink?.success(map)
-                                }
-                            }
-                        }
-                    }
-
-                    BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                        Handler(Looper.getMainLooper()).post {
-                            scanEventSink?.endOfStream()
-                        }
-                        stopBluetoothScan()
-                    }
-                }
-            }
-        }
-        val filter = IntentFilter(BluetoothDevice.ACTION_FOUND).apply {
-            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
-        }
-        mContext?.registerReceiver(receiver, filter)
-        btScanReceiver = receiver
-        try {
-            adapter.startDiscovery()
-        } catch (_: SecurityException) {
-            scanEventSink?.error("BT_PERMISSION", "Missing BLUETOOTH_SCAN permission", null)
-        }
-    }
-
-    private fun stopBluetoothScan() {
-        runCatching { getBluetoothAdapter()?.cancelDiscovery() }
-        runCatching { btScanReceiver?.let { mContext?.unregisterReceiver(it) } }
-        btScanReceiver = null
-    }
-
-    private fun getBluetoothAdapter(): BluetoothAdapter? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-            (mContext?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-        else @Suppress("DEPRECATION") BluetoothAdapter.getDefaultAdapter()
-
-    private fun getBluetoothDevices(result: Result) {
-        try {
-            val adapter = getBluetoothAdapter()
-            if (adapter == null || !adapter.isEnabled) {
-                result.error("BT_OFF", "Bluetooth is not enabled", null); return
-            }
-            val list = adapter.bondedDevices
-                .filter { isPrinter(it) }
-                .map {
-                    mapOf(
-                        "name" to (it.name ?: "Unknown"),
-                        "mac" to it.address
-                    )
-                }
-            result.success(list)
-        } catch (e: SecurityException) {
-            result.error("BT_PERMISSION", "Missing BLUETOOTH_CONNECT permission", null)
-        } catch (e: Exception) {
-            result.error("BT_ERROR", e.message, null)
-        }
-    }
-
-    private fun isPrinter(device: BluetoothDevice): Boolean {
-        try {
-            val name = device.name ?: ""
-            val lowerName = name.lowercase()
-            if (lowerName.isEmpty()) return false
-
-            // Danh sách từ khóa dài tự động khớp nếu xuất hiện ở bất kỳ đâu trong tên (giống iOS)
-            val longKeywords = listOf(
-                "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
-                "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
-                "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang"
-            )
-            val matchesLong = longKeywords.any { lowerName.contains(it) }
-
-            // Danh sách tiền tố ngắn (khớp ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới - giống iOS)
-            val shortPrefixes = listOf(
-                "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc"
-            )
-            val matchesShort = shortPrefixes.any { prefix ->
-                lowerName.startsWith(prefix) ||
-                lowerName.contains("$prefix-") ||
-                lowerName.contains("$prefix ") ||
-                lowerName.contains("_$prefix")
-            }
-
-            if (matchesLong || matchesShort) {
-                return true
-            }
-
-            // Nếu không khớp tên, kiểm tra lớp Bluetooth (chỉ chấp nhận nếu là IMAGING hoặc IMAGING_PRINTER)
-            val btClass = device.bluetoothClass ?: return false
-            val majorClass = btClass.majorDeviceClass
-            val deviceClass = btClass.deviceClass
-            
-            return majorClass == 1536 || deviceClass == 1664
-        } catch (_: SecurityException) {
-            return false
-        }
-    }
-
-    private fun printLabel(call: MethodCall, conn: IDeviceConnection, result: Result) {
+    internal fun printLabel(call: MethodCall, conn: IDeviceConnection, result: Result) {
         try {
             val type = call.argument<String>("type")
             if (type != "TSPL") {
@@ -868,7 +590,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    private fun printText(call: MethodCall, conn: IDeviceConnection, result: Result) {
+    internal fun printText(call: MethodCall, conn: IDeviceConnection, result: Result) {
         try {
             val text = call.argument<String>("text") ?: ""
             val x = call.argument<Int>("x") ?: 0
@@ -905,7 +627,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    private fun printBarcode(call: MethodCall, conn: IDeviceConnection, result: Result) {
+    internal fun printBarcode(call: MethodCall, conn: IDeviceConnection, result: Result) {
         try {
             val code = call.argument<String>("code") ?: ""
             val x = call.argument<Int>("x") ?: 0
@@ -934,7 +656,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
-    private fun printQRCode(call: MethodCall, conn: IDeviceConnection, result: Result) {
+    internal fun printQRCode(call: MethodCall, conn: IDeviceConnection, result: Result) {
         try {
             val code = call.argument<String>("code") ?: ""
             val x = call.argument<Int>("x") ?: 0
@@ -994,7 +716,7 @@ class PrinterLabelPlugin : FlutterPlugin, MethodCallHandler {
         )
     }
 
-    private fun toast(str: String) = Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
+    internal fun toast(str: String) = Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
 
     companion object {
         private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"

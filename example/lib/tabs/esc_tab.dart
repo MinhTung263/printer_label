@@ -18,17 +18,76 @@ class EscTab extends StatefulWidget {
 class _EscTabState extends State<EscTab> {
   bool _isPrintingEsc = false;
   TicketSize _selectedSize = TicketSize.mm80;
+  bool _hasBuiltInPrinter = false;
 
-  List<String> get _targetDeviceIds => widget.connectedDevices.isNotEmpty
-      ? widget.connectedDevices.map((d) => d.id).toList()
-      : [DeviceId.lan(widget.ipAddress)];
+  List<String?> get _targetDeviceIds {
+    if (widget.connectedDevices.isNotEmpty) {
+      return widget.connectedDevices.map((d) => d.id).toList();
+    }
+    if (_hasBuiltInPrinter) {
+      return [null]; // null đại diện cho máy in tích hợp sẵn
+    }
+    return [DeviceId.lan(widget.ipAddress)];
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _checkBuiltInPrinter();
+  }
+
+  Future<void> _checkBuiltInPrinter() async {
+    final paperSize = await PrinterLabel.getBuiltInPrinterPaperSize();
+    final hasPrinter = paperSize > 0;
+    if (mounted) {
+      setState(() {
+        _hasBuiltInPrinter = hasPrinter;
+        // Tự động chọn khổ giấy mặc định khớp với máy in tích hợp sẵn (K57 hoặc K80)
+        if (hasPrinter) {
+          _selectedSize = paperSize == 80 ? TicketSize.mm80 : TicketSize.mm58;
+        }
+      });
+      
+      // Tiến hành kết nối ngầm ngay khi mở tab để loại bỏ độ trễ kết nối ở lần bấm in đầu tiên
+      if (hasPrinter) {
+        PrinterLabel.autoConnectBuiltIn();
+      }
+    }
+  }
 
   void _showNoConnectionMsg() {
     showTopNotification(context, 'Vui lòng kết nối máy in trước khi in!');
   }
 
+  Future<void> _printBuiltInExample() async {
+    setState(() => _isPrintingEsc = true);
+    try {
+      // In trực tiếp thông qua luồng tự động kết nối máy in tích hợp sẵn
+      await ESCPrintService.instance.printWidget(
+        widget: ThermalReceiptPreview(
+          size: TicketSize.mm58,
+          isForPrinting: true,
+        ),
+        size: TicketSize.mm58,
+      );
+      if (mounted) {
+        showTopNotification(
+          context,
+          'Đã kết nối và gửi lệnh in máy in tích hợp sẵn thành công!',
+          isError: false,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showTopNotification(context, 'Lỗi in tự động máy in tích hợp: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isPrintingEsc = false);
+    }
+  }
+
   Future<void> _printExample() async {
-    if (widget.connectedDevices.isEmpty) {
+    if (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter) {
       _showNoConnectionMsg();
       return;
     }
@@ -213,11 +272,16 @@ class _EscTabState extends State<EscTab> {
                   onPressed: _isPrintingEsc
                       ? null
                       : () {
-                          if (widget.connectedDevices.isEmpty) {
+                          if (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter) {
                             _showNoConnectionMsg();
                             return;
                           }
-                          _printExample();
+                          
+                          if (widget.connectedDevices.isEmpty && _hasBuiltInPrinter) {
+                            _printBuiltInExample();
+                          } else {
+                            _printExample();
+                          }
                         },
                   icon: _isPrintingEsc
                       ? const SizedBox(
@@ -253,19 +317,19 @@ class _EscTabState extends State<EscTab> {
           buttons: [
             (
               label: 'In Text',
-              onPressed: () => widget.connectedDevices.isEmpty
+              onPressed: () => (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
                   ? _showNoConnectionMsg()
                   : _printRawText()
             ),
             (
               label: 'In Barcode',
-              onPressed: () => widget.connectedDevices.isEmpty
+              onPressed: () => (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
                   ? _showNoConnectionMsg()
                   : _printRawBarcode()
             ),
             (
               label: 'In QR',
-              onPressed: () => widget.connectedDevices.isEmpty
+              onPressed: () => (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
                   ? _showNoConnectionMsg()
                   : _printRawQRCode()
             ),

@@ -97,6 +97,7 @@ class _MyHomePageState extends State<MyHomePage>
 
   final List<ConnectedDevice> _connectedDevices = [];
   StreamSubscription<UsbConnectionEvent>? _usbSub;
+  bool _hasBuiltInPrinter = false;
 
   // Trạng thái quét Bluetooth inline
   List<BluetoothDeviceModel> _btDevices = [];
@@ -111,6 +112,14 @@ class _MyHomePageState extends State<MyHomePage>
     _tabController = TabController(length: 2, vsync: this);
     _checkConnectionState(ipAddress: textEditingController.text);
     _listenUsb();
+    _checkBuiltInPrinter();
+  }
+
+  Future<void> _checkBuiltInPrinter() async {
+    final paperSize = await PrinterLabel.getBuiltInPrinterPaperSize();
+    if (mounted) {
+      setState(() => _hasBuiltInPrinter = paperSize > 0);
+    }
   }
 
   @override
@@ -476,6 +485,7 @@ class _MyHomePageState extends State<MyHomePage>
               ipController: textEditingController,
               ipFocusNode: focusNode,
               connectedDevices: _connectedDevices,
+              hasBuiltInPrinter: _hasBuiltInPrinter,
               onCheckConnect: () =>
                   _checkConnectionState(ipAddress: textEditingController.text),
               onConnect: _connectLanPrinter,

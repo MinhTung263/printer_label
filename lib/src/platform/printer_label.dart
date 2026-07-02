@@ -144,6 +144,33 @@ class PrinterLabel {
     return await _platform.connectBluetooth(macAddress: macAddress);
   }
 
+  static Future<bool> autoConnectBuiltIn() async {
+    if (!Platform.isAndroid) return false;
+    return await _platform.autoConnectBuiltIn();
+  }
+
+  /// Opens the system App Settings screen for the user to grant permissions.
+  /// Returns `true` if launched successfully, `false` otherwise.
+  static Future<bool> openPermissionSettings() async {
+    if (!Platform.isAndroid) return false;
+    return await _platform.openPermissionSettings();
+  }
+
+  /// Checks if the current Android device has a built-in thermal printer.
+  /// Always returns `false` on iOS/Web/Desktop.
+  static Future<bool> hasBuiltInPrinter() async {
+    if (!Platform.isAndroid) return false;
+    return await _platform.hasBuiltInPrinter();
+  }
+
+  /// Gets the paper width of the built-in printer in millimeters (e.g., 58 or 80).
+  /// Returns `0` if the device has no built-in thermal printer.
+  /// Always returns `0` on iOS/Web/Desktop.
+  static Future<int> getBuiltInPrinterPaperSize() async {
+    if (!Platform.isAndroid) return 0;
+    return await _platform.getBuiltInPrinterPaperSize();
+  }
+
   /// Retrieves a list of previously paired (bonded) Bluetooth devices.
   static Future<List<BluetoothDeviceModel>> getBluetoothDevices() async {
     return await _platform.getBluetoothDevices();

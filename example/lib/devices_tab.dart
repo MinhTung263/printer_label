@@ -19,6 +19,8 @@ class DevicesTab extends StatelessWidget {
   final bool isCheckingConnection;
   final bool isPrinting;
 
+  final bool hasBuiltInPrinter;
+
   // Bluetooth inline parameters
   final List<BluetoothDeviceModel> btDevices;
   final bool isScanningBt;
@@ -42,6 +44,7 @@ class DevicesTab extends StatelessWidget {
     this.isCheckingStatus = false,
     this.isCheckingConnection = false,
     this.isPrinting = false,
+    this.hasBuiltInPrinter = false,
     required this.btDevices,
     required this.isScanningBt,
     required this.hasScannedBt,
@@ -100,7 +103,9 @@ class DevicesTab extends StatelessWidget {
   }
 
   Widget _buildConnectedDevicesList(BuildContext context) {
-    if (connectedDevices.isEmpty) {
+    final hasAny = connectedDevices.isNotEmpty || hasBuiltInPrinter;
+
+    if (!hasAny) {
       return Card(
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -135,7 +140,10 @@ class DevicesTab extends StatelessWidget {
     }
 
     return Column(
-      children: connectedDevices.map((device) {
+      children: [
+        if (hasBuiltInPrinter)
+          _buildBuiltInPrinterCard(),
+        ...connectedDevices.map((device) {
         final (IconData icon, Color color) = switch (device.type) {
           'USB' => (Icons.usb, const Color(0xFF0D9488)),
           'LAN' => (Icons.lan, const Color(0xFF3B82F6)),
@@ -276,7 +284,86 @@ class DevicesTab extends StatelessWidget {
             ),
           ),
         );
-      }).toList(),
+      }),
+      ],
+    );
+  }
+
+  Widget _buildBuiltInPrinterCard() {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: const Color(0xFF22C55E).withOpacity(0.25), width: 1.5),
+      ),
+      color: const Color(0xFFF0FDF4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: const Color(0xFF22C55E).withOpacity(0.15),
+              child: const Icon(Icons.print, color: Color(0xFF16A34A), size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Máy in tích hợp sẵn',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Color(0xFF14532D),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Được phát hiện tự động qua phần cứng thiết bị',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.green.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF16A34A),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Sẵn sàng',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF16A34A),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

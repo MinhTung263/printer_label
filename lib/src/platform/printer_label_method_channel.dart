@@ -16,7 +16,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   @override
   Future<bool> bluetoothEnabled() async {
     return await _channel
-            .invokeMethod<bool>(PrinterMethod.bluetoothEnabled.value) ??
+            .invokeMethod<bool>(PrinterMethod.bluetooth_enabled.name) ??
         false;
   }
 
@@ -24,7 +24,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   Future<bool> checkConnect({String? deviceId}) async {
     final targetId = deviceId?.trim();
     if (targetId == null || targetId.isEmpty) return false;
-    return await _channel.invokeMethod<bool>(PrinterMethod.checkConnect.value, {
+    return await _channel.invokeMethod<bool>(PrinterMethod.checkConnect.name, {
           "device_id": targetId,
         }) ??
         false;
@@ -34,7 +34,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   Future<PrinterStatus> checkPrinterStatus({String? deviceId, String? type}) async {
     final targetId = deviceId?.trim();
     final String? statusStr = await _channel.invokeMethod<String>(
-      PrinterMethod.checkPrinterStatus.value,
+      PrinterMethod.check_printer_status.name,
       {
         if (targetId != null && targetId.isNotEmpty) "device_id": targetId,
         if (type != null && type.isNotEmpty) "type": type,
@@ -46,7 +46,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   @override
   Future<Map<String, bool>> getAllConnections() async {
     final result = await _channel.invokeMethod<Map>(
-      PrinterMethod.checkConnect.value,
+      PrinterMethod.checkConnect.name,
     );
     if (result == null) return {};
     return result.map((key, value) => MapEntry(key.toString(), value == true));
@@ -55,7 +55,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   @override
   Future<bool> disconnectPrinter({String? deviceId}) async {
     final targetId = deviceId?.trim();
-    return await _channel.invokeMethod<bool>(PrinterMethod.disconnect.value, {
+    return await _channel.invokeMethod<bool>(PrinterMethod.disconnect.name, {
           "device_id": (targetId == null || targetId.isEmpty) ? null : targetId,
         }) ??
         false;
@@ -71,7 +71,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   Future<bool> connectLan({required String ipAddress}) async {
     final targetIp = ipAddress.trim();
     if (targetIp.isEmpty) return false;
-    return await _channel.invokeMethod<bool>(PrinterMethod.connectLan.value, {
+    return await _channel.invokeMethod<bool>(PrinterMethod.connect_lan.name, {
           "ip_address": targetIp,
         }) ??
         false;
@@ -79,20 +79,20 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Future<bool> startBluetoothScan() async {
-    return await _channel.invokeMethod<bool>(PrinterMethod.scanBt.value) ??
+    return await _channel.invokeMethod<bool>(PrinterMethod.scan_bt.name) ??
         false;
   }
 
   @override
   Future<bool> stopBluetoothScan() async {
-    return await _channel.invokeMethod<bool>(PrinterMethod.stopScanBt.value) ??
+    return await _channel.invokeMethod<bool>(PrinterMethod.stop_scan_bt.name) ??
         false;
   }
 
   @override
   Future<String?> get platformVersion async {
     final String? version = await _channel
-        .invokeMethod<String>(PrinterMethod.getPlatformVersion.value);
+        .invokeMethod<String>(PrinterMethod.getPlatformVersion.name);
     return version;
   }
 
@@ -107,7 +107,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printLabel.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_label.name, data);
   }
 
   @override
@@ -121,7 +121,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printImage.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_image.name, data);
   }
 
   @override
@@ -137,7 +137,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     };
     try {
       await _channel.invokeMethod<void>(
-          PrinterMethod.printImageEsc.value, data);
+          PrinterMethod.print_image_esc.name, data);
     } catch (e, stack) {
       debugPrint("Error printing ESC: $e\n$stack");
       rethrow;
@@ -148,16 +148,36 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   Future<bool> connectBluetooth({required String macAddress}) async {
     final targetMac = macAddress.trim();
     if (targetMac.isEmpty) return false;
-    return await _channel.invokeMethod<bool>(PrinterMethod.connectBt.value, {
+    return await _channel.invokeMethod<bool>(PrinterMethod.connect_bt.name, {
           "mac_address": targetMac,
         }) ??
         false;
   }
 
   @override
+  Future<bool> autoConnectBuiltIn() async {
+    return await _channel.invokeMethod<bool>(PrinterMethod.auto_connect_built_in.name) ?? false;
+  }
+
+  @override
+  Future<bool> openPermissionSettings() async {
+    return await _channel.invokeMethod<bool>(PrinterMethod.open_permission_settings.name) ?? false;
+  }
+
+  @override
+  Future<bool> hasBuiltInPrinter() async {
+    return await _channel.invokeMethod<bool>(PrinterMethod.has_built_in_printer.name) ?? false;
+  }
+
+  @override
+  Future<int> getBuiltInPrinterPaperSize() async {
+    return await _channel.invokeMethod<int>(PrinterMethod.get_built_in_printer_paper_size.name) ?? 0;
+  }
+
+  @override
   Future<List<BluetoothDeviceModel>> getBluetoothDevices() async {
     final result = await _channel.invokeMethod<List>(
-      PrinterMethod.getBluetoothDevices.value,
+      PrinterMethod.get_bluetooth_devices.name,
     );
     if (result == null) return [];
     return result.map((e) {
@@ -222,7 +242,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printText.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_text.name, data);
   }
 
   @override
@@ -236,7 +256,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printTextESC.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_text_esc.name, data);
   }
 
   @override
@@ -262,7 +282,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printBarcode.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_barcode.name, data);
   }
 
   @override
@@ -286,7 +306,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printQRCode.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_qrcode.name, data);
   }
 
   @override
@@ -306,7 +326,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printBarcodeESC.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_barcode_esc.name, data);
   }
 
   @override
@@ -322,6 +342,6 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.printQRCodeESC.value, data);
+    await _channel.invokeMethod<void>(PrinterMethod.print_qrcode_esc.name, data);
   }
 }

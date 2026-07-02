@@ -96,6 +96,26 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// - Android: [macAddress] represents the physical MAC address (e.g., `AA:BB:CC:DD:EE:FF`).
   Future<bool> connectBluetooth({required String macAddress});
 
+  /// Automatically turns on Bluetooth (if supported/allowed) and connects to
+  /// the internal emulated Bluetooth printer on built-in printer POS devices.
+  /// Returns `true` if connected successfully, `false` otherwise.
+  Future<bool> autoConnectBuiltIn();
+
+  /// Opens the system App Settings screen for the user to grant permissions.
+  /// Returns `true` if launched successfully, `false` otherwise.
+  Future<bool> openPermissionSettings() {
+    throw UnimplementedError('openPermissionSettings() has not been implemented.');
+  }
+
+  /// Checks if the current Android device has a built-in thermal printer.
+  /// Always returns `false` on iOS.
+  Future<bool> hasBuiltInPrinter();
+
+  /// Gets the paper width of the built-in printer in millimeters (e.g., 58 or 80).
+  /// Returns `0` if the device has no built-in thermal printer.
+  /// Always returns `0` on iOS.
+  Future<int> getBuiltInPrinterPaperSize();
+
   /// Retrieves a list of previously paired (bonded) Bluetooth devices.
   Future<List<BluetoothDeviceModel>> getBluetoothDevices();
 

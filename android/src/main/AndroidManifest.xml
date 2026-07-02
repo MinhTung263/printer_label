@@ -1,2 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.printer.printer_label">
+    <queries>
+        <package android:name="com.sunmi.printerservice" />
+        <package android:name="woyou.aidl.service" />
+        <package android:name="net.imin.printer" />
+        <package android:name="com.pax.sz.printerservice" />
+        <package android:name="com.landicorp.android.pinpadservice" />
+        <package android:name="com.urovo.printerservice" />
+        <package android:name="android.printservice.urovoprint" />
+    </queries>
 </manifest>
