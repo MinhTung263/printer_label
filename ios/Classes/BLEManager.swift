@@ -21,6 +21,8 @@ final class BLEManager: NSObject {
 
     private let minScanRSSI: Int = -70
     var scanEventSink: FlutterEventSink?
+    /// true = chỉ hiển thị thiết bị BLE được nhận dạng là máy in, false = tất cả thiết bị
+    var filterPrinterOnly: Bool = true
     private var isScanning = false
 
     private override init() {
@@ -270,7 +272,7 @@ extension BLEManager: CBCentralManagerDelegate {
             nameLower.contains("_\(prefix)")
         }
         
-        guard matchesLong || matchesShort else { return }
+        guard matchesLong || matchesShort || !filterPrinterOnly else { return }
         
         // ⭐ Chỉ lưu thiết bị vào danh sách phát hiện nếu thỏa mãn bộ lọc máy in
         discoveredPeripherals[identifier] = peripheral

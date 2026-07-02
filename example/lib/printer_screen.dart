@@ -44,12 +44,6 @@ class _PrinterScreenState extends State<PrinterScreen> {
   }
 
   Future<void> _init() async {
-    final granted = await _requestPermissions();
-    if (!granted) {
-      setState(() =>
-          _errorMessage = "Cần cấp đầy đủ quyền Bluetooth để quét thiết bị");
-      return;
-    }
     await _loadPairedDevices();
     _startScan();
   }
@@ -73,7 +67,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
       _errorMessage = null;
     });
     _scanSubscription?.cancel();
-    _scanSubscription = PrinterLabel.bluetoothScanStream.listen(
+    _scanSubscription = PrinterLabel.bluetoothScanStream().listen(
       (device) {
         if (!mounted) return;
         if (_devices.any((d) => d.mac == device.mac)) return;

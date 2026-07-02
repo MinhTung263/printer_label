@@ -88,20 +88,6 @@ class PrinterLabel {
     );
   }
 
-  /// [Deprecated] Use [printImage] instead to align with the platform interface.
-  @Deprecated('Use printImage instead')
-  static Future<void> printPrintImage({
-    String? deviceId,
-    PrinterConnectionType? connectionType,
-    required ImageModel model,
-  }) async {
-    return await _platform.printImage(
-      deviceId: deviceId,
-      connectionType: connectionType,
-      imageModel: model,
-    );
-  }
-
   /// Prints a thermal receipt using ESC/POS commands from [printThermalModel].
   static Future<void> printESC({
     String? deviceId,
@@ -149,13 +135,6 @@ class PrinterLabel {
     return await _platform.autoConnectBuiltIn();
   }
 
-  /// Opens the system App Settings screen for the user to grant permissions.
-  /// Returns `true` if launched successfully, `false` otherwise.
-  static Future<bool> openPermissionSettings() async {
-    if (!Platform.isAndroid) return false;
-    return await _platform.openPermissionSettings();
-  }
-
   /// Checks if the current Android device has a built-in thermal printer.
   /// Always returns `false` on iOS/Web/Desktop.
   static Future<bool> hasBuiltInPrinter() async {
@@ -172,15 +151,17 @@ class PrinterLabel {
   }
 
   /// Retrieves a list of previously paired (bonded) Bluetooth devices.
-  static Future<List<BluetoothDeviceModel>> getBluetoothDevices() async {
-    return await _platform.getBluetoothDevices();
+  /// If [filterPrinterOnly] is true (default), only devices recognized as printers are returned.
+  static Future<List<BluetoothDeviceModel>> getBluetoothDevices({bool filterPrinterOnly = true}) async {
+    return await _platform.getBluetoothDevices(filterPrinterOnly: filterPrinterOnly);
   }
 
   /// Stream emitting discovered Bluetooth devices during active scans.
   ///
+  /// If [filterPrinterOnly] is true (default), only devices recognized as printers are emitted.
   /// Call [startBluetoothScan] before listening to this stream on iOS.
-  static Stream<BluetoothDeviceModel> get bluetoothScanStream =>
-      _platform.bluetoothScanStream;
+  static Stream<BluetoothDeviceModel> bluetoothScanStream({bool filterPrinterOnly = true}) =>
+      _platform.bluetoothScanStream(filterPrinterOnly: filterPrinterOnly);
 
   /// Stream emitting USB connection events (attach/detach) for USB printers (Android only).
   static Stream<UsbConnectionEvent> get usbDeviceStream =>

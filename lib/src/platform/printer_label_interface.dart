@@ -101,11 +101,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Returns `true` if connected successfully, `false` otherwise.
   Future<bool> autoConnectBuiltIn();
 
-  /// Opens the system App Settings screen for the user to grant permissions.
-  /// Returns `true` if launched successfully, `false` otherwise.
-  Future<bool> openPermissionSettings() {
-    throw UnimplementedError('openPermissionSettings() has not been implemented.');
-  }
+
 
   /// Checks if the current Android device has a built-in thermal printer.
   /// Always returns `false` on iOS.
@@ -117,12 +113,14 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   Future<int> getBuiltInPrinterPaperSize();
 
   /// Retrieves a list of previously paired (bonded) Bluetooth devices.
-  Future<List<BluetoothDeviceModel>> getBluetoothDevices();
+  /// If [filterPrinterOnly] is true (default), only devices recognized as printers are returned.
+  Future<List<BluetoothDeviceModel>> getBluetoothDevices({bool filterPrinterOnly = true});
 
   /// Stream emitting discovered Bluetooth devices during active scans.
   ///
+  /// If [filterPrinterOnly] is true (default), only devices recognized as printers are emitted.
   /// Call [startBluetoothScan] before listening to this stream on iOS.
-  Stream<BluetoothDeviceModel> get bluetoothScanStream;
+  Stream<BluetoothDeviceModel> bluetoothScanStream({bool filterPrinterOnly = true});
 
   /// Stream emitting USB connection events (attach/detach) for USB printers (Android only).
   Stream<UsbConnectionEvent> get usbDeviceStream;

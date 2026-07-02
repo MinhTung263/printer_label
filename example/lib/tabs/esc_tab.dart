@@ -47,11 +47,7 @@ class _EscTabState extends State<EscTab> {
           _selectedSize = paperSize == 80 ? TicketSize.mm80 : TicketSize.mm58;
         }
       });
-      
-      // Tiến hành kết nối ngầm ngay khi mở tab để loại bỏ độ trễ kết nối ở lần bấm in đầu tiên
-      if (hasPrinter) {
-        PrinterLabel.autoConnectBuiltIn();
-      }
+
     }
   }
 
@@ -64,7 +60,7 @@ class _EscTabState extends State<EscTab> {
     try {
       // In trực tiếp thông qua luồng tự động kết nối máy in tích hợp sẵn
       await ESCPrintService.instance.printWidget(
-        widget: ThermalReceiptPreview(
+        widget: const ThermalReceiptPreview(
           size: TicketSize.mm58,
           isForPrinting: true,
         ),
@@ -272,12 +268,14 @@ class _EscTabState extends State<EscTab> {
                   onPressed: _isPrintingEsc
                       ? null
                       : () {
-                          if (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter) {
+                          if (widget.connectedDevices.isEmpty &&
+                              !_hasBuiltInPrinter) {
                             _showNoConnectionMsg();
                             return;
                           }
-                          
-                          if (widget.connectedDevices.isEmpty && _hasBuiltInPrinter) {
+
+                          if (widget.connectedDevices.isEmpty &&
+                              _hasBuiltInPrinter) {
                             _printBuiltInExample();
                           } else {
                             _printExample();
@@ -317,21 +315,24 @@ class _EscTabState extends State<EscTab> {
           buttons: [
             (
               label: 'In Text',
-              onPressed: () => (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
-                  ? _showNoConnectionMsg()
-                  : _printRawText()
+              onPressed: () =>
+                  (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
+                      ? _showNoConnectionMsg()
+                      : _printRawText()
             ),
             (
               label: 'In Barcode',
-              onPressed: () => (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
-                  ? _showNoConnectionMsg()
-                  : _printRawBarcode()
+              onPressed: () =>
+                  (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
+                      ? _showNoConnectionMsg()
+                      : _printRawBarcode()
             ),
             (
               label: 'In QR',
-              onPressed: () => (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
-                  ? _showNoConnectionMsg()
-                  : _printRawQRCode()
+              onPressed: () =>
+                  (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
+                      ? _showNoConnectionMsg()
+                      : _printRawQRCode()
             ),
           ],
         ),

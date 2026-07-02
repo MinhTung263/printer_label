@@ -9,6 +9,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import net.posprinter.IDeviceConnection
 
 class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodCallHandler {
 
@@ -25,10 +26,10 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 "checkConnect" -> {
                     val deviceId = call.argument<String>("device_id")
                     if (deviceId != null) {
-                        result.success(plugin.connections[deviceId]?.isConnect ?: false)
+                        result.success(plugin.isConnectionActive(deviceId))
                     } else {
                         // Trả về toàn bộ danh sách kết nối đang hoạt động dưới dạng map { deviceId: true/false }
-                        val map = plugin.connections.mapValues { (_, conn) -> conn.isConnect }
+                        val map = plugin.connections.keys.associateWith { plugin.isConnectionActive(it) }
                         result.success(map)
                     }
                 }
@@ -64,11 +65,7 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     plugin.bluetoothManager.autoConnectBuiltIn(result)
                 }
  
-                "open_permission_settings" -> {
-                    plugin.bluetoothManager.openAppSettings()
-                    result.success(true)
-                }
-    
+
                 "has_built_in_printer" -> {
                     result.success(hasBuiltInPrinter(plugin.mContext))
                 }
@@ -78,39 +75,45 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
     
                 "get_bluetooth_devices" -> {
-                    plugin.bluetoothManager.getBluetoothDevices(result)
+                    val filterPrinterOnly = call.argument<Boolean>("filter_printer_only") ?: true
+                    plugin.bluetoothManager.getBluetoothDevices(result, filterPrinterOnly)
                 }
     
                 "print_label" -> {
-                    plugin.toast("[print_label] nhận lệnh in")
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    plugin.printLabel(call, conn, result)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printLabel(call, conn, targetResult)
+                    }
                 }
     
                 "print_text" -> {
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    plugin.printText(call, conn, result)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printText(call, conn, targetResult)
+                    }
                 }
     
                 "print_text_esc" -> {
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    plugin.printThermal.printTextESC(call, conn, result)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printThermal.printTextESC(call, conn, targetResult)
+                    }
                 }
     
                 "print_barcode" -> {
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    plugin.printBarcode(call, conn, result)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printBarcode(call, conn, targetResult)
+                    }
                 }
     
                 "print_qrcode" -> {
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    plugin.printQRCode(call, conn, result)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printQRCode(call, conn, targetResult)
+                    }
                 }
     
                 "print_image_esc" -> {
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    val isTargetBuiltIn = plugin.bluetoothManager.isConnectionToBuiltInPrinter(conn)
-                    plugin.printThermal.printImageESC(call, conn, result, isTargetBuiltIn)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        val isTargetBuiltIn = plugin.bluetoothManager.isConnectionToBuiltInPrinter(conn)
+                        plugin.printThermal.printImageESC(call, conn, targetResult, isTargetBuiltIn)
+                    }
                 }
     
                 "check_printer_status" -> {
@@ -128,13 +131,15 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
     
                 "print_barcode_esc" -> {
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    plugin.printThermal.printBarcodeESC(call, conn, result)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printThermal.printBarcodeESC(call, conn, targetResult)
+                    }
                 }
     
                 "print_qrcode_esc" -> {
-                    val conn = plugin.resolveConn(call, result) ?: return
-                    plugin.printThermal.printQRCodeESC(call, conn, result)
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printThermal.printQRCodeESC(call, conn, targetResult)
+                    }
                 }
     
                 "print_all" -> {
@@ -168,6 +173,26 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
             }
         } catch (e: Exception) {
             result.error("METHOD_CALL_ERROR", e.message, null)
+        }
+    }
+
+    private fun runPrintJob(call: MethodCall, result: Result, job: (IDeviceConnection, Result) -> Unit) {
+        kotlin.concurrent.thread {
+            val conns = plugin.resolveConnectionsForPrint(call)
+            if (conns.isEmpty()) {
+                Handler(Looper.getMainLooper()).post {
+                    result.error("NO_CONNECTION", "No connected printer found", null)
+                }
+                return@thread
+            }
+
+            Handler(Looper.getMainLooper()).post {
+                conns.forEachIndexed { index, conn ->
+                    val isLast = index == conns.size - 1
+                    val targetResult = if (isLast) result else NoOpResult
+                    job(conn, targetResult)
+                }
+            }
         }
     }
 

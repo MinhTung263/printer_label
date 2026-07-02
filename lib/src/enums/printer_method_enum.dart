@@ -1,3 +1,5 @@
+// ignore_for_file: constant_identifier_names
+
 enum PrinterMethod {
   getPlatformVersion,
   checkConnect,
@@ -19,7 +21,6 @@ enum PrinterMethod {
   print_qrcode_esc,
   check_printer_status,
   auto_connect_built_in,
-  open_permission_settings,
   has_built_in_printer,
   get_built_in_printer_paper_size;
 }

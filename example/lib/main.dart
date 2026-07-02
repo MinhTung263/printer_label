@@ -6,7 +6,6 @@ import 'package:example/context_extensions.dart';
 import 'package:example/devices_tab.dart';
 import 'package:example/functions_tab.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:printer_label/printer_label.dart';
 
 import 'widgets/print_preview_widgets.dart';
@@ -164,19 +163,6 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   Future<void> _startBtScan() async {
-    if (Platform.isAndroid) {
-      final statuses = await [
-        Permission.bluetoothConnect,
-        Permission.bluetoothScan,
-        Permission.locationWhenInUse,
-      ].request();
-      if (!statuses.values.every((s) => s.isGranted)) {
-        if (!mounted) return;
-        context.showSnackBar('Cần cấp quyền Bluetooth để tiếp tục',
-            backgroundColor: Colors.amber[800]!);
-        return;
-      }
-    }
     if (!mounted) return;
     setState(() {
       _isScanningBt = true;
@@ -199,7 +185,7 @@ class _MyHomePageState extends State<MyHomePage>
     } catch (_) {}
 
     _btScanSub?.cancel();
-    _btScanSub = PrinterLabel.bluetoothScanStream.listen(
+    _btScanSub = PrinterLabel.bluetoothScanStream().listen(
       (d) {
         if (!mounted) return;
         setState(() {

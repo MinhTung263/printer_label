@@ -16,6 +16,9 @@ private final class EmptyStreamHandler: NSObject, FlutterStreamHandler {
 // onCancel: nil sink nhưng KHÔNG dừng scan — BLEManager tự quản lý lifecycle
 private final class BLEScanStreamHandler: NSObject, FlutterStreamHandler {
     func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        // Đọc tham số filterPrinterOnly từ Flutter (truyền qua receiveBroadcastStream arguments)
+        let args = arguments as? [String: Any]
+        BLEManager.shared.filterPrinterOnly = args?["filter_printer_only"] as? Bool ?? true
         BLEManager.shared.scanEventSink = events
         BLEManager.shared.replayCachedDevices(to: events)
         return nil

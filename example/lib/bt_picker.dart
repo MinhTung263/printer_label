@@ -64,7 +64,7 @@ class _BtPickerState extends State<BtPicker> {
       _scannedDevices.clear();
     });
     _scanSub?.cancel();
-    _scanSub = PrinterLabel.bluetoothScanStream.listen(
+    _scanSub = PrinterLabel.bluetoothScanStream().listen(
       (d) {
         if (!mounted) return;
         setState(() {

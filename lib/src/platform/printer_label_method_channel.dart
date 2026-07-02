@@ -11,6 +11,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   // Cached streams to prevent recreating them on every getter access
   Stream<BluetoothDeviceModel>? _bluetoothScanStream;
+  bool? _currentScanFilterPrinterOnly;
   Stream<UsbConnectionEvent>? _usbDeviceStream;
 
   @override
@@ -159,10 +160,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     return await _channel.invokeMethod<bool>(PrinterMethod.auto_connect_built_in.name) ?? false;
   }
 
-  @override
-  Future<bool> openPermissionSettings() async {
-    return await _channel.invokeMethod<bool>(PrinterMethod.open_permission_settings.name) ?? false;
-  }
+
 
   @override
   Future<bool> hasBuiltInPrinter() async {
@@ -175,9 +173,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<List<BluetoothDeviceModel>> getBluetoothDevices() async {
+  Future<List<BluetoothDeviceModel>> getBluetoothDevices({bool filterPrinterOnly = true}) async {
     final result = await _channel.invokeMethod<List>(
       PrinterMethod.get_bluetooth_devices.name,
+      {'filter_printer_only': filterPrinterOnly},
     );
     if (result == null) return [];
     return result.map((e) {
@@ -191,15 +190,21 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Stream<BluetoothDeviceModel> get bluetoothScanStream {
-    _bluetoothScanStream ??= _scanChannel.receiveBroadcastStream().map((e) {
-      final map = Map<Object?, Object?>.from(e as Map);
-      return BluetoothDeviceModel.fromMap({
-        'name': map['name']?.toString() ?? 'Unknown',
-        'identifier': map['identifier']?.toString(),
-        'mac': map['mac']?.toString(),
+  Stream<BluetoothDeviceModel> bluetoothScanStream({bool filterPrinterOnly = true}) {
+    // Nếu filterPrinterOnly thay đổi → tạo lại stream mới với arguments mới
+    if (_bluetoothScanStream == null || _currentScanFilterPrinterOnly != filterPrinterOnly) {
+      _currentScanFilterPrinterOnly = filterPrinterOnly;
+      _bluetoothScanStream = _scanChannel
+          .receiveBroadcastStream({'filter_printer_only': filterPrinterOnly})
+          .map((e) {
+        final map = Map<Object?, Object?>.from(e as Map);
+        return BluetoothDeviceModel.fromMap({
+          'name': map['name']?.toString() ?? 'Unknown',
+          'identifier': map['identifier']?.toString(),
+          'mac': map['mac']?.toString(),
+        });
       });
-    });
+    }
     return _bluetoothScanStream!;
   }
 

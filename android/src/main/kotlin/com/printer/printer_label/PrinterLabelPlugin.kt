@@ -23,6 +23,7 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import android.app.Activity
+import io.flutter.plugin.common.PluginRegistry
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -39,9 +40,11 @@ import net.posprinter.TSPLPrinter
 import net.posprinter.model.AlgorithmType
 
 /** PrinterLabelPlugin — Multi-connection manager */
-class PrinterLabelPlugin : FlutterPlugin, ActivityAware {
+class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.ActivityResultListener, PluginRegistry.RequestPermissionsResultListener {
     internal var activity: Activity? = null
+    internal var activityBinding: ActivityPluginBinding? = null
     internal val bluetoothManager = BluetoothPrinterManager(this)
+    internal var permissionCallback: ((Boolean) -> Unit)? = null
 
     private lateinit var channel: MethodChannel
     private lateinit var scanEventChannel: EventChannel
@@ -115,19 +118,54 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         this.activity = binding.activity
+        this.activityBinding = binding
+        binding.addActivityResultListener(this)
+        binding.addRequestPermissionsResultListener(this)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding?.removeRequestPermissionsResultListener(this)
         this.activity = null
+        this.activityBinding = null
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         this.activity = binding.activity
+        this.activityBinding = binding
+        binding.addActivityResultListener(this)
+        binding.addRequestPermissionsResultListener(this)
     }
 
     override fun onDetachedFromActivity() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding?.removeRequestPermissionsResultListener(this)
         this.activity = null
+        this.activityBinding = null
     }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == BluetoothPrinterManager.REQUEST_ENABLE_BT) {
+            bluetoothManager.handleBluetoothEnableResult(resultCode)
+            return true
+        }
+        return false
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ): Boolean {
+        if (requestCode == REQUEST_PERMISSIONS_CODE) {
+            val allGranted = grantResults.isNotEmpty() && grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
+            permissionCallback?.invoke(allGranted)
+            permissionCallback = null
+            return true
+        }
+        return false
+    }
+
 
     internal fun checkStatusESC(conn: IDeviceConnection, result: Result) {
         val handler = Handler(Looper.getMainLooper())
@@ -217,30 +255,99 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware {
         }
     }
 
-    // ─── Connection helpers ───────────────────────────────────────────────────
+    internal fun isConnectionActive(deviceId: String): Boolean {
+        val conn = connections[deviceId] ?: return false
+        if (!conn.isConnect) return false
+        
+        // Nếu là kết nối Bluetooth mà Bluetooth adapter của hệ thống đang tắt, coi như mất kết nối
+        if (connectionTypes[deviceId] == ConnectionType.BT) {
+            try {
+                val adapter = bluetoothManager.getBluetoothAdapter()
+                if (adapter == null || !adapter.isEnabled) {
+                    return false
+                }
+            } catch (e: Exception) {
+                // Tránh lỗi bảo mật (SecurityException) trên Android 12+ khi chưa cấp quyền Bluetooth,
+                // fallback trả về trạng thái kết nối mặc định của SDK máy in
+                return conn.isConnect
+            }
+        }
+        return true
+    }
 
     internal fun getConn(call: MethodCall): IDeviceConnection? {
         val deviceId = call.argument<String>("device_id")
 
         if (!deviceId.isNullOrEmpty()) {
             val conn = connections[deviceId]
-            if (conn != null && conn.isConnect) return conn
+            if (conn != null && isConnectionActive(deviceId)) return conn
             
             // Thử khớp khóa phụ (không có tiền tố hoặc tự thêm tiền tố LAN/BT)
             val altKey = if (deviceId.contains(":")) deviceId.substringAfter(":") else deviceId
             val conn2 = connections[altKey] ?: connections["LAN:$deviceId"] ?: connections["BT:$deviceId"]
-            if (conn2 != null && conn2.isConnect) return conn2
+            if (conn2 != null && isConnectionActive(altKey)) return conn2
+            val keyLan = "LAN:$deviceId"
+            if (connections.containsKey(keyLan) && isConnectionActive(keyLan)) return connections[keyLan]
+            val keyBt = "BT:$deviceId"
+            if (connections.containsKey(keyBt) && isConnectionActive(keyBt)) return connections[keyBt]
         }
 
-        return connections.values.firstOrNull { it.isConnect }
+        val activeKey = connections.keys.firstOrNull { isConnectionActive(it) }
+        return if (activeKey != null) connections[activeKey] else null
     }
 
-    internal fun resolveConn(call: MethodCall, result: Result): IDeviceConnection? {
-        val conn = getConn(call)
-        if (conn != null) return conn
 
-        result.error("NO_CONNECTION", "No connected printer found", null)
-        return null
+
+    internal fun resolveConnectionsForPrint(call: MethodCall): List<IDeviceConnection> {
+        val deviceId = call.argument<String>("device_id")
+        val targets = mutableListOf<IDeviceConnection>()
+
+        if (!deviceId.isNullOrEmpty()) {
+            val conn = connections[deviceId]
+            if (conn != null && isConnectionActive(deviceId)) {
+                targets.add(conn)
+            } else {
+                val altKey = if (deviceId.contains(":")) deviceId.substringAfter(":") else deviceId
+                val conn2 = connections[altKey] ?: connections["LAN:$deviceId"] ?: connections["BT:$deviceId"]
+                if (conn2 != null && isConnectionActive(altKey)) {
+                    targets.add(conn2)
+                } else {
+                    val keyLan = "LAN:$deviceId"
+                    if (connections.containsKey(keyLan) && isConnectionActive(keyLan)) {
+                        connections[keyLan]?.let { targets.add(it) }
+                    } else {
+                        val keyBt = "BT:$deviceId"
+                        if (connections.containsKey(keyBt) && isConnectionActive(keyBt)) {
+                            connections[keyBt]?.let { targets.add(it) }
+                        }
+                    }
+                }
+            }
+        } else {
+            if (isBuiltInPrinter()) {
+                val isConnected = connections.values.any { bluetoothManager.isConnectionToBuiltInPrinter(it) && it.isConnect }
+                if (!isConnected) {
+                    bluetoothManager.autoConnectBuiltInSync()
+                }
+                val builtInConn = connections.entries.firstOrNull { 
+                    bluetoothManager.isConnectionToBuiltInPrinter(it.value) && isConnectionActive(it.key) 
+                }?.value
+                if (builtInConn != null) {
+                    targets.add(builtInConn)
+                }
+                connections.entries.forEach { (key, conn) ->
+                    if (isConnectionActive(key) && !bluetoothManager.isConnectionToBuiltInPrinter(conn)) {
+                        targets.add(conn)
+                    }
+                }
+            } else {
+                val activeKey = connections.keys.firstOrNull { isConnectionActive(it) }
+                if (activeKey != null) {
+                    connections[activeKey]?.let { targets.add(it) }
+                }
+            }
+        }
+        return targets
     }
 
     /** Build a per-device IConnectListener so parallel connects don't race. */
@@ -719,6 +826,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware {
     internal fun toast(str: String) = Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
 
     companion object {
+        internal const val REQUEST_PERMISSIONS_CODE = 1002
         private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"
         private const val CONNECT_TIMEOUT_MS = 5_000L
 
