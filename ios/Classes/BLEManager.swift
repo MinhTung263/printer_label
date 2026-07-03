@@ -3,49 +3,26 @@ import Flutter
 
 // MARK: - BLEManager
 // Singleton quản lý toàn bộ vòng đời CoreBluetooth.
-// Tại sao singleton là bắt buộc:
-//   - CBCentralManager phải tồn tại xuyên suốt app để giữ kết nối
-//   - CBPeripheral PHẢI được giữ strong reference — iOS sẽ deallocate nếu không giữ
-//   - Nếu tạo mới CBCentralManager theo UI lifecycle → mất kết nối mỗi khi navigate
-// Tại sao iOS BLE khác Android Bluetooth Classic:
-//   - iOS dùng UUID (NSUUID) thay MAC address — MAC bị ẩn từ iOS 13+
-//   - CBPeripheral object không thể recreate từ string — phải lấy từ scan cache
-//   - Kết nối BLE qua CBCentralManager.connect(_:) không phải socket TCP
-//   - Phải discover services → characteristics trước khi write
-
 final class BLEManager: NSObject {
 
     static let shared = BLEManager()
 
-    // CBCentralManager chạy trên main queue, giữ sống suốt app lifecycle
     private var centralManager: CBCentralManager!
-
-    // Cache CBPeripheral theo UUID string — PHẢI giữ strong reference
-    // Tại sao: CBPeripheral không có init(identifier:), nếu bị deallocate
-    // sẽ không thể reconnect mà không scan lại
     private var discoveredPeripherals: [String: CBPeripheral] = [:]
-
-    // Các peripheral đang kết nối thành công
     private var connectedPeripherals: [String: CBPeripheral] = [:]
-
-    // Characteristic có khả năng write cho mỗi peripheral
-    // tuple: (characteristic, writeType) — .withResponse hoặc .withoutResponse
     private var writableCharacteristics: [String: (CBCharacteristic, CBCharacteristicWriteType)] = [:]
-
-    // Đếm số service còn chờ discover characteristics
-    // Dùng để biết khi nào toàn bộ services đã được process
     private var pendingServiceCount: [String: Int] = [:]
-
-    // Flutter result callbacks chờ kết quả bất đồng bộ từ BLE delegates
     private var pendingConnectResults: [String: FlutterResult] = [:]
     private var pendingDisconnectResults: [String: FlutterResult] = [:]
 
-    // Lọc thiết bị theo RSSI để tránh hiển thị quá nhiều thiết bị yếu
-     private let minScanRSSI: Int = -50
+    // ⭐ Timeout cho connect — tránh treo khi máy in tắt
+    private var connectTimeouts: [String: DispatchWorkItem] = [:]
+    private let connectTimeoutInterval: TimeInterval = 5.0 // 5 giây
 
-    // EventChannel sink để push device được discover về Flutter
+    private let minScanRSSI: Int = -70
     var scanEventSink: FlutterEventSink?
-
+    /// true = chỉ hiển thị thiết bị BLE được nhận dạng là máy in, false = tất cả thiết bị
+    var filterPrinterOnly: Bool = true
     private var isScanning = false
 
     private override init() {
@@ -58,15 +35,11 @@ final class BLEManager: NSObject {
     }
 
     // MARK: - Scan
-
     func startScan() {
-        
-        guard !isScanning else { return } // avoid duplicate scans
+        guard !isScanning else { return }
         isScanning = true
-        // Xóa cache thiết bị cũ, giữ lại những thiết bị đang kết nối
         discoveredPeripherals = discoveredPeripherals.filter { connectedPeripherals[$0.key] != nil }
         guard centralManager.state == .poweredOn else { return }
-    
         centralManager.scanForPeripherals(
             withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
@@ -80,52 +53,87 @@ final class BLEManager: NSObject {
     }
 
     // MARK: - Connect
-
-    // identifier là UUID string từ peripheral.identifier.uuidString
-    // PHẢI có trong discoveredPeripherals cache — không thể recreate từ string
     func connect(identifier: String, result: @escaping FlutterResult) {
-        guard let peripheral = discoveredPeripherals[identifier] else {
-            result(FlutterError(
-                code: "PERIPHERAL_NOT_FOUND",
-                message: "Peripheral \(identifier) not in cache. Run scan first.",
-                details: nil
-            ))
+        // 1. Cache scan
+        if let peripheral = discoveredPeripherals[identifier] {
+            _connect(peripheral, identifier: identifier, result: result)
             return
         }
+        // 2. Retrieve từ UUID đã lưu — KHÔNG CẦN SCAN LẠI
+        if let uuid = UUID(uuidString: identifier) {
+            let retrieved = centralManager.retrievePeripherals(withIdentifiers: [uuid])
+            if let peripheral = retrieved.first {
+                discoveredPeripherals[identifier] = peripheral
+                _connect(peripheral, identifier: identifier, result: result)
+                return
+            }
+            // 3. Retrieve từ thiết bị đang kết nối hệ thống
+            let connected = centralManager.retrieveConnectedPeripherals(withServices: [])
+            if let peripheral = connected.first(where: { $0.identifier.uuidString == identifier }) {
+                discoveredPeripherals[identifier] = peripheral
+                _connect(peripheral, identifier: identifier, result: result)
+                return
+            }
+        }
+        // 4. Thất bại → false (giống Android)
+        result(false)
+    }
 
-        // Nếu đã kết nối rồi → trả về thành công ngay
+    private func _connect(_ peripheral: CBPeripheral, identifier: String, result: @escaping FlutterResult) {
+        // ⭐ Hủy timeout cũ nếu có
+        connectTimeouts[identifier]?.cancel()
+
         if peripheral.state == .connected {
-            result(true)
+            if writableCharacteristics[identifier] != nil {
+                result(true)
+                return
+            }
+            peripheral.delegate = self
+            peripheral.discoverServices(nil)
+            pendingConnectResults[identifier] = result
             return
         }
-        //  Nếu đang kết nối → return error (tránh kết nối 2 lần)
         if peripheral.state == .connecting {
-            result(FlutterError(
-                code: "ALREADY_CONNECTING",
-                message: "Already connecting to \(identifier)",
-                details: nil
-            ))
+            result(false) // giống Android
             return
         }
-
         pendingConnectResults[identifier] = result
         peripheral.delegate = self
         centralManager.connect(peripheral, options: nil)
+
+        // ⭐ Schedule timeout — nếu máy in tắt, sau 8s tự động trả về false
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            if self.pendingConnectResults[identifier] != nil {
+                self.pendingConnectResults.removeValue(forKey: identifier)
+                self.centralManager.cancelPeripheralConnection(peripheral)
+                result(false)
+            }
+            self.connectTimeouts.removeValue(forKey: identifier)
+        }
+        connectTimeouts[identifier] = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + connectTimeoutInterval, execute: workItem)
     }
 
     // MARK: - Disconnect
-
     func disconnect(identifier: String, result: @escaping FlutterResult) {
+        // ⭐ Hủy timeout nếu đang connect
+        connectTimeouts[identifier]?.cancel()
+        connectTimeouts.removeValue(forKey: identifier)
+
         guard let peripheral = connectedPeripherals[identifier] else {
             result(false)
             return
         }
-    
         pendingDisconnectResults[identifier] = result
         centralManager.cancelPeripheralConnection(peripheral)
     }
 
     func disconnectAll(result: @escaping FlutterResult) {
+        // ⭐ Hủy tất cả timeout
+        for (id, work) in connectTimeouts { work.cancel() }
+        connectTimeouts.removeAll()
+
         guard !connectedPeripherals.isEmpty else {
             result(false)
             return
@@ -137,95 +145,80 @@ final class BLEManager: NSObject {
     }
 
     // MARK: - Write
-
     func writeData(_ data: Data, toIdentifier identifier: String, result: @escaping FlutterResult) {
         guard let peripheral = connectedPeripherals[identifier],
               peripheral.state == .connected else {
-            result(FlutterError(
-                code: "NOT_CONNECTED",
-                message: "Peripheral \(identifier) is not connected",
-                details: nil
-            ))
+            result(FlutterError(code: "NOT_CONNECTED", message: "Peripheral \(identifier) is not connected", details: nil))
             return
         }
-
         guard let charTuple = writableCharacteristics[identifier] else {
-            result(FlutterError(
-                code: "NO_CHARACTERISTIC",
-                message: "No writable characteristic for \(identifier). Connect first.",
-                details: nil
-            ))
+            result(FlutterError(code: "NO_CHARACTERISTIC", message: "No writable characteristic for \(identifier). Connect first.", details: nil))
             return
         }
-
         let (characteristic, writeType) = charTuple
-        // BLE MTU thường 182–512 bytes. Chunk 182 bytes để an toàn trên mọi thiết bị
-        let chunkSize = 182
-        var offset = 0
-        while offset < data.count {
-            let end = min(offset + chunkSize, data.count)
-            let chunk = data.subdata(in: offset..<end)
-            peripheral.writeValue(chunk, for: characteristic, type: writeType)
-            offset = end
+        
+        // Giới hạn kích thước gói gửi xuống máy in ở mức tối ưu cho vi xử lý máy in (180 bytes)
+        // Gói nhỏ giúp máy in vừa nhận vừa in nhịp nhàng, tránh nghẽn CPU dẫn đến tràn bộ đệm.
+        let safeMaxChunkSize = 180
+        let chunkSize = min(peripheral.maximumWriteValueLength(for: writeType), safeMaxChunkSize)
+        
+        // Đưa việc ghi dữ liệu vào Background Thread để tránh block Main Thread (gây khựng UI)
+        DispatchQueue.global(qos: .userInitiated).async {
+            var offset = 0
+            
+            while offset < data.count {
+                let end = min(offset + chunkSize, data.count)
+                let chunk = data.subdata(in: offset..<end)
+                
+                peripheral.writeValue(chunk, for: characteristic, type: writeType)
+                offset = end
+                
+                // Khoảng nghỉ để duy trì tốc độ truyền ổn định và tránh tràn bộ đệm máy in
+                if writeType == .withoutResponse {
+                    // Tối ưu tốc độ lên khoảng 16 KB/s (16,384 bytes/s) để máy in in nhanh hơn mà vẫn an toàn
+                    let delay = Double(chunk.count) / 16384.0
+                    Thread.sleep(forTimeInterval: delay)
+                } else {
+                    // Chế độ in có phản hồi (.withResponse) cần thời gian chờ ack của iOS (khoảng 25ms)
+                    Thread.sleep(forTimeInterval: 0.025)
+                }
+            }
+            
+            // Trả kết quả về Main Thread cho Flutter
+            DispatchQueue.main.async {
+                result(true)
+            }
         }
-        result(true)
     }
 
-    // Write tới peripheral đầu tiên đang kết nối (dùng khi không chỉ định device_id)
     func writeDataToFirstConnected(_ data: Data, result: @escaping FlutterResult) {
         guard let first = connectedPeripherals.first else {
-            result(FlutterError(
-                code: "NO_CONNECTED_DEVICE",
-                message: "No BLE peripheral is currently connected",
-                details: nil
-            ))
+            result(FlutterError(code: "NO_CONNECTED_DEVICE", message: "No BLE peripheral is currently connected", details: nil))
             return
         }
         writeData(data, toIdentifier: first.key, result: result)
     }
 
     // MARK: - Status
+    var isBluetoothEnabled: Bool { centralManager.state == .poweredOn }
+    func isConnected(identifier: String) -> Bool { connectedPeripherals[identifier]?.state == .connected }
+    func hasAnyConnection() -> Bool { !connectedPeripherals.isEmpty }
 
-    var isBluetoothEnabled: Bool {
-        return centralManager.state == .poweredOn
-    }
-
-    // Kiểm tra kết nối của peripheral theo identifier
-    func isConnected(identifier: String) -> Bool {
-        return connectedPeripherals[identifier]?.state == .connected
-    }
-
-    // Kiểm tra có kết nối nào đang hoạt động hay không
-    func hasAnyConnection() -> Bool {
-        return !connectedPeripherals.isEmpty
-    }
-    // Lấy danh sách thiết bị đã discover (đang cache) để Flutter hiển thị
     func getDiscoveredDevices() -> [[String: Any]] {
         return discoveredPeripherals.values.map { peripheral in
-            [
-                "name": peripheral.name                                                                                                               ,
-                "identifier": peripheral.identifier.uuidString
-            ]
+            ["name": peripheral.name ?? "Unknown", "identifier": peripheral.identifier.uuidString]
         }
     }
 
-    // Gửi lại tất cả device đã cache vào sink mới.
-    // Dùng khi Flutter subscribe sau khi scan đã chạy (race condition).
     func replayCachedDevices(to sink: FlutterEventSink) {
         for peripheral in discoveredPeripherals.values {
-            sink([
-                "name": peripheral.name ?? "Unknown",
-                "identifier": peripheral.identifier.uuidString,
-                "mac": peripheral.identifier.uuidString
-            ] as [String: Any])
+            sink(["name": peripheral.name ?? "Unknown", "identifier": peripheral.identifier.uuidString, "mac": peripheral.identifier.uuidString] as [String: Any])
         }
     }
-    // Lấy trạng thái kết nối của tất cả peripheral đã cache
+
     func getAllConnectionStatus() -> [String: Bool] {
         var status: [String: Bool] = [:]
-        for (id, peripheral) in connectedPeripherals {
-            status[id] = peripheral.state == .connected
-        }
+        for (id, peripheral) in connectedPeripherals { status[id] = peripheral.state == .connected }
         return status
     }
 }
@@ -233,95 +226,80 @@ final class BLEManager: NSObject {
 // MARK: - CBCentralManagerDelegate
 extension BLEManager: CBCentralManagerDelegate {
 
-
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
-            if isScanning {
-                centralManager.scanForPeripherals(
-                    withServices: nil,
-                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
-                )
-            }
+            if isScanning { centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]) }
         case .unauthorized:
             print("[BLEManager] Bluetooth permission denied. Add NSBluetoothAlwaysUsageDescription to Info.plist.")
         case .poweredOff:
             print("[BLEManager] Bluetooth is powered off.")
-        default:
-            break
+        default: break
         }
     }
 
-    func centralManager(
-        _ central: CBCentralManager,
-        didDiscover peripheral: CBPeripheral,
-        advertisementData: [String: Any],
-        rssi RSSI: NSNumber
-    ) {
-        // Lọc thiết bị theo RSSI để tránh hiển thị quá nhiều thiết bị yếu
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard RSSI.intValue >= minScanRSSI else { return }
         let identifier = peripheral.identifier.uuidString
-
-        // Giữ strong reference — bắt buộc để connect sau này
-        // Nếu không cache ở đây, iOS có thể deallocate peripheral object
-        discoveredPeripherals[identifier] = peripheral
-
-        let name = peripheral.name
-            ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
-            ?? "Unknown"
-
-        let deviceInfo: [String: Any] = [
-            "name": name,
-            "identifier": identifier,
-            "mac": identifier   // alias để tương thích Flutter model
+        let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? ""
+        
+        guard !name.isEmpty else { return }
+        
+        let nameLower = name.lowercased()
+        
+        // Danh sách từ khóa dài tự động khớp nếu xuất hiện ở bất kỳ đâu trong tên
+        let longKeywords = [
+            "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
+            "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
+            "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang"
         ]
-
-        scanEventSink?(deviceInfo)
+        let matchesLong = longKeywords.contains { nameLower.contains($0) }
+        
+        // Danh sách tiền tố ngắn (chỉ khớp nếu ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới)
+        let shortPrefixes = [
+            "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc"
+        ]
+        let matchesShort = shortPrefixes.contains { prefix in
+            nameLower.hasPrefix(prefix) ||
+            nameLower.contains("\(prefix)-") ||
+            nameLower.contains("\(prefix) ") ||
+            nameLower.contains("_\(prefix)")
+        }
+        
+        guard matchesLong || matchesShort || !filterPrinterOnly else { return }
+        
+        // ⭐ Chỉ lưu thiết bị vào danh sách phát hiện nếu thỏa mãn bộ lọc máy in
+        discoveredPeripherals[identifier] = peripheral
+        scanEventSink?(["name": name, "identifier": identifier, "mac": identifier] as [String: Any])
     }
 
-    func centralManager(
-        _ central: CBCentralManager,
-        didConnect peripheral: CBPeripheral
-    ) {
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         let identifier = peripheral.identifier.uuidString
+        // ⭐ Hủy timeout connect
+        connectTimeouts[identifier]?.cancel()
+        connectTimeouts.removeValue(forKey: identifier)
+
         connectedPeripherals[identifier] = peripheral
         peripheral.delegate = self
-        // Discover tất cả services — nil = không lọc
         peripheral.discoverServices(nil)
     }
 
-    func centralManager(
-        _ central: CBCentralManager,
-        didFailToConnect peripheral: CBPeripheral,
-        error: Error?
-    ) {
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         let identifier = peripheral.identifier.uuidString
+        connectTimeouts[identifier]?.cancel()
+        connectTimeouts.removeValue(forKey: identifier)
+
         if let result = pendingConnectResults.removeValue(forKey: identifier) {
-            result(FlutterError(
-                code: "CONNECT_FAILED",
-                message: error?.localizedDescription ?? "Failed to connect",
-                details: nil
-            ))
+            result(false) // giống Android
         }
     }
 
-    func centralManager(
-        _ central: CBCentralManager,
-        didDisconnectPeripheral peripheral: CBPeripheral,
-        error: Error?
-    ) {
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         let identifier = peripheral.identifier.uuidString
-
         connectedPeripherals.removeValue(forKey: identifier)
         writableCharacteristics.removeValue(forKey: identifier)
         pendingServiceCount.removeValue(forKey: identifier)
-
-        // Nếu có pending disconnect result → trả về thành công
-        if let result = pendingDisconnectResults.removeValue(forKey: identifier) {
-            result(true)
-        }
-
-        // KHÔNG xóa discoveredPeripherals — giữ cache để reconnect không cần scan lại
+        if let result = pendingDisconnectResults.removeValue(forKey: identifier) { result(true) }
     }
 }
 
@@ -330,83 +308,45 @@ extension BLEManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         let identifier = peripheral.identifier.uuidString
-
         guard error == nil, let services = peripheral.services, !services.isEmpty else {
             if let result = pendingConnectResults.removeValue(forKey: identifier) {
-                result(FlutterError(
-                    code: "SERVICE_DISCOVERY_FAILED",
-                    message: error?.localizedDescription ?? "No services found",
-                    details: nil
-                ))
+                result(false)
             }
             return
         }
-
-        // Lưu số service cần process để biết khi nào xong
         pendingServiceCount[identifier] = services.count
-
-        for service in services {
-            peripheral.discoverCharacteristics(nil, for: service)
-        }
+        for service in services { peripheral.discoverCharacteristics(nil, for: service) }
     }
 
-    func peripheral(
-        _ peripheral: CBPeripheral,
-        didDiscoverCharacteristicsFor service: CBService,
-        error: Error?
-    ) {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         let identifier = peripheral.identifier.uuidString
-
         if let chars = service.characteristics {
             for char in chars {
-                // Ưu tiên .write (withResponse) hơn .writeWithoutResponse
-                // .withResponse: printer xác nhận đã nhận → reliable hơn
-                // .writeWithoutResponse: không có ACK → nhanh hơn nhưng có thể mất data
-                if char.properties.contains(.write) {
-                    writableCharacteristics[identifier] = (char, .withResponse)
-                    break
-                } else if char.properties.contains(.writeWithoutResponse),
-                          writableCharacteristics[identifier] == nil {
+                // Ưu tiên chọn writeWithoutResponse trước để tăng tốc độ in tối đa
+                if char.properties.contains(.writeWithoutResponse) {
                     writableCharacteristics[identifier] = (char, .withoutResponse)
+                    break
+                } else if char.properties.contains(.write), writableCharacteristics[identifier] == nil {
+                    writableCharacteristics[identifier] = (char, .withResponse)
                 }
             }
         }
-
-        // Giảm pending count
         let remaining = (pendingServiceCount[identifier] ?? 1) - 1
         pendingServiceCount[identifier] = remaining
-
         guard remaining == 0 else { return }
-
-        // Tất cả services đã được process — resolve connect result
         pendingServiceCount.removeValue(forKey: identifier)
-
         if let result = pendingConnectResults.removeValue(forKey: identifier) {
             if writableCharacteristics[identifier] != nil {
                 result(true)
             } else {
-                result(FlutterError(
-                    code: "NO_WRITABLE_CHARACTERISTIC",
-                    message: "Printer connected but no writable characteristic found",
-                    details: nil
-                ))
+                result(false) // giống Android
             }
         }
     }
 
-    func peripheral(
-        _ peripheral: CBPeripheral,
-        didWriteValueFor characteristic: CBCharacteristic,
-        error: Error?
-    ) {
-        if let error = error {
-            print("[BLEManager] Write error for \(peripheral.identifier.uuidString): \(error)")
-        }
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error { print("[BLEManager] Write error for \(peripheral.identifier.uuidString): \(error)") }
     }
 
-    func peripheral(
-        _ peripheral: CBPeripheral,
-        didDiscoverDescriptorsFor characteristic: CBCharacteristic,
-        error: Error?
-    ) {}
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverDescriptorsFor characteristic: CBCharacteristic, error: Error?) {}
 }

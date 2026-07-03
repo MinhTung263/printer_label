@@ -1,0 +1,35 @@
+import 'dart:typed_data';
+
+import '../enums/label_per_row_enum.dart';
+
+class LabelModel {
+  final List<Uint8List> images;
+  int quantity;
+  final LabelPerRow? labelPerRow;
+
+  LabelModel({
+    required this.images,
+    this.quantity = 1,
+    this.labelPerRow,
+  });
+
+  /// Converts the model to a map for use in method channel calls
+  Map<String, dynamic> toJson() {
+    final label = labelPerRow ?? LabelPerRow.single;
+    final map = <String, dynamic>{
+      'images': images,
+      'type': 'TSPL',
+      'quantity': quantity,
+      'label_count': label.count,
+      'size': {
+        'width': label.width,
+        'height': label.height,
+      },
+      'gap': {
+        'width': label.gap,
+        'height': 0,
+      },
+    };
+    return map;
+  }
+}

@@ -1,0 +1,64 @@
+import 'package:flutter/material.dart';
+import 'package:printer_label/printer_label.dart';
+
+class CupStickerExample {
+  const CupStickerExample._();
+
+  static Future<void> printOrderCupSticker(
+    CupStickerSize size, {
+    List<PreviewLabelModel>? items,
+    BuildContext? context,
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+  }) async {
+    final List<PreviewLabelModel> dataList = items ?? [
+      PreviewLabelModel(
+        code: "1213",
+        productName: "Trà sữa",
+        price: "27.000 đ",
+        companyName: "Printer Label",
+        note: "Test print",
+        labelIndex: 1,
+        billDate: "01/01/2026",
+        totalLabels: 1,
+        toppings: const ["Đá", "Đường"],
+      ),
+      PreviewLabelModel(
+        code: "1214",
+        productName: "Trà đào",
+        price: "30.000 đ",
+        companyName: "Printer Label",
+        note: "Order #2",
+        labelIndex: 2,
+        billDate: "02/01/2026",
+        totalLabels: 2,
+        toppings: const ["Đá", "Trân châu"],
+      ),
+      PreviewLabelModel(
+        code: "1215",
+        productName: "Trà sữa matcha",
+        price: "35.000 đ",
+        companyName: "Printer Label",
+        note: "Order #3",
+        labelIndex: 3,
+        billDate: "03/01/2026",
+        totalLabels: 3,
+        toppings: const ["Đá", "Thạch", "Sữa đặc"],
+      ),
+    ];
+
+    final List<Widget> stickerWidgets =
+        dataList.map((data) => PreviewCupSticker(data: data)).toList();
+
+    await CupStickerPrinter.printWithWidgets(
+      widgets: stickerWidgets,
+      size: size,
+      context: context,
+      deviceId: deviceId,
+      connectionType: connectionType,
+    );
+  }
+}
+
+@Deprecated('Use CupStickerExample instead')
+typedef CupStickerPrintExample = CupStickerExample;

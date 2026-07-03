@@ -1,51 +1,108 @@
 import 'package:flutter/material.dart';
-import 'package:printer_label/enums/label_per_row_enum.dart';
+import 'package:printer_label/printer_label.dart';
 
-class LabelPerRowSelector extends StatefulWidget {
-  /// Giá trị ban đầu
-  final LabelPerRow initialValue;
+/// Controlled dropdown for selecting how many labels to print per row.
+/// The parent owns the selected value via [value] and [onChanged].
+class LabelPerRowSelector extends StatelessWidget {
+  /// Currently selected value (controlled by parent).
+  final LabelPerRow value;
 
-  /// Callback khi đổi
+  /// Callback khi đổi giá trị.
   final ValueChanged<LabelPerRow> onChanged;
 
   const LabelPerRowSelector({
     super.key,
-    required this.initialValue,
+    required this.value,
     required this.onChanged,
   });
 
   @override
-  State<LabelPerRowSelector> createState() => _LabelPerRowSelectorState();
-}
-
-class _LabelPerRowSelectorState extends State<LabelPerRowSelector> {
-  late LabelPerRow _selected;
-
-  @override
-  void initState() {
-    super.initState();
-    _selected = widget.initialValue;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return DropdownButton<LabelPerRow>(
-      value: _selected,
-      underline: Container(
-        height: 1,
-        color: Colors.grey.shade400,
+    final List<DropdownMenuItem<LabelPerRow?>> items = [];
+
+    // Nhóm 1: 1 Tem / Hàng
+    items.add(const DropdownMenuItem<LabelPerRow?>(
+      value: null,
+      enabled: false,
+      child: Text(
+        '── 1 TEM / HÀNG ──',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF4F46E5),
+          fontSize: 11,
+        ),
       ),
-      items: LabelPerRow.values.map((item) {
-        return DropdownMenuItem<LabelPerRow>(
-          value: item,
-          child: Text(item.title),
-        );
-      }).toList(),
-      onChanged: (value) {
-        if (value == null) return;
-        setState(() => _selected = value);
-        widget.onChanged(value);
-      },
+    ));
+    items.addAll(LabelPerRow.values
+        .where((item) => !item.name.startsWith('double') && !item.name.startsWith('triple'))
+        .map((item) => DropdownMenuItem<LabelPerRow?>(
+              value: item,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6.0),
+                child: Text(item.title),
+              ),
+            )));
+
+    // Nhóm 2: 2 Tem / Hàng
+    items.add(const DropdownMenuItem<LabelPerRow?>(
+      value: null,
+      enabled: false,
+      child: Text(
+        '── 2 TEM / HÀNG ──',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF4F46E5),
+          fontSize: 11,
+        ),
+      ),
+    ));
+    items.addAll(LabelPerRow.values
+        .where((item) => item.name.startsWith('double'))
+        .map((item) => DropdownMenuItem<LabelPerRow?>(
+              value: item,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6.0),
+                child: Text(item.title),
+              ),
+            )));
+
+    // Nhóm 3: 3 Tem / Hàng
+    items.add(const DropdownMenuItem<LabelPerRow?>(
+      value: null,
+      enabled: false,
+      child: Text(
+        '── 3 TEM / HÀNG ──',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF4F46E5),
+          fontSize: 11,
+        ),
+      ),
+    ));
+    items.addAll(LabelPerRow.values
+        .where((item) => item.name.startsWith('triple'))
+        .map((item) => DropdownMenuItem<LabelPerRow?>(
+              value: item,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6.0),
+                child: Text(item.title),
+              ),
+            )));
+
+    return DropdownButtonHideUnderline(
+      child: DropdownButton<LabelPerRow?>(
+        value: value,
+        isExpanded: true,
+        style: const TextStyle(
+          fontSize: 13,
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
+        items: items,
+        onChanged: (v) {
+          if (v != null) onChanged(v);
+        },
+      ),
     );
   }
 }

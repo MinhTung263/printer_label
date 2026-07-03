@@ -1,122 +1,34 @@
-import 'dart:io';
+library printer_label;
 
-import 'src.dart';
+export 'src/platform/printer_label.dart';
 
-PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
+// Export models
+export 'src/models/barcode_model.dart';
+export 'src/models/bluetooth_device_model.dart';
+export 'src/models/device_id.dart';
+export 'src/models/image_model.dart';
+export 'src/models/label_model.dart';
+export 'src/models/print_thermal.dart';
+export 'src/models/product_barcode_model.dart';
+export 'src/models/usb_connection_event.dart';
 
-class PrinterLabel {
-  static Future<String?> get platformVersion => _platform.platformVersion;
+// Export enums
+export 'src/enums/cup_sticker_size.dart';
+export 'src/enums/label_per_row_enum.dart';
+export 'src/enums/paper_size_enum.dart';
+export 'src/enums/printer_connection_type.dart';
+export 'src/enums/printer_status.dart';
 
-  static Future<bool> bluetoothEnabled() => _platform.bluetoothEnabled();
+// Export components
+export 'src/component/barcode_view.dart';
+export 'src/component/cup_sticker_view.dart';
 
-  static Future<bool> checkConnect({String? deviceId}) async {
-    return await _platform.checkConnect(deviceId: deviceId);
-  }
+// Export services
+export 'src/service/cup_sticker/cup_sticker_printer.dart';
+export 'src/service/cup_sticker/cup_sticker_printer_interface.dart';
+export 'src/service/label/label_from_widget.dart';
+export 'src/service/label/label_printer_service.dart';
+export 'src/service/label/label_printer_service_interface.dart';
+export 'src/service/esc/esc_print_service.dart';
+export 'src/service/esc/esc_print_service_interface.dart';
 
-  static Future<Map<String, bool>> getAllConnections() async {
-    if (!Platform.isAndroid) return {};
-    return await _platform.getAllConnections();
-  }
-
-  static Future<bool> disconectPrinter({String? deviceId}) async {
-    return await _platform.disconectPrinter(deviceId: deviceId);
-  }
-
-  static Future<bool> connectLan({required String ipAddress}) async {
-    return await _platform.connectLan(ipAddress: ipAddress);
-  }
-
-  static Future<void> printLabel({
-    String? deviceId,
-    PrinterConnectionType? connectionType,
-    required LabelModel barcodeImageModel,
-  }) async {
-    return await _platform.printLabel(
-      deviceId: deviceId,
-      connectionType: connectionType,
-      labelModel: barcodeImageModel,
-    );
-  }
-
-  static Future<void> printPrintImage({
-    String? deviceId,
-    PrinterConnectionType? connectionType,
-    required ImageModel model,
-  }) async {
-    return await _platform.printImage(
-      deviceId: deviceId,
-      connectionType: connectionType,
-      imageModel: model,
-    );
-  }
-
-  static Future<void> printBarcode({
-    String? deviceId,
-    PrinterConnectionType? connectionType,
-    required BarcodeModel printBarcodeModel,
-  }) async {
-    return await _platform.printBarcode(
-      deviceId: deviceId,
-      connectionType: connectionType,
-      printBarcodeModel: printBarcodeModel,
-    );
-  }
-
-  static Future<void> printESC({
-    String? deviceId,
-    PrinterConnectionType? connectionType,
-    required PrintThermalModel printThermalModel,
-  }) async {
-    return await _platform.printESC(
-      deviceId: deviceId,
-      connectionType: connectionType,
-      printThermalModel: printThermalModel,
-    );
-  }
-
-  static Future<void> printAll({
-    LabelModel? labelModel,
-    PrintThermalModel? escModel,
-    PrinterConnectionType? connectionType,
-  }) async {
-    return await _platform.printAll(
-      labelModel: labelModel,
-      escModel: escModel,
-      connectionType: connectionType,
-    );
-  }
-
-  // MARK: - Bluetooth
-  /// iOS: khởi động BLE scan. Devices sẽ được emit qua [bluetoothScanStream].
-  /// Phải gọi trước khi listen stream trên iOS.
-  /// Android: no-op — Android tự scan khi enumerate devices.
-  static Future<bool> startBluetoothScan() async {
-    if (!Platform.isIOS) return false;
-    return await _platform.startBluetoothScan();
-  }
-
-  static Future<bool> stopBluetoothScan() async {
-    if (!Platform.isIOS) return false;
-    return await _platform.stopBluetoothScan();
-  }
-
-  /// Connect tới printer.
-  /// - iOS: [macAddress] là UUID identifier từ [BluetoothDeviceModel.identifier]
-  /// - Android: [macAddress] là MAC address thực
-  static Future<bool> connectBluetooth({required String macAddress}) async {
-    return await _platform.connectBluetooth(macAddress: macAddress);
-  }
-
-  static Future<List<BluetoothDeviceModel>> getBluetoothDevices() async {
-    return await _platform.getBluetoothDevices();
-  }
-
-  /// Stream BLE devices được discover.
-  /// iOS: emit liên tục trong khi scan đang chạy.
-  /// Gọi [startBluetoothScan] trước khi subscribe trên iOS.
-  static Stream<BluetoothDeviceModel> get bluetoothScanStream =>
-      _platform.bluetoothScanStream;
-
-  static Stream<UsbConnectionEvent> get usbDeviceStream =>
-      _platform.usbDeviceStream;
-}

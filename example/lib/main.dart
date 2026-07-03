@@ -1,31 +1,17 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:example/printer_screen.dart';
-import 'package:example/select_size.dart';
-import 'package:example/select_type_label.dart';
+import 'package:example/connected_device.dart';
+import 'package:example/context_extensions.dart';
+import 'package:example/devices_tab.dart';
+import 'package:example/functions_tab.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:printer_label/src.dart';
-import 'preview_image_printer.dart';
+import 'package:printer_label/printer_label.dart';
+
+import 'widgets/print_preview_widgets.dart';
 
 void main() {
   runApp(const MyApp());
-}
-
-enum _PrintAction { lan, all, esc }
-
-// ── Model thiết bị đã kết nối ────────────────────────────────────────────────
-class _ConnectedDevice {
-  final String id; // USB path | IP | MAC
-  final String label; // tên hiển thị
-  final String type; // 'USB' | 'LAN' | 'BT'
-  const _ConnectedDevice({
-    required this.id,
-    required this.label,
-    required this.type,
-  });
 }
 
 class MyApp extends StatelessWidget {
@@ -35,857 +21,538 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Flutter example printer',
+      title: 'Flutter Printer Label Example',
       theme: ThemeData(
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF4F46E5),
+          primary: const Color(0xFF4F46E5),
+          secondary: const Color(0xFF0D9488),
+          surface: Colors.white,
+        ),
+        cardTheme: CardThemeData(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: Colors.grey.shade200, width: 1),
+          ),
+          color: Colors.white,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          foregroundColor: Color(0xFF0F172A),
+          elevation: 0,
+        ),
       ),
-      home: MyHomePage(),
+      home: const MyHomePage(),
     );
   }
 }
 
-// ignore: must_be_immutable
 class MyHomePage extends StatefulWidget {
-  MyHomePage({super.key});
-  bool isConnected = false;
+  const MyHomePage({super.key});
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  final String image1 = "images/image1.png";
-  final String image2 = "images/image2.png";
-  final String imageBarCode = "images/barcode.png";
+const String defaultPrinterIp = '192.168.1.199';
 
-  List<Uint8List> productImages = [];
+class _MyHomePageState extends State<MyHomePage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  bool isConnected = false;
+  bool isConnecting = false;
+  bool isCheckingStatus = false;
+  bool isCheckingConnection = false;
+  bool isPrinting = false;
 
   final TextEditingController textEditingController =
-      TextEditingController(text: "192.168.1.56");
-  FocusNode focusNode = FocusNode();
+      TextEditingController(text: defaultPrinterIp);
+  final FocusNode focusNode = FocusNode();
 
-  final List<ProductBarcodeModel> products = [];
+  final List<ProductBarcodeModel> products = [
+    ProductBarcodeModel(
+      barcode: '83868888',
+      name: 'iPhone 17 Pro Max',
+      price: 28990000,
+      quantity: 1,
+    ),
+    ProductBarcodeModel(
+      barcode: '72341234',
+      name: 'AirPods Pro 2',
+      price: 6990000,
+      quantity: 1,
+    ),
+    ProductBarcodeModel(
+      barcode: '91250099',
+      name: 'Apple Watch S10',
+      price: 11990000,
+      quantity: 3,
+    ),
+  ];
   LabelPerRow _selectedRow = LabelPerRow.single;
 
-  // ── Danh sách thiết bị đã kết nối ────────────────────────────────────────
-  final List<_ConnectedDevice> _connectedDevices = [];
+  final List<ConnectedDevice> _connectedDevices = [];
   StreamSubscription<UsbConnectionEvent>? _usbSub;
-  bool? _bluetoothEnabled;
+  bool _hasBuiltInPrinter = false;
+  bool _isBuiltInPrinterConnected = false;
+
+  // Trạng thái quét Bluetooth inline
+  List<BluetoothDeviceModel> _btDevices = [];
+  bool _isScanningBt = false;
+  bool _hasScannedBt = false;
+  StreamSubscription<BluetoothDeviceModel>? _btScanSub;
+  final Set<String> _connectingBtMacs = {};
 
   @override
   void initState() {
     super.initState();
-    checkConnectPrint(deviceId: textEditingController.text);
-    _checkBluetoothEnabled();
-    addProducts();
+    _tabController = TabController(length: 2, vsync: this);
+    _checkConnectionState(ipAddress: textEditingController.text);
     _listenUsb();
+    _checkBuiltInPrinter();
   }
 
-  Future<void> _checkBluetoothEnabled() async {
-    final enabled = await PrinterLabel.bluetoothEnabled();
-    if (!mounted) return;
-    setState(() => _bluetoothEnabled = enabled);
-  }
-
-  @override
-  void dispose() {
-    _usbSub?.cancel();
-    super.dispose();
-  }
-
-  // ── USB auto-detect ───────────────────────────────────────────────────────
-  void _listenUsb() {
-    _usbSub = PrinterLabel.usbDeviceStream.listen((event) {
-      if (!mounted) return;
+  Future<void> _checkBuiltInPrinter() async {
+    final paperSize = await PrinterLabel.getBuiltInPrinterPaperSize();
+    if (mounted) {
       setState(() {
-        if (event.connected) {
-          if (_connectedDevices.any((d) => d.id == event.deviceId)) return;
-          _connectedDevices.add(_ConnectedDevice(
-            id: event.deviceId, // already prefixed "USB:/dev/bus/..."
-            label: 'USB: ${event.deviceId.split('/').last}',
-            type: 'USB',
-          ));
-        } else {
-          _connectedDevices.removeWhere((d) => d.id == event.deviceId);
-        }
+        _hasBuiltInPrinter = paperSize > 0;
+        _isBuiltInPrinterConnected = paperSize > 0;
       });
-    });
-  }
-
-  // ── Kết nối Bluetooth ─────────────────────────────────────────────────────
-  Future<void> _showAddBluetooth() async {
-    if (Platform.isAndroid) {
-      final statuses = await [
-        Permission.bluetoothConnect,
-        Permission.bluetoothScan,
-        Permission.locationWhenInUse,
-      ].request();
-      if (!statuses.values.every((s) => s.isGranted)) {
-        if (!mounted) return;
-        _showSnack('Cần cấp quyền Bluetooth', Colors.orange);
-        return;
-      }
     }
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => _BtPicker(
-        onConnected: (device) {
-          if (!mounted) return;
-          setState(() {
-            final id = DeviceId.bluetooth(device.mac);
-            _connectedDevices.removeWhere((d) => d.id == id);
-            _connectedDevices.add(_ConnectedDevice(
-              id: id,
-              label: '${device.name} (BT)',
-              type: 'BT',
-            ));
-          });
-          _showSnack(
-            'Kết nối Bluetooth thành công: ${device.name}',
-            Colors.green,
-          );
-        },
-      ),
-    );
-  }
-
-  // ── Capture label images helper ──────────────────────────────────────────
-  Future<LabelModel?> _buildLabelModel() async {
-    final images = await LabelFromWidget.captureImages<ProductBarcodeModel>(
-      products,
-      context,
-      labelPerRow: _selectedRow,
-      itemBuilder: _buildBarcodeLabel,
-      quantity: (p) => p.quantity,
-    );
-    if (images.isEmpty) return null;
-    return LabelModel(images: images, labelPerRow: _selectedRow);
-  }
-
-  // ── In Label tất cả thiết bị LAN ─────────────────────────────────────────
-  Future<void> _printAllLan() async {
-    if (!_connectedDevices.any((d) => d.type == 'LAN')) {
-      _showSnack('Không có máy LAN nào đang kết nối', Colors.orange);
-      return;
-    }
-    final model = await _buildLabelModel();
-    if (model == null) return;
-    await PrinterLabel.printAll(
-      labelModel: model,
-      connectionType: PrinterConnectionType.LAN,
-    );
-  }
-
-  // ── In Label tất cả thiết bị đã kết nối ──────────────────────────────────
-  Future<void> _printAll() async {
-    if (_connectedDevices.isEmpty) {
-      _showSnack('Chưa có thiết bị nào kết nối', Colors.orange);
-      return;
-    }
-    final model = await _buildLabelModel();
-    if (model == null) return;
-    await PrinterLabel.printAll(labelModel: model);
-  }
-
-  // ── In ESC tất cả thiết bị đã kết nối ────────────────────────────────────
-  Future<void> _printAllEsc() async {
-    if (_connectedDevices.isEmpty) {
-      _showSnack('Chưa có thiết bị nào kết nối', Colors.orange);
-      return;
-    }
-    final image = await ESCPrintService.instance.loadImageFromAssets(
-      "packages/printer_label/images/ticket.png",
-    );
-    await PrinterLabel.printAll(
-      escModel: PrintThermalModel(image: image, size: TicketSize.mm80),
-    );
-  }
-
-  void _showSnack(String msg, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: color,
-      duration: const Duration(seconds: 2),
-    ));
-  }
-
-  void addProducts() {
-    products.clear();
-    products.addAll([
-      ProductBarcodeModel(
-        barcode: "83868888",
-        name: "iPhone 17 Pro Max",
-        price: 28990000,
-        quantity: 1,
-      ),
-      // ProductBarcodeModel(
-      //   barcode: "56782123931231",
-      //   name: "iPad Pro",
-      //   price: 34980000,
-      //   quantity: 5,
-      // ),
-      // ProductBarcodeModel(
-      //   barcode: "56789345233",
-      //   name: "Apple Pencil",
-      //   price: 2350000,
-      //   quantity: 2,
-      // ),
-      // ProductBarcodeModel(
-      //   barcode: "1234543234",
-      //   name: "MacBook Pro",
-      //   price: 6589000,
-      //   quantity: 3,
-      // )
-    ]);
-  }
-
-  Widget _buildBarcodeLabel(
-    ProductBarcodeModel product,
-    Dimensions dimensions,
-  ) {
-    return BarcodeView<ProductBarcodeModel>(
-      data: product,
-      dimensions: dimensions,
-      nameBuilder: (p) => p.name,
-      barcodeBuilder: (p) => p.barcode,
-      priceBuilder: (p) => p.price,
-    );
-  }
-
-  Future<void> generateLabelImages({
-    required LabelPerRow labelPerRow,
-  }) async {
-    final images = await LabelFromWidget.captureImages<ProductBarcodeModel>(
-      products,
-      context,
-      labelPerRow: labelPerRow,
-      itemBuilder: _buildBarcodeLabel,
-      quantity: (p) => p.quantity,
-    );
-
-    productImages
-      ..clear()
-      ..addAll(images);
-  }
-
-  Future<void> checkConnectPrint({required String deviceId}) async {
-    final isConnected =
-        await PrinterLabel.checkConnect(deviceId: DeviceId.lan(deviceId));
-    setState(() {
-      widget.isConnected = isConnected;
-    });
-  }
-
-  Future<void> printLabels() async {
-    await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
-      items: products,
-      context: context,
-      deviceId: DeviceId.lan(textEditingController.text),
-      labelPerRow: _selectedRow,
-      itemBuilder: _buildBarcodeLabel,
-      quantity: (p) => p.quantity,
-    );
-  }
-
-  Future<void> connect() async {
-    final input = textEditingController.text.replaceAll(',', '.');
-    // kiem tra ket noi
-    final bool isConnected = await PrinterLabel.checkConnect(
-      deviceId: DeviceId.lan(input),
-    );
-    if (isConnected) {
-      _showSnack('Thiết bị $input đã kết nối', Colors.yellow[800]!);
-      return;
-    }
-    final bool ok = await PrinterLabel.connectLan(ipAddress: input);
-    if (!mounted) return;
-    setState(() {
-      widget.isConnected = ok;
-      if (ok) {
-        final id = DeviceId.lan(input);
-        _connectedDevices.removeWhere((d) => d.id == id);
-        _connectedDevices.add(_ConnectedDevice(
-          id: id,
-          label: 'LAN: $input',
-          type: 'LAN',
-        ));
-      }
-    });
-    focusNode.unfocus();
-    _showSnack(
-      ok ? 'Kết nối LAN thành công: $input' : 'Kết nối LAN thất bại',
-      ok ? Colors.green : Colors.red,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text("Printer label"),
-      ),
-      body: SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          children: [
-            padding(),
-            _buildButtonConnect(),
-            padding(),
-            TextField(
-              controller: textEditingController,
-              focusNode: focusNode,
-              decoration: const InputDecoration(
-                hintText: 'Enter IP',
-                border: OutlineInputBorder(),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ), // nếu IP, nhập số và dấu .
-            ),
-            padding(),
-            ElevatedButton(
-              onPressed: () async => await connect(),
-              child: const Text(
-                "Connect Lan",
-              ),
-            ),
-            padding(),
-            ElevatedButton(
-              onPressed: () async {
-                final disconnect = await PrinterLabel.disconectPrinter();
-
-                setState(() {
-                  widget.isConnected = !disconnect;
-                });
-              },
-              child: const Text(
-                "Disconnect printer",
-              ),
-            ),
-            padding(),
-            const Text("Print single label"),
-            Card(
-              elevation: 2,
-              child: BarcodeView<ProductBarcodeModel>(
-                data: products.first,
-                nameBuilder: (p) => p.name,
-                barcodeBuilder: (p) => p.barcode,
-                priceBuilder: (p) => p.price,
-              ),
-            ),
-            padding(),
-            _buildPrintBarcode(
-                deviceId: DeviceId.lan(textEditingController.text)),
-            padding(),
-            _buildPrintMultilLabel(),
-            padding(),
-            _viewListImage(),
-            padding(),
-            _viewCupSticker(),
-            padding(),
-            ElevatedButton(
-              onPressed: () async {
-                await ESCPrintService.instance.printExample(
-                  deviceId: DeviceId.lan(textEditingController.text),
-                );
-              },
-              child: const Text("Print ESC"),
-            ),
-            padding(),
-            _printCupSticket(
-                deviceId: DeviceId.lan(textEditingController.text)),
-            padding(),
-            padding(),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const PrinterScreen(),
-                  ),
-                );
-              },
-              child: const Text(
-                "Print Bluetooth",
-              ),
-            ),
-            // ── Danh sách thiết bị đã kết nối ──────────────────────────────
-            padding(),
-            const Divider(),
-            _buildConnectedDevicesSection(),
-            padding(),
-            padding(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Section: danh sách thiết bị đã kết nối ───────────────────────────────
-  Widget _buildConnectedDevicesSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text(
-              'Thiết bị đã kết nối',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const Spacer(),
-            IconButton(
-              onPressed: _showAddBluetooth,
-              icon: const Icon(Icons.bluetooth_rounded),
-              tooltip: 'Thêm Bluetooth',
-            ),
-            PopupMenuButton<_PrintAction>(
-              icon: const Icon(Icons.print_rounded),
-              tooltip: 'In',
-              enabled: _connectedDevices.isNotEmpty,
-              onSelected: (action) async {
-                switch (action) {
-                  case _PrintAction.lan:
-                    await _printAllLan();
-                  case _PrintAction.all:
-                    await _printAll();
-                  case _PrintAction.esc:
-                    await _printAllEsc();
-                }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: _PrintAction.lan,
-                  enabled: _connectedDevices.any((d) => d.type == 'LAN'),
-                  child: const ListTile(
-                    dense: true,
-                    leading: Icon(Icons.lan_rounded),
-                    title: Text('In tất cả LAN'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: _PrintAction.all,
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.print_rounded),
-                    title: Text('In tất cả thiết bị'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: _PrintAction.esc,
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.receipt_long_rounded),
-                    title: Text('In ESC tất cả'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        if (_connectedDevices.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              'Chưa có thiết bị nào kết nối',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-          )
-        else
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _connectedDevices.length,
-            itemBuilder: (_, i) => _buildDeviceCard(_connectedDevices[i]),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildDeviceCard(_ConnectedDevice device) {
-    final (IconData icon, Color color) = switch (device.type) {
-      'USB' => (Icons.usb_rounded, Colors.teal),
-      'LAN' => (Icons.lan_rounded, Colors.blue),
-      'BT' => (Icons.bluetooth_rounded, Colors.indigo),
-      _ => (Icons.device_unknown, Colors.grey),
-    };
-    return Card(
-      elevation: 1,
-      child: ListTile(
-        dense: true,
-        leading: CircleAvatar(
-          radius: 18,
-          backgroundColor: color.withValues(alpha: 0.12),
-          child: Icon(icon, color: color, size: 18),
-        ),
-        title: Text(
-          device.label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-        ),
-        subtitle: Text(
-          device.id,
-          style: const TextStyle(fontSize: 10),
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.print_rounded, size: 20),
-              tooltip: 'In',
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'label', child: Text('In Label')),
-                PopupMenuItem(value: 'barcode', child: Text('In Barcode')),
-                PopupMenuItem(value: 'esc', child: Text('In ESC')),
-              ],
-              onSelected: (action) async {
-                switch (action) {
-                  case 'label':
-                    await LabelPrintService.instance
-                        .printLabels<ProductBarcodeModel>(
-                      items: products,
-                      context: context,
-                      deviceId: device.id,
-                      labelPerRow: _selectedRow,
-                      itemBuilder: _buildBarcodeLabel,
-                      quantity: (p) => p.quantity,
-                    );
-                  case 'barcode':
-                    await PrinterLabel.printBarcode(
-                      deviceId: device.id,
-                      printBarcodeModel: BarcodeModel(
-                        barcodeY: 60,
-                        width: 300,
-                        barcodeContent: '123456',
-                        quantity: 1,
-                        textData: [
-                          TextData(y: 20, data: 'Hello printer label'),
-                          TextData(y: 170, data: '30.000'),
-                        ],
-                      ),
-                    );
-                  case 'esc':
-                    await ESCPrintService.instance
-                        .printExample(deviceId: device.id);
-                }
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.link_off, size: 18),
-              color: Colors.red,
-              tooltip: 'Ngắt kết nối',
-              onPressed: () async {
-                await PrinterLabel.disconectPrinter(deviceId: device.id);
-                setState(() => _connectedDevices.remove(device));
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget padding() {
-    return const Padding(padding: EdgeInsets.all(10));
-  }
-
-  Widget _buildPrintMultilLabel() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
-      children: [
-        LabelPerRowSelector(
-          initialValue: LabelPerRow.single,
-          onChanged: (label) {
-            setState(() {
-              _selectedRow = label;
-            });
-          },
-        ),
-        ElevatedButton(
-          onPressed: printLabels,
-          child: const Text(
-            "Print multi label",
-          ),
-        )
-      ],
-    );
-  }
-
-  Widget _printCupSticket({required String deviceId}) {
-    return CupStickerSizeSelector(
-      onPrint: (select) => CupStickerPrintExample.printOrderCupSticker(
-        select,
-        context: context,
-        deviceId: DeviceId.lan(textEditingController.text),
-      ),
-    );
-  }
-
-  Widget _buildButtonConnect() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const Text("Connect Status"),
-        Container(
-          padding: const EdgeInsets.all(8),
-          color: widget.isConnected ? Colors.green : Colors.red,
-          child: Text(
-            widget.isConnected ? "Connect success" : "Connect false",
-            style: const TextStyle(color: Colors.white),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _viewListImage() {
-    return ElevatedButton(
-      onPressed: () async {
-        addProducts();
-        await generateLabelImages(
-          labelPerRow: _selectedRow,
-        );
-        Navigator.push(
-          // ignore: use_build_context_synchronously
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                ImageDisplayScreen(imageBytesList: productImages),
-          ),
-        );
-      },
-      child: Text(
-        "View list( ${products.map(
-              (e) => e.quantity.toDouble(),
-            ).reduce(
-              (value, element) => value + element,
-            )})",
-      ),
-    );
-  }
-
-  Widget _viewCupSticker() {
-    return ElevatedButton(
-      onPressed: () async {
-        final image = await LabelFromWidget.captureFromWidget(
-          PreviewCupSticker(
-            data: PreviewLabelModel(
-              code: "1213",
-              productName: "Trà sữa",
-              price: "27.000 đ",
-              companyName: "Printer Label",
-              note: "Test print",
-              labelIndex: 1,
-              billDate: "01/01/2026",
-              totalLabels: 1,
-              toppings: ["Đá", "Đường"],
-            ),
-          ),
-          context: context,
-        );
-
-        Navigator.push(
-          // ignore: use_build_context_synchronously
-          context,
-          MaterialPageRoute(
-            builder: (context) => ImageDisplayScreen(imageBytesList: [image]),
-          ),
-        );
-      },
-      child: const Text(
-        "View cup sticker",
-      ),
-    );
-  }
-
-  Widget _buildPrintBarcode({required String deviceId}) {
-    return ElevatedButton(
-      onPressed: () async {
-        final List<TextData> textData = [
-          TextData(
-            y: 20,
-            data: "Hello printer label",
-          ),
-          TextData(
-            y: 170,
-            data: "30.000",
-          ),
-          TextData(
-            y: 200,
-            data: "12345678",
-          ),
-        ];
-        // Create an instance of PrintBarcodeModel
-        final BarcodeModel printBarcodeModel = BarcodeModel(
-          barcodeY: 60,
-          width: 300,
-          barcodeContent: "123456",
-          textData: textData,
-          quantity: 1,
-        );
-        await PrinterLabel.printBarcode(
-            deviceId: deviceId, printBarcodeModel: printBarcodeModel);
-      },
-      child: const Text(
-        "Print barcode",
-      ),
-    );
-  }
-}
-
-// ── BT Picker bottom sheet ────────────────────────────────────────────────────
-class _BtPicker extends StatefulWidget {
-  final void Function(BluetoothDeviceModel device) onConnected;
-  const _BtPicker({required this.onConnected});
-
-  @override
-  State<_BtPicker> createState() => _BtPickerState();
-}
-
-class _BtPickerState extends State<_BtPicker> {
-  final List<BluetoothDeviceModel> _devices = [];
-  final Set<String> _connecting = {};
-  StreamSubscription<BluetoothDeviceModel>? _scanSub;
-  bool _scanning = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPaired();
-    _startScan();
   }
 
   @override
   void dispose() {
-    _scanSub?.cancel();
+    _tabController.dispose();
+    textEditingController.dispose();
+    focusNode.dispose();
+    _usbSub?.cancel();
+    _btScanSub?.cancel();
     if (Platform.isIOS) {
       PrinterLabel.stopBluetoothScan();
     }
     super.dispose();
   }
 
-  Future<void> _loadPaired() async {
-    try {
-      final paired = await PrinterLabel.getBluetoothDevices();
-      if (!mounted) return;
-      setState(() {
-        for (final d in paired) {
-          if (!_devices.any((e) => e.mac == d.mac)) _devices.add(d);
-        }
-      });
-    } catch (_) {}
+  void _addConnectedDevice(ConnectedDevice device) {
+    setState(() {
+      _connectedDevices.removeWhere((d) => d.id == device.id);
+      _connectedDevices.add(device);
+    });
   }
 
-  void _startScan() async {
-    setState(() => _scanning = true);
-    _scanSub = PrinterLabel.bluetoothScanStream.listen(
+  void _removeConnectedDevice(String deviceId) {
+    setState(() {
+      _connectedDevices.removeWhere((d) => d.id == deviceId);
+    });
+  }
+
+  void _listenUsb() {
+    _usbSub = PrinterLabel.usbDeviceStream.listen((event) {
+      if (!mounted) return;
+      if (event.connected) {
+        _addConnectedDevice(ConnectedDevice(
+          id: event.deviceId,
+          label: 'USB: ${event.deviceId.split('/').last}',
+          type: 'USB',
+        ));
+      } else {
+        _removeConnectedDevice(event.deviceId);
+      }
+    });
+  }
+
+  Future<void> _startBtScan() async {
+    if (!mounted) return;
+    setState(() {
+      _isScanningBt = true;
+      _hasScannedBt = true;
+      _btDevices.clear();
+    });
+
+    // Tải các thiết bị đã ghép đôi trước
+    try {
+      final paired = await PrinterLabel.getBluetoothDevices();
+      if (mounted) {
+        setState(() {
+          for (final d in paired) {
+            if (!_btDevices.any((e) => e.mac == d.mac)) {
+              _btDevices.add(d);
+            }
+          }
+        });
+      }
+    } catch (_) {}
+
+    _btScanSub?.cancel();
+    _btScanSub = PrinterLabel.bluetoothScanStream().listen(
       (d) {
         if (!mounted) return;
         setState(() {
-          if (!_devices.any((e) => e.mac == d.mac)) _devices.add(d);
+          if (!_btDevices.any((e) => e.mac == d.mac)) {
+            _btDevices.add(d);
+          }
         });
       },
-      onDone: () => mounted ? setState(() => _scanning = false) : null,
-      onError: (_) => mounted ? setState(() => _scanning = false) : null,
+      onDone: () {
+        if (mounted) setState(() => _isScanningBt = false);
+      },
+      onError: (_) {
+        if (mounted) setState(() => _isScanningBt = false);
+      },
     );
+
     if (Platform.isIOS) {
       await PrinterLabel.startBluetoothScan();
     }
   }
 
-  Future<void> _connect(BluetoothDeviceModel device) async {
-    setState(() => _connecting.add(device.mac));
+  void _stopBtScan() async {
+    _btScanSub?.cancel();
+    if (Platform.isIOS) {
+      await PrinterLabel.stopBluetoothScan();
+    }
+    if (mounted) {
+      setState(() => _isScanningBt = false);
+    }
+  }
+
+  Future<void> _connectBtDevice(BluetoothDeviceModel device) async {
+    if (!mounted) return;
+    final isAlreadyConnected = _connectedDevices.any(
+      (d) =>
+          d.type == 'BT' && (d.id == device.mac || d.id == 'BT:${device.mac}'),
+    );
+    if (isAlreadyConnected) {
+      context.showSnackBar('Thiết bị này đã được kết nối');
+      return;
+    }
+
+    setState(() => _connectingBtMacs.add(device.mac));
+    _stopBtScan();
+
     try {
       final ok = await PrinterLabel.connectBluetooth(macAddress: device.mac);
       if (!mounted) return;
       if (ok) {
-        widget.onConnected(device);
-        Navigator.pop(context);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Không thể kết nối ${device.name}'),
-          backgroundColor: Colors.red,
+        final id = DeviceId.bluetooth(device.mac);
+        _addConnectedDevice(ConnectedDevice(
+          id: id,
+          label: device.name.isEmpty ? 'Bluetooth Printer' : device.name,
+          type: 'BT',
         ));
+        context.showSnackBar(
+          'Kết nối Bluetooth thành công: ${device.name.isEmpty ? "máy in" : device.name}',
+          backgroundColor: const Color(0xFF10B981),
+        );
+      } else {
+        context.showSnackBar(
+          'Không thể kết nối ${device.name.isEmpty ? 'máy in' : device.name}',
+          backgroundColor: const Color(0xFFF43F5E),
+        );
+        _startBtScan();
+      }
+    } catch (e) {
+      if (mounted) {
+        context.showSnackBar('Lỗi kết nối: $e',
+            backgroundColor: const Color(0xFFF43F5E));
+        _startBtScan();
       }
     } finally {
-      if (mounted) setState(() => _connecting.remove(device.mac));
+      if (mounted) setState(() => _connectingBtMacs.remove(device.mac));
+    }
+  }
+
+  Widget _buildBarcodeView(ProductBarcodeModel product) {
+    return BarcodeView<ProductBarcodeModel>(
+      data: product,
+      stampWidth: _selectedRow.stampWidth,
+      stampHeight: _selectedRow.stampHeight,
+      nameBuilder: (p) => p.name,
+      barcodeBuilder: (p) => p.barcode,
+      priceBuilder: (p) => p.price,
+    );
+  }
+
+  Future<void> _checkPrinterStatus(ConnectedDevice device) async {
+    setState(() => isCheckingStatus = true);
+    context.showSnackBar('Đang kiểm tra máy in...',
+        backgroundColor: Colors.blueGrey);
+    try {
+      // 1. Thử check theo giao thức ESC/POS trước
+      var status = await PrinterLabel.checkPrinterStatus(
+        deviceId: device.id,
+        type: "ESC",
+      );
+
+      // 2. Nếu trả về UNKNOWN (do timeout / không phải máy ESC), thử sang TSPL
+      if (status == PrinterStatus.unknown) {
+        status = await PrinterLabel.checkPrinterStatus(
+          deviceId: device.id,
+          type: "TSPL",
+        );
+      }
+
+      if (!mounted) return;
+      final (msg, color) = switch (status) {
+        PrinterStatus.normal => (
+            'Máy in bình thường ✅',
+            const Color(0xFF10B981)
+          ),
+        PrinterStatus.outOfPaper => ('Hết giấy 📄', const Color(0xFFF59E0B)),
+        PrinterStatus.paperJam => ('Kẹt giấy ⚠️', Colors.orange),
+        PrinterStatus.headOpened => ('Đầu in đang mở 🔓', Colors.orange),
+        PrinterStatus.outOfRibbon => ('Hết ruy băng mực 🎞️', Colors.orange),
+        PrinterStatus.pause => ('Máy in đang tạm dừng ⏸️', Colors.blueGrey),
+        PrinterStatus.printing => ('Đang in... 🖨️', const Color(0xFF4F46E5)),
+        PrinterStatus.offline => (
+            'Máy in không phản hồi ❌',
+            const Color(0xFFE11D48)
+          ),
+        PrinterStatus.unknown => (
+            'Không xác định được trạng thái ❓',
+            Colors.grey
+          ),
+      };
+      context.showSnackBar(msg, backgroundColor: color);
+    } finally {
+      if (mounted) {
+        setState(() => isCheckingStatus = false);
+      }
+    }
+  }
+
+  Future<void> _checkConnectionState({required String ipAddress}) async {
+    setState(() => isCheckingConnection = true);
+    try {
+      final connected =
+          await PrinterLabel.checkConnect(deviceId: DeviceId.lan(ipAddress));
+      setState(() {
+        isConnected = connected;
+      });
+
+      if (connected) {
+        // Tự động kiểm tra loại máy in (thử ESC trước, fallback TSPL)
+        var status = await PrinterLabel.checkPrinterStatus(
+          deviceId: DeviceId.lan(ipAddress),
+          type: "ESC",
+        );
+        if (status == PrinterStatus.unknown) {
+          status = await PrinterLabel.checkPrinterStatus(
+            deviceId: DeviceId.lan(ipAddress),
+            type: "TSPL",
+          );
+        }
+        if (!mounted) return;
+        context.showSnackBar(
+          'Trạng thái hoạt động máy in: ${status.name.toUpperCase()}',
+          backgroundColor: status == PrinterStatus.normal
+              ? const Color(0xFF10B981)
+              : const Color(0xFFF59E0B),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => isCheckingConnection = false);
+      }
+    }
+  }
+
+  Future<void> _printProductLabels(List<ProductBarcodeModel> items) async {
+    if (_connectedDevices.isEmpty) {
+      final fallbackId = DeviceId.lan(textEditingController.text);
+      await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
+        items: items,
+        context: context,
+        deviceId: fallbackId,
+        labelPerRow: _selectedRow,
+        itemBuilder: _buildBarcodeView,
+        quantity: (p) => p.quantity,
+      );
+      return;
+    }
+
+    for (final device in _connectedDevices) {
+      try {
+        await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
+          items: items,
+          context: context,
+          deviceId: device.id,
+          labelPerRow: _selectedRow,
+          itemBuilder: _buildBarcodeView,
+          quantity: (p) => p.quantity,
+        );
+      } catch (e) {
+        debugPrint('Lỗi in trên thiết bị ${device.label}: $e');
+        if (mounted) {
+          showTopNotification(context, 'Lỗi in trên ${device.label}: $e');
+        }
+      }
+    }
+  }
+
+  Future<void> _connectLanPrinter() async {
+    final input = textEditingController.text.replaceAll(',', '.').trim();
+    if (input.isEmpty) return;
+
+    setState(() => isConnecting = true);
+    try {
+      final bool alreadyConnected = await PrinterLabel.checkConnect(
+        deviceId: DeviceId.lan(input),
+      );
+      if (!mounted) return;
+      if (alreadyConnected) {
+        context.showSnackBar('Thiết bị LAN $input đã kết nối từ trước',
+            backgroundColor: Colors.amber[800]!);
+        return;
+      }
+
+      final bool ok = await PrinterLabel.connectLan(ipAddress: input);
+      if (!mounted) return;
+      setState(() {
+        isConnected = ok;
+        if (ok) {
+          _addConnectedDevice(ConnectedDevice(
+            id: DeviceId.lan(input),
+            label: 'LAN: $input',
+            type: 'LAN',
+          ));
+        }
+      });
+      focusNode.unfocus();
+      context.showSnackBar(
+        ok ? 'Kết nối LAN thành công: $input' : 'Kết nối LAN thất bại',
+        backgroundColor: ok ? const Color(0xFF10B981) : const Color(0xFFF43F5E),
+      );
+    } finally {
+      if (mounted) setState(() => isConnecting = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.5,
-      minChildSize: 0.3,
-      maxChildSize: 0.85,
-      builder: (_, controller) => Column(
-        children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: const Row(
+          children: [
+            Icon(Icons.print_outlined, color: Color(0xFF4F46E5)),
+            SizedBox(width: 8),
+            Text(
+              "Printer Dashboard",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                const Text(
-                  'Chọn thiết bị Bluetooth',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const Spacer(),
-                if (_scanning)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-              ],
+          ],
+        ),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: const Color(0xFF4F46E5),
+          unselectedLabelColor: const Color(0xFF64748B),
+          indicatorColor: const Color(0xFF4F46E5),
+          indicatorWeight: 3,
+          tabs: const [
+            Tab(icon: Icon(Icons.devices), text: "Thiết bị"),
+            Tab(icon: Icon(Icons.print), text: "Chức năng"),
+          ],
+        ),
+      ),
+      body: SafeArea(
+        child: TabBarView(
+          controller: _tabController,
+          children: [
+             DevicesTab(
+              isConnected: isConnected,
+              isConnecting: isConnecting,
+              isCheckingStatus: isCheckingStatus,
+              isCheckingConnection: isCheckingConnection,
+              isPrinting: isPrinting,
+              ipController: textEditingController,
+              ipFocusNode: focusNode,
+              connectedDevices: _connectedDevices,
+              hasBuiltInPrinter: _hasBuiltInPrinter,
+              isBuiltInPrinterConnected: _isBuiltInPrinterConnected,
+              onConnectBuiltIn: () async {
+                setState(() => isConnecting = true);
+                try {
+                  final ok = await PrinterLabel.autoConnectBuiltIn();
+                  if (mounted) {
+                    setState(() {
+                      _isBuiltInPrinterConnected = ok;
+                    });
+                    if (ok) {
+                      context.showSnackBar('Kết nối máy in tích hợp thành công', backgroundColor: const Color(0xFF10B981));
+                    } else {
+                      context.showSnackBar('Kết nối máy in tích hợp thất bại');
+                    }
+                  }
+                } finally {
+                  if (mounted) setState(() => isConnecting = false);
+                }
+              },
+              onDisconnectBuiltIn: () async {
+                final ok = await PrinterLabel.disconnectBuiltIn();
+                if (mounted) {
+                  setState(() {
+                    _isBuiltInPrinterConnected = !ok;
+                  });
+                  context.showSnackBar('Đã ngắt kết nối máy in tích hợp', backgroundColor: Colors.blueGrey);
+                }
+              },
+              onCheckConnect: () =>
+                  _checkConnectionState(ipAddress: textEditingController.text),
+              onConnect: _connectLanPrinter,
+              onDisconnectMain: () async {
+                final disconnect = await PrinterLabel.disconnectPrinter();
+                setState(() {
+                  isConnected = !disconnect;
+                  if (disconnect) {
+                    _connectedDevices.clear();
+                    _isBuiltInPrinterConnected = false;
+                  }
+                });
+                if (!context.mounted) return;
+                context.showSnackBar('Đã tắt kết nối chính',
+                    backgroundColor: Colors.blueGrey);
+              },
+              onDisconnectDevice: (device) async {
+                await PrinterLabel.disconnectPrinter(deviceId: device.id);
+                _removeConnectedDevice(device.id);
+              },
+              onCheckPrinterStatus: _checkPrinterStatus,
+              btDevices: _btDevices,
+              isScanningBt: _isScanningBt,
+              hasScannedBt: _hasScannedBt,
+              connectingBtMacs: _connectingBtMacs,
+              onConnectBtDevice: _connectBtDevice,
+              onRefreshBtScan: () {
+                if (_isScanningBt) {
+                  _stopBtScan();
+                } else {
+                  _startBtScan();
+                }
+              },
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: _devices.isEmpty
-                ? const Center(child: Text('Không tìm thấy thiết bị'))
-                : ListView.builder(
-                    controller: controller,
-                    itemCount: _devices.length,
-                    itemBuilder: (_, i) {
-                      final d = _devices[i];
-                      final isConnecting = _connecting.contains(d.mac);
-                      return ListTile(
-                        leading: const Icon(Icons.bluetooth_rounded,
-                            color: Colors.indigo),
-                        title: Text(d.name),
-                        subtitle:
-                            Text(d.mac, style: const TextStyle(fontSize: 11)),
-                        trailing: isConnecting
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.chevron_right),
-                        onTap: isConnecting ? null : () => _connect(d),
-                      );
-                    },
-                  ),
-          ),
-        ],
+            FunctionsTab(
+              products: products,
+              selectedRow: _selectedRow,
+              onLabelPerRowChanged: (label) {
+                setState(() {
+                  _selectedRow = label;
+                });
+              },
+              onPrintLabels: _printProductLabels,
+              ipAddress: textEditingController.text,
+              connectedDevices: _connectedDevices,
+              isBuiltInPrinterConnected: _isBuiltInPrinterConnected,
+            ),
+          ],
+        ),
       ),
     );
   }

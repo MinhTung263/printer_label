@@ -16,6 +16,9 @@ private final class EmptyStreamHandler: NSObject, FlutterStreamHandler {
 // onCancel: nil sink nhưng KHÔNG dừng scan — BLEManager tự quản lý lifecycle
 private final class BLEScanStreamHandler: NSObject, FlutterStreamHandler {
     func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        // Đọc tham số filterPrinterOnly từ Flutter (truyền qua receiveBroadcastStream arguments)
+        let args = arguments as? [String: Any]
+        BLEManager.shared.filterPrinterOnly = args?["filter_printer_only"] as? Bool ?? true
         BLEManager.shared.scanEventSink = events
         BLEManager.shared.replayCachedDevices(to: events)
         return nil
@@ -86,8 +89,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         case "scan_bt":
             BLEManager.shared.startScan()
             // Trả false nếu BT không được cấp quyền để Flutter biết
-            let authorized = CBCentralManager.authorization != .denied
-                && CBCentralManager.authorization != .restricted
+            let authorized: Bool
+            if #available(iOS 13.1, *) {
+                authorized = CBCentralManager.authorization != .denied
+                    && CBCentralManager.authorization != .restricted
+            } else {
+                authorized = true
+            }
             result(authorized)
 
         case "stop_scan_bt":
@@ -148,6 +156,48 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 return
             }
             printLabel(args: args, result: result)
+            
+        case "print_text":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printText(args: args, result: result)
+            
+        case "print_text_esc":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printTextESC(args: args, result: result)
+
+        case "print_barcode":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printBarcode(args: args, result: result)
+
+        case "print_qrcode":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printQRCode(args: args, result: result)
+
+        case "print_barcode_esc":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printBarcodeESC(args: args, result: result)
+
+        case "print_qrcode_esc":
+            guard let args = call.arguments as? [String: Any] else {
+                result(false)
+                return
+            }
+            printQRCodeESC(args: args, result: result)
 
         // MARK: Print Image (TSPL)
         case "print_image":
@@ -157,25 +207,10 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             }
             printImage(args: args, result: result)
 
-        // MARK: Print Barcode (TSPL)
-        case "print_barcode":
-            guard let args = call.arguments as? [String: Any] else {
-                result(false)
-                return
-            }
-            printBarcode(args: args, result: result)
-
         // MARK: Print ESC/POS
         case "print_image_esc":
             escPrinter.printImageESC(call: call, result: result)
 
-        // MARK: Print All
-        case "print_all":
-            guard let args = call.arguments as? [String: Any] else {
-                result(false)
-                return
-            }
-            printAll(args: args, result: result)
 
         // MARK: Check Connection
         case "checkConnect":
@@ -198,6 +233,24 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 result(hasBleSub || hasLanSub)
             }
 
+        case "check_printer_status":
+            let args = call.arguments as? [String: Any]
+            let deviceId = args?["device_id"] as? String
+            if let id = deviceId {
+                let isConnected: Bool
+                if let bleId = extractBLEIdentifier(from: id) {
+                    isConnected = BLEManager.shared.isConnected(identifier: bleId)
+                } else if let ip = extractLANIp(from: id) {
+                    isConnected = LANPrinterManager.shared.isConnected(ip: ip)
+                } else {
+                    isConnected = false
+                }
+                result(isConnected ? "normal" : "offline")
+            } else {
+                let anyConnected = BLEManager.shared.hasAnyConnection() || !LANPrinterManager.shared.getConnectedPrinters().isEmpty
+                result(anyConnected ? "normal" : "offline")
+            }
+
         case "bluetooth_enabled":
             result(BLEManager.shared.isBluetoothEnabled)
 
@@ -213,7 +266,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     private func connectLAN(ip: String, result: @escaping FlutterResult) {
         // Use LANPrinterManager to create/maintain a connection per IP
-        LANPrinterManager.shared.connect(ip: ip, port: 9100, autoReconnect: true) { success in
+        LANPrinterManager.shared.connect(ip: ip, port: 9100) { success in
             result(success)
         }
     }
@@ -300,6 +353,27 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         return String(deviceId.dropFirst(4))
     }
 
+    private func resizeImage(_ image: UIImage, targetWidth: CGFloat, targetHeight: CGFloat, drawX: CGFloat = 0.0) -> CGImage? {
+        UIGraphicsBeginImageContextWithOptions(
+            CGSize(width: targetWidth, height: targetHeight),
+            true, // opaque: true (gives us a solid white background to avoid transparent pixel issues)
+            1.0   // scale factor of 1.0 to keep exact dot dimensions
+        )
+        
+        // Fill background with white
+        if let context = UIGraphicsGetCurrentContext() {
+            context.setFillColor(UIColor.white.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+        }
+        
+        image.draw(in: CGRect(x: drawX, y: 0, width: targetWidth, height: targetHeight))
+        let resized = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        guard let binarizedImage = resized?.binarized(threshold: 200) else { return resized?.cgImage }
+        return binarizedImage.cgImage
+    }
+
     // MARK: - Print Methods
 
     func printLabel(args: [String: Any], result: @escaping FlutterResult) {
@@ -309,31 +383,258 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         }
 
         let sizeMap = args["size"] as? [String: Any]
-        let labelWidthMM = sizeMap?["width"] as? Int ?? 100
-        let labelHeightMM = sizeMap?["height"] as? Int ?? 20
-        let startX = args["x"] as? Int ?? 0
-        let startY = args["y"] as? Int ?? 0
+        let labelWidthMM = sizeMap?["width"] as? Int ?? 40
+        let labelHeightMM = sizeMap?["height"] as? Int ?? 25
+        
+        let gapMap = args["gap"] as? [String: Any]
+        let gapWidthMM = gapMap?["width"] as? Int ?? 2
+        let gapHeightMM = gapMap?["height"] as? Int ?? 0
+        
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
 
+        let targetWidth = labelWidthMM * 8
+        let targetHeight = labelHeightMM * 8
+
         for imageData in images {
-            let cmd = PTCommandTSPL()
-            cmd.encoding = String.Encoding.utf8.rawValue
-            cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
-            cmd.setGapWithDistance(1, offset: 0)
-            cmd.setCLS()
+            autoreleasepool {
+                let cmd = PTCommandTSPL()
+                cmd.encoding = String.Encoding.utf8.rawValue
+                cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
+                cmd.setGapWithDistance(gapWidthMM, offset: gapHeightMM)
+                cmd.setReferenceXPos(0, yPos: 0)
+                cmd.setPrintDirection(.normal, mirror: .normal)
+                cmd.setCLS()
 
-            guard let cgImage = imageFromFlutter(imageData)?.cgImage else { continue }
+                guard let uiImage = imageFromFlutter(imageData) else { return }
+                // Compensate for printer's 20-dot hardware offset on the left.
+                let drawX: CGFloat = -20.0
+                guard let cgImage = resizeImage(uiImage, targetWidth: CGFloat(targetWidth), targetHeight: CGFloat(targetHeight), drawX: drawX) else { return }
 
-            cmd.addBitmap(
-                withXPos: startX, yPos: startY,
-                mode: .OVERWRITE, image: cgImage,
-                bitmapMode: .binary, compress: .none
-            )
-            cmd.print(withSets: 1, copies: 1)
-            sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+                cmd.addBitmap(
+                    withXPos: 0, yPos: 0,
+                    mode: .OVERWRITE, image: cgImage,
+                    bitmapMode: .binary, compress: .none
+                )
+                cmd.print(withSets: 1, copies: 1)
+                sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+            }
         }
         result(true)
+    }
+
+    func printText(args: [String: Any], result: @escaping FlutterResult) {
+        let text = args["text"] as? String ?? ""
+        let startX = args["x"] as? Int ?? 0
+        let startY = args["y"] as? Int ?? 0
+        let fontVal = args["font"] as? Int ?? 0
+        let rotationVal = args["rotation"] as? Int ?? 0
+        let sizeX = args["sizeX"] as? Int ?? 1
+        let sizeY = args["sizeY"] as? Int ?? 1
+        
+        let labelWidthMM = args["width"] as? Int ?? 40
+        let labelHeightMM = args["height"] as? Int ?? 30
+        
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let cmd = PTCommandTSPL()
+        cmd.encoding = String.Encoding.utf8.rawValue
+        cmd.setPrintAreaSizeWithWidth(labelWidthMM, height: labelHeightMM)
+        cmd.setGapWithDistance(1, offset: 0)
+        cmd.setCLS()
+        
+        let fontStyle = PTTSCTextFontStyle(rawValue: UInt(fontVal)) ?? PTTSCTextFontStyle(rawValue: 0)!
+        let rotation = PTTSCStyleRotation(rawValue: UInt(rotationVal)) ?? PTTSCStyleRotation(rawValue: 0)!
+        
+        cmd.appendText(
+            withXpos: startX,
+            yPos: startY,
+            font: fontStyle,
+            rotation: rotation,
+            xMultiplication: sizeX,
+            yMultiplication: sizeY,
+            text: text
+        )
+        
+        cmd.print(withSets: 1, copies: 1)
+        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+        result(true)
+    }
+
+    func printTextESC(args: [String: Any], result: @escaping FlutterResult) {
+        let text = args["text"] as? String ?? ""
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let esc = PTCommandESC()
+        esc.initCommandQueue()
+        esc.appendZeroData()
+        esc.appendText(text)
+        esc.printAndLineFeed()
+        esc.setFullCutWithDistance(1)
+
+        let data = esc.getCommandData() as Data?
+        if let printData = data {
+            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
+            result(true)
+        } else {
+            result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC text command", details: nil))
+        }
+    }
+
+    func printBarcode(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let startX = args["x"] as? Int ?? 0
+        let startY = args["y"] as? Int ?? 0
+        let height = args["height"] as? Int ?? 100
+        let typeVal = args["type"] as? String ?? "128"
+        let width = args["width"] as? Int ?? 40
+        let heightMM = args["heightMM"] as? Int ?? 30
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let cmd = PTCommandTSPL()
+        cmd.encoding = String.Encoding.utf8.rawValue
+        cmd.setPrintAreaSizeWithWidth(width, height: heightMM)
+        cmd.setGapWithDistance(1, offset: 0)
+        cmd.setCLS()
+
+        let typeInt: Int = {
+            switch typeVal {
+            case "39": return 5
+            case "93": return 7
+            case "128": return 0
+            case "EAN13": return 8
+            case "EAN8": return 11
+            case "UPCA": return 16
+            case "UPCE": return 17
+            default: return 0
+            }
+        }()
+
+        let barcodeType = PTTSCBarcodeStyle(rawValue: UInt(typeInt)) ?? PTTSCBarcodeStyle(rawValue: 0)!
+        let readable = PTTSCBarcodeReadbleStyle(rawValue: 1) ?? PTTSCBarcodeReadbleStyle(rawValue: 1)!
+        let rotation = PTTSCStyleRotation(rawValue: 0) ?? PTTSCStyleRotation(rawValue: 0)!
+        let ratio = PTTSCBarcodeRatio(rawValue: 2) ?? PTTSCBarcodeRatio(rawValue: 2)!
+
+        cmd.printBarcode(
+            withXPos: startX,
+            yPos: startY,
+            type: barcodeType,
+            height: height,
+            readable: readable,
+            rotation: rotation,
+            ratio: ratio,
+            context: code
+        )
+
+        cmd.print(withSets: 1, copies: 1)
+        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+        result(true)
+    }
+
+    func printQRCode(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let startX = args["x"] as? Int ?? 0
+        let startY = args["y"] as? Int ?? 0
+        let size = args["size"] as? Int ?? 4
+        let width = args["width"] as? Int ?? 40
+        let heightMM = args["heightMM"] as? Int ?? 30
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let cmd = PTCommandTSPL()
+        cmd.encoding = String.Encoding.utf8.rawValue
+        cmd.setPrintAreaSizeWithWidth(width, height: heightMM)
+        cmd.setGapWithDistance(1, offset: 0)
+        cmd.setCLS()
+
+        let ecc = PTTSCQRcodeEcclevel(rawValue: 76) ?? PTTSCQRcodeEcclevel(rawValue: 76)!
+        let widthQR = PTTSCQRcodeWidth(rawValue: UInt(size)) ?? PTTSCQRcodeWidth(rawValue: 4)!
+        let mode = PTTSCQRCodeMode(rawValue: 77) ?? PTTSCQRCodeMode(rawValue: 77)!
+        let rotation = PTTSCStyleRotation(rawValue: 0) ?? PTTSCStyleRotation(rawValue: 0)!
+        let model = PTTSCQRCodeModel(rawValue: 1) ?? PTTSCQRCodeModel(rawValue: 1)!
+        let mask = PTTSCQRcodeMask(rawValue: 8) ?? PTTSCQRcodeMask(rawValue: 8)!
+
+        cmd.printQRcode(
+            withXPos: startX,
+            yPos: startY,
+            eccLevel: ecc,
+            cellWidth: widthQR,
+            mode: mode,
+            rotation: rotation,
+            model: model,
+            mask: mask,
+            context: code
+        )
+
+        cmd.print(withSets: 1, copies: 1)
+        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+        result(true)
+    }
+
+    func printBarcodeESC(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let typeVal = args["type"] as? String ?? "128"
+        let width = args["width"] as? Int ?? 2
+        let height = args["height"] as? Int ?? 162
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let esc = PTCommandESC()
+        esc.initCommandQueue()
+        esc.appendZeroData()
+
+        let typeInt: Int = {
+            switch typeVal {
+            case "UPCA": return 65
+            case "UPCE": return 66
+            case "EAN13": return 67
+            case "EAN8": return 68
+            case "CODE39": return 69
+            case "ITF": return 70
+            case "CODEBAR": return 71
+            case "CODE93": return 72
+            default: return 73
+            }
+        }()
+
+        let barcodeType = ESCBarcode(rawValue: typeInt) ?? ESCBarcode(rawValue: 73)!
+        esc.append(barcodeType, data: code, justification: 1, width: width, height: height, hri: 2)
+        esc.printAndLineFeed()
+        esc.setFullCutWithDistance(1)
+
+        let data = esc.getCommandData() as Data?
+        if let printData = data {
+            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
+            result(true)
+        } else {
+            result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC barcode command", details: nil))
+        }
+    }
+
+    func printQRCodeESC(args: [String: Any], result: @escaping FlutterResult) {
+        let code = args["code"] as? String ?? ""
+        let size = args["size"] as? Int ?? 8
+        let deviceId = args["device_id"] as? String
+        let connectionType = args["connection_type"] as? String
+
+        let esc = PTCommandESC()
+        esc.initCommandQueue()
+        esc.appendZeroData()
+
+        esc.appendQRCodeData(code, justification: 1, leftMargin: 0, eccLevel: 48, model: 49, size: size)
+        esc.printAndLineFeed()
+        esc.setFullCutWithDistance(1)
+
+        let data = esc.getCommandData() as Data?
+        if let printData = data {
+            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
+            result(true)
+        } else {
+            result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC QR code command", details: nil))
+        }
     }
 
     func printImage(args: [String: Any], result: @escaping FlutterResult) {
@@ -349,7 +650,12 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
 
-        guard let cgImage = imageFromFlutter(imageData)?.cgImage else {
+        guard let uiImage = imageFromFlutter(imageData) else {
+            result(false)
+            return
+        }
+        let binarizedImage = uiImage.binarized(threshold: 200) ?? uiImage
+        guard let cgImage = binarizedImage.cgImage else {
             result(false)
             return
         }
@@ -369,83 +675,6 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         result(true)
     }
 
-    func printBarcode(args: [String: Any], result: @escaping FlutterResult) {
-        guard let imageData = args["image"] as? FlutterStandardTypedData else {
-            result(false)
-            return
-        }
-
-        let x = args["x"] as? Int ?? 0
-        let y = args["y"] as? Int ?? 0
-        let width = args["width"] as? Int ?? 100
-        let height = args["height"] as? Int ?? 20
-        let deviceId = args["device_id"] as? String
-        let connectionType = args["connection_type"] as? String
-
-        guard let cgImage = imageFromFlutter(imageData)?.cgImage else {
-            result(false)
-            return
-        }
-
-        let cmd = PTCommandTSPL()
-        cmd.encoding = String.Encoding.utf8.rawValue
-        cmd.setPrintAreaSizeWithWidth(width, height: height)
-        cmd.setGapWithDistance(1, offset: 0)
-        cmd.setCLS()
-        cmd.addBitmap(
-            withXPos: x, yPos: y,
-            mode: .OVERWRITE, image: cgImage,
-            bitmapMode: .binary, compress: .none
-        )
-        cmd.print(withSets: 1, copies: 1)
-        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
-        result(true)
-    }
-
-    func printAll(args: [String: Any], result: @escaping FlutterResult) {
-        let connectionType = args["connection_type"] as? String
-
-        // Lấy command data — thử build ESC hoặc TSPL tuỳ args có sẵn
-        if let imageData = args["image"] as? FlutterStandardTypedData {
-            // ESC path
-            escPrinter.buildAndSendESC(imageData: imageData, args: args) { [weak self] data in
-                guard let self = self, let data = data else { result(false); return }
-                if connectionType == "Bluetooth" || connectionType == nil {
-                    self.sendToPrinter(data, deviceId: nil, connectionType: connectionType)
-                }
-                if connectionType == "LAN" || connectionType == nil {
-                    let ips = LANPrinterManager.shared.getConnectedPrinters()
-                    for ip in ips {
-                        LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
-                    }
-                }
-                result(true)
-            }
-        } else if let images = args["images"] as? [FlutterStandardTypedData], !images.isEmpty {
-            // TSPL path — send tới tất cả connections
-            let sizeMap = args["size"] as? [String: Any]
-            let w = sizeMap?["width"] as? Int ?? 100
-            let h = sizeMap?["height"] as? Int ?? 20
-            let x = args["x"] as? Int ?? 0
-            let y = args["y"] as? Int ?? 0
-
-            for imageData in images {
-                let cmd = PTCommandTSPL()
-                cmd.encoding = String.Encoding.utf8.rawValue
-                cmd.setPrintAreaSizeWithWidth(w, height: h)
-                cmd.setGapWithDistance(1, offset: 0)
-                cmd.setCLS()
-                guard let cg = imageFromFlutter(imageData)?.cgImage else { continue }
-                cmd.addBitmap(withXPos: x, yPos: y, mode: .OVERWRITE, image: cg, bitmapMode: .binary, compress: .none)
-                cmd.print(withSets: 1, copies: 1)
-                let data = cmd.cmdData as Data
-                sendToPrinter(data, deviceId: nil, connectionType: connectionType)
-            }
-            result(true)
-        } else {
-            result(false)
-        }
-    }
 
     // MARK: - Utilities
 
