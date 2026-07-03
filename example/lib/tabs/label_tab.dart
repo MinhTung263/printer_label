@@ -103,23 +103,31 @@ class _LabelTabState extends State<LabelTab> {
                 padding: EdgeInsets.fromLTRB(leftPadding, 10, rightPadding, 10),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(rowItems.length, (index) {
-                    final product = rowItems[index];
-                    final itemWidget = Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade300, width: 0.5),
-                      ),
-                      child: BarcodeView<ProductBarcodeModel>(
-                        data: product,
-                        stampWidth: widget.selectedRow.stampWidth,
-                        stampHeight: widget.selectedRow.stampHeight,
-                        nameBuilder: (p) => p.name,
-                        barcodeBuilder: (p) => p.barcode,
-                        priceBuilder: (p) => p.price,
-                      ),
-                    );
+                  children: List.generate(itemsPerRow, (index) {
+                    final Widget itemWidget;
+                    if (index < rowItems.length) {
+                      final product = rowItems[index];
+                      itemWidget = Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300, width: 0.5),
+                        ),
+                        child: BarcodeView<ProductBarcodeModel>(
+                          data: product,
+                          stampWidth: widget.selectedRow.stampWidth,
+                          stampHeight: widget.selectedRow.stampHeight,
+                          nameBuilder: (p) => p.name,
+                          barcodeBuilder: (p) => p.barcode,
+                          priceBuilder: (p) => p.price,
+                        ),
+                      );
+                    } else {
+                      itemWidget = SizedBox(
+                        width: widget.selectedRow.stampWidth * 6.57,
+                        height: widget.selectedRow.stampHeight * 6.57,
+                      );
+                    }
 
-                    if (index < rowItems.length - 1) {
+                    if (index < itemsPerRow - 1) {
                       return Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [

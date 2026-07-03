@@ -4,18 +4,28 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Flutter](https://img.shields.io/badge/Platform-Flutter-02569B.svg)](https://flutter.dev)
 
-A comprehensive, high-performance Flutter printing package. Easily connect to and print on various printer hardware (supporting **TSPL** for labels/barcodes and **ESC/POS** for thermal receipts) via **Bluetooth**, **LAN (Wi-Fi)**, and **USB** connections.
+A comprehensive, high-performance Flutter printing package. Easily connect to and print on various printer hardware (supporting **TSPL** for labels/barcodes and **ESC/POS** for thermal receipts) via **Bluetooth BLE**, **LAN (Wi-Fi)**, and **USB** connections.
 
 ---
 
 ## 🚀 Features
 
-- 📶 **Multi-Connection Support**: Print via Bluetooth, LAN (Wi-Fi), or USB.
+- 📶 **Multi-Connection Support**: Print via Bluetooth BLE, LAN (Wi-Fi), or USB.
 - 🏷️ **TSPL Printing (Labels)**: Build dynamic labels using Flutter widgets, render them automatically, and print them as single or multi-column layouts (`LabelPerRow`).
-- 🧾 **ESC/POS Printing (Receipts)**: Print receipts from rasterized images or custom templates.
+- 🧾 **ESC/POS Printing (Receipts)**: Print receipts from rasterized images or custom templates with automatic height scaling.
 - 🥤 **Cup Sticker Service**: Custom service tailored for milk tea/coffee cup label printing with automatic resizing and layout alignment.
 - 🔍 **Device Discovery**: Listen to real-time streams for Bluetooth BLE scanning and Android USB connection events.
 - ⚡ **Asynchronous Bridging**: High-performance lazy stream caching and robust platform serialization.
+
+---
+
+## ⚡ Specialized Built-in Optimizations
+
+Unlike standard printing packages, `printer_label` comes with pre-configured native performance tuning:
+
+1. **High-Contrast Binarization (iOS & Android)**: Uses a custom integer-based luminance algorithm (threshold `200`) to force light/transparent pixels to white and dark pixels to solid black. This ensures text is sharp, dark, and highly legible on iOS, matching Android's print quality perfectly.
+2. **BLE Write Flow Pacing**: Restricts chunk size to a safe limit of `180` bytes and introduces a continuous dynamic pacing delay (targeting `16 KB/s`) based on chunk sizes. This prevents printer buffer overflows (which cause corrupt characters/symbols) and motor starvation (which causes jerky, stuttering printing).
+3. **Built-in POS Printer Toggle**: Full connect and disconnect support for integrated POS hardware printers (Sunmi, iMin, etc.) via `PrinterLabel.disconnectBuiltIn()`, allowing developers to cleanly disable built-in printing when testing external hardware.
 
 ---
 
@@ -26,6 +36,27 @@ A comprehensive, high-performance Flutter printing package. Easily connect to an
 | **LAN (Wi-Fi)** | ✔ | ✔ | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
 | **Bluetooth** | ✔ | ✔ (BLE) | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
 | **USB** | ✔ | ❌ | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
+
+---
+
+## 🖼️ Previews & Feature Output
+
+Here are visual examples of the capabilities of the library:
+
+### 🏷️ Sample Feature Previews
+| Label Printing (TSPL) | Thermal Receipt (ESC/POS) | Barcode Printing |
+| :---: | :---: | :---: |
+| ![Label Print](images/image1.png) | ![Receipt Print](images/image2.png) | ![Barcode Print](images/barcode.png) |
+
+### 📱 Example Dashboard App
+The package contains a fully optimized developer dashboard to test LAN, Bluetooth, and USB connection configurations, print layouts, and thermal templates:
+
+![Developer Dashboard](https://github.com/user-attachments/assets/0fe164b2-9bf5-4a4a-a59e-f71a45fdef15)
+
+### 🖨️ Physical Output Result
+Example output on physical TSPL label & ESC/POS receipt paper:
+
+![Physical Output](https://github.com/user-attachments/assets/b41e5700-5462-4b79-bdb7-a729bff82e23)
 
 ---
 
@@ -107,6 +138,16 @@ final bool isActive = await PrinterLabel.checkConnect(deviceId: lanId);
 final bool disconnected = await PrinterLabel.disconnectPrinter(deviceId: lanId);
 ```
 
+#### 🖨️ Built-in POS Printer Control (Android Only)
+For devices with integrated thermal printers, you can connect or disconnect the hardware driver cleanly:
+```dart
+// Auto-connect to built-in printer
+final bool connected = await PrinterLabel.autoConnectBuiltIn();
+
+// Disconnect/Disable the built-in printer
+final bool disconnected = await PrinterLabel.disconnectBuiltIn();
+```
+
 ---
 
 ### 2. Bluetooth Scanning & Connecting
@@ -117,8 +158,8 @@ if (Platform.isIOS) {
   await PrinterLabel.startBluetoothScan();
 }
 
-// 2. Subscribe to scan stream
-final subscription = PrinterLabel.bluetoothScanStream.listen((device) {
+// 2. Subscribe to scan stream (invoke as a method call)
+final subscription = PrinterLabel.bluetoothScanStream().listen((device) {
   print("Discovered: ${device.name} - MAC/UUID: ${device.mac}");
 });
 
@@ -189,27 +230,44 @@ await LabelPrintService.instance.printLabels<MyCustomProduct>(
 
 ---
 
-### 4. Direct Barcode & Text Printing (Native Commands)
+### 4. Direct Barcode & QR Code Printing (Native Commands)
 
-If you don't need widgets, you can print native text and barcodes directly by sending native TSPL commands:
+If you don't need to print custom widgets, you can print barcodes and QR codes directly by sending raw printer commands (TSPL for labels, ESC/POS for receipts):
 
+#### 🏷️ TSPL (Label Printer)
 ```dart
-final textElements = [
-  TextData(y: 20, data: "iPhone 17 Pro Max"),
-  TextData(y: 170, data: "28.990.000 VND"),
-];
-
-final model = BarcodeModel(
-  barcodeY: 60,
-  width: 300,
-  barcodeContent: "83868888",
-  textData: textElements,
-  quantity: 1,
-);
-
+// Print raw barcode directly
 await PrinterLabel.printBarcode(
   deviceId: DeviceId.lan('192.168.1.56'),
-  printBarcodeModel: model,
+  code: "83868888",
+  x: 20,
+  y: 60,
+  height: 100,
+  type: "128",
+);
+
+// Print raw QR Code directly
+await PrinterLabel.printQRCode(
+  deviceId: DeviceId.lan('192.168.1.56'),
+  code: "https://pub.dev/packages/printer_label",
+  x: 20,
+  y: 20,
+  size: 5,
+);
+```
+
+#### 🧾 ESC/POS (Receipt Printer)
+```dart
+// Print raw barcode directly
+await ESCPrintService.instance.printBarcode(
+  deviceId: DeviceId.lan('192.168.1.56'),
+  code: "83868888",
+);
+
+// Print raw QR Code directly
+await ESCPrintService.instance.printQRCode(
+  deviceId: DeviceId.lan('192.168.1.56'),
+  code: "https://pub.dev/packages/printer_label",
 );
 ```
 
@@ -294,20 +352,6 @@ final Uint8List receiptBytes = await WidgetCaptureHelper.captureFromLongWidget(
   pixelRatio: 2.5,
 );
 ```
-
----
-
-## 📸 Preview Screens
-
-### 📱 Example Dashboard App
-The package contains a fully optimized developer dashboard to test LAN, Bluetooth, and USB connection configurations, print layouts, and thermal templates:
-
-![Developer Dashboard](https://github.com/user-attachments/assets/0fe164b2-9bf5-4a4a-a59e-f71a45fdef15)
-
-### 🖨️ Physical Output Result
-Example output on physical TSPL label & ESC/POS receipt paper:
-
-![Physical Output](https://github.com/user-attachments/assets/b41e5700-5462-4b79-bdb7-a729bff82e23)
 
 ---
 
