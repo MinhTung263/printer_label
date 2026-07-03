@@ -157,15 +157,14 @@ final class BLEManager: NSObject {
         }
         let (characteristic, writeType) = charTuple
         
-        // Giới hạn kích thước gói gửi xuống máy in ở mức tối ưu cho vi xử lý máy in (120 bytes)
+        // Giới hạn kích thước gói gửi xuống máy in ở mức tối ưu cho vi xử lý máy in (180 bytes)
         // Gói nhỏ giúp máy in vừa nhận vừa in nhịp nhàng, tránh nghẽn CPU dẫn đến tràn bộ đệm.
-        let safeMaxChunkSize = 120
+        let safeMaxChunkSize = 180
         let chunkSize = min(peripheral.maximumWriteValueLength(for: writeType), safeMaxChunkSize)
         
         // Đưa việc ghi dữ liệu vào Background Thread để tránh block Main Thread (gây khựng UI)
         DispatchQueue.global(qos: .userInitiated).async {
             var offset = 0
-            var bytesSentInBlock = 0
             
             while offset < data.count {
                 let end = min(offset + chunkSize, data.count)
@@ -173,20 +172,15 @@ final class BLEManager: NSObject {
                 
                 peripheral.writeValue(chunk, for: characteristic, type: writeType)
                 offset = end
-                bytesSentInBlock += chunk.count
                 
-                // Khoảng nghỉ siêu ngắn giữa các gói tin để duy trì hàng đợi gửi của iOS ổn định
+                // Khoảng nghỉ để duy trì tốc độ truyền ổn định và tránh tràn bộ đệm máy in
                 if writeType == .withoutResponse {
-                    Thread.sleep(forTimeInterval: 0.003) // 3ms nghỉ giữa các gói
+                    // Tối ưu tốc độ lên khoảng 16 KB/s (16,384 bytes/s) để máy in in nhanh hơn mà vẫn an toàn
+                    let delay = Double(chunk.count) / 16384.0
+                    Thread.sleep(forTimeInterval: delay)
                 } else {
-                    Thread.sleep(forTimeInterval: 0.001) // 1ms nghỉ
-                }
-                
-                // Chiến lược chống tràn bộ đệm phần cứng (Block-based Flow Control):
-                // Cứ sau mỗi 1500 bytes dữ liệu gửi đi, ta nghỉ thêm 60ms để máy in giải phóng bộ đệm và thực hiện in vật lý.
-                if bytesSentInBlock >= 1500 {
-                    Thread.sleep(forTimeInterval: 0.060)
-                    bytesSentInBlock = 0
+                    // Chế độ in có phản hồi (.withResponse) cần thời gian chờ ack của iOS (khoảng 25ms)
+                    Thread.sleep(forTimeInterval: 0.025)
                 }
             }
             

@@ -70,7 +70,8 @@ final class ESCPosPrinter {
         let resized = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
 
-        guard let cgImage = resized?.cgImage else {
+        guard let binarized = resized?.binarized(threshold: 200),
+              let cgImage = binarized.cgImage else {
             completion(nil)
             return
         }
@@ -79,7 +80,7 @@ final class ESCPosPrinter {
         esc.initCommandQueue()
         esc.appendZeroData()
         esc.setJustification(1)
-        esc.appendRasterImage(cgImage, mode: .dithering, compress: .none, package: true)
+        esc.appendRasterImage(cgImage, mode: .binary, compress: .none, package: true)
         esc.printAndLineFeed()
         esc.setFullCutWithDistance(1)
 

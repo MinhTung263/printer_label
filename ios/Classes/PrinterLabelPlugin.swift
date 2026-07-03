@@ -370,7 +370,8 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let resized = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
         
-        return resized?.cgImage
+        guard let binarizedImage = resized?.binarized(threshold: 200) else { return resized?.cgImage }
+        return binarizedImage.cgImage
     }
 
     // MARK: - Print Methods
@@ -649,7 +650,12 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
 
-        guard let cgImage = imageFromFlutter(imageData)?.cgImage else {
+        guard let uiImage = imageFromFlutter(imageData) else {
+            result(false)
+            return
+        }
+        let binarizedImage = uiImage.binarized(threshold: 200) ?? uiImage
+        guard let cgImage = binarizedImage.cgImage else {
             result(false)
             return
         }
