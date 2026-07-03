@@ -7,9 +7,14 @@ import 'package:qr_flutter/qr_flutter.dart';
 class EscTab extends StatefulWidget {
   final String ipAddress;
   final List<ConnectedDevice> connectedDevices;
+  final bool isBuiltInPrinterConnected;
 
-  const EscTab(
-      {super.key, required this.ipAddress, required this.connectedDevices});
+  const EscTab({
+    super.key,
+    required this.ipAddress,
+    required this.connectedDevices,
+    this.isBuiltInPrinterConnected = false,
+  });
 
   @override
   State<EscTab> createState() => _EscTabState();
@@ -20,11 +25,13 @@ class _EscTabState extends State<EscTab> {
   TicketSize _selectedSize = TicketSize.mm80;
   bool _hasBuiltInPrinter = false;
 
+  bool get _isBuiltInPrinterActive => _hasBuiltInPrinter && widget.isBuiltInPrinterConnected;
+
   List<String?> get _targetDeviceIds {
     if (widget.connectedDevices.isNotEmpty) {
       return widget.connectedDevices.map((d) => d.id).toList();
     }
-    if (_hasBuiltInPrinter) {
+    if (_isBuiltInPrinterActive) {
       return [null]; // null đại diện cho máy in tích hợp sẵn
     }
     return [DeviceId.lan(widget.ipAddress)];
@@ -83,7 +90,7 @@ class _EscTabState extends State<EscTab> {
   }
 
   Future<void> _printExample() async {
-    if (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter) {
+    if (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive) {
       _showNoConnectionMsg();
       return;
     }
@@ -269,13 +276,13 @@ class _EscTabState extends State<EscTab> {
                       ? null
                       : () {
                           if (widget.connectedDevices.isEmpty &&
-                              !_hasBuiltInPrinter) {
+                              !_isBuiltInPrinterActive) {
                             _showNoConnectionMsg();
                             return;
                           }
 
                           if (widget.connectedDevices.isEmpty &&
-                              _hasBuiltInPrinter) {
+                              _isBuiltInPrinterActive) {
                             _printBuiltInExample();
                           } else {
                             _printExample();
@@ -316,21 +323,21 @@ class _EscTabState extends State<EscTab> {
             (
               label: 'In Text',
               onPressed: () =>
-                  (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
+                  (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive)
                       ? _showNoConnectionMsg()
                       : _printRawText()
             ),
             (
               label: 'In Barcode',
               onPressed: () =>
-                  (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
+                  (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive)
                       ? _showNoConnectionMsg()
                       : _printRawBarcode()
             ),
             (
               label: 'In QR',
               onPressed: () =>
-                  (widget.connectedDevices.isEmpty && !_hasBuiltInPrinter)
+                  (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive)
                       ? _showNoConnectionMsg()
                       : _printRawQRCode()
             ),

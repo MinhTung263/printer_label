@@ -97,6 +97,7 @@ class _MyHomePageState extends State<MyHomePage>
   final List<ConnectedDevice> _connectedDevices = [];
   StreamSubscription<UsbConnectionEvent>? _usbSub;
   bool _hasBuiltInPrinter = false;
+  bool _isBuiltInPrinterConnected = false;
 
   // Trạng thái quét Bluetooth inline
   List<BluetoothDeviceModel> _btDevices = [];
@@ -117,7 +118,10 @@ class _MyHomePageState extends State<MyHomePage>
   Future<void> _checkBuiltInPrinter() async {
     final paperSize = await PrinterLabel.getBuiltInPrinterPaperSize();
     if (mounted) {
-      setState(() => _hasBuiltInPrinter = paperSize > 0);
+      setState(() {
+        _hasBuiltInPrinter = paperSize > 0;
+        _isBuiltInPrinterConnected = paperSize > 0;
+      });
     }
   }
 
@@ -462,7 +466,7 @@ class _MyHomePageState extends State<MyHomePage>
         child: TabBarView(
           controller: _tabController,
           children: [
-            DevicesTab(
+             DevicesTab(
               isConnected: isConnected,
               isConnecting: isConnecting,
               isCheckingStatus: isCheckingStatus,
@@ -472,6 +476,34 @@ class _MyHomePageState extends State<MyHomePage>
               ipFocusNode: focusNode,
               connectedDevices: _connectedDevices,
               hasBuiltInPrinter: _hasBuiltInPrinter,
+              isBuiltInPrinterConnected: _isBuiltInPrinterConnected,
+              onConnectBuiltIn: () async {
+                setState(() => isConnecting = true);
+                try {
+                  final ok = await PrinterLabel.autoConnectBuiltIn();
+                  if (mounted) {
+                    setState(() {
+                      _isBuiltInPrinterConnected = ok;
+                    });
+                    if (ok) {
+                      context.showSnackBar('Kết nối máy in tích hợp thành công', backgroundColor: const Color(0xFF10B981));
+                    } else {
+                      context.showSnackBar('Kết nối máy in tích hợp thất bại');
+                    }
+                  }
+                } finally {
+                  if (mounted) setState(() => isConnecting = false);
+                }
+              },
+              onDisconnectBuiltIn: () async {
+                final ok = await PrinterLabel.disconnectBuiltIn();
+                if (mounted) {
+                  setState(() {
+                    _isBuiltInPrinterConnected = !ok;
+                  });
+                  context.showSnackBar('Đã ngắt kết nối máy in tích hợp', backgroundColor: Colors.blueGrey);
+                }
+              },
               onCheckConnect: () =>
                   _checkConnectionState(ipAddress: textEditingController.text),
               onConnect: _connectLanPrinter,
@@ -481,6 +513,7 @@ class _MyHomePageState extends State<MyHomePage>
                   isConnected = !disconnect;
                   if (disconnect) {
                     _connectedDevices.clear();
+                    _isBuiltInPrinterConnected = false;
                   }
                 });
                 if (!context.mounted) return;
@@ -516,6 +549,7 @@ class _MyHomePageState extends State<MyHomePage>
               onPrintLabels: _printProductLabels,
               ipAddress: textEditingController.text,
               connectedDevices: _connectedDevices,
+              isBuiltInPrinterConnected: _isBuiltInPrinterConnected,
             ),
           ],
         ),

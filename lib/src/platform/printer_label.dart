@@ -135,6 +135,12 @@ class PrinterLabel {
     return await _platform.autoConnectBuiltIn();
   }
 
+  /// Disconnects the built-in printer (only supported on Android).
+  static Future<bool> disconnectBuiltIn() async {
+    if (!Platform.isAndroid) return false;
+    return await _platform.disconnectBuiltIn();
+  }
+
   /// Checks if the current Android device has a built-in thermal printer.
   /// Always returns `false` on iOS/Web/Desktop.
   static Future<bool> hasBuiltInPrinter() async {

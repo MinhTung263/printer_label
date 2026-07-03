@@ -62,6 +62,7 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
     
                 "auto_connect_built_in" -> {
+                    plugin.isBuiltInPrinterDisabled = false
                     plugin.bluetoothManager.autoConnectBuiltIn(result)
                 }
  

@@ -160,6 +160,11 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     return await _channel.invokeMethod<bool>(PrinterMethod.auto_connect_built_in.name) ?? false;
   }
 
+  @override
+  Future<bool> disconnectBuiltIn() async {
+    return await disconnectPrinter(deviceId: 'BUILT_IN');
+  }
+
 
 
   @override

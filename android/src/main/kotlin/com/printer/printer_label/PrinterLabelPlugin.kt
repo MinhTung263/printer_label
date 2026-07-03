@@ -62,6 +62,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
     // Type label for each connection: "USB" | "LAN" | "BT"
     internal val connectionTypes = mutableMapOf<String, ConnectionType>()
+    internal var isBuiltInPrinterDisabled = false
     internal val printerModes = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     // Maps stable USB id → actual device path (e.g. /dev/bus/usb/001/002)
@@ -312,7 +313,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         val targets = mutableListOf<IDeviceConnection>()
 
         // 1. Nếu thiết bị hỗ trợ in trực tiếp (Built-in Printer), luôn ưu tiên kết nối và thêm nó vào targets đầu tiên
-        if (isBuiltInPrinter()) {
+        if (isBuiltInPrinter() && !isBuiltInPrinterDisabled) {
             val isConnected = connections.values.any { bluetoothManager.isConnectionToBuiltInPrinter(it) && it.isConnect }
             if (!isConnected) {
                 bluetoothManager.autoConnectBuiltInSync()
@@ -467,6 +468,19 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
     internal fun disconnectPrinter(deviceId: String, result: Result) {
         try {
+            if (deviceId == "BUILT_IN") {
+                val builtInEntry = connections.entries.firstOrNull { 
+                    bluetoothManager.isConnectionToBuiltInPrinter(it.value) 
+                }
+                if (builtInEntry != null) {
+                    builtInEntry.value.close()
+                    connections.remove(builtInEntry.key)
+                    connectionTypes.remove(builtInEntry.key)
+                }
+                isBuiltInPrinterDisabled = true
+                result.success(true)
+                return
+            }
             connections[deviceId]?.close()
             connections.remove(deviceId)
             connectionTypes.remove(deviceId)

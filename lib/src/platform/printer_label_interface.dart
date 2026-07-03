@@ -101,6 +101,9 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Returns `true` if connected successfully, `false` otherwise.
   Future<bool> autoConnectBuiltIn();
 
+  /// Disconnects the built-in printer (only supported on Android).
+  Future<bool> disconnectBuiltIn();
+
 
 
   /// Checks if the current Android device has a built-in thermal printer.

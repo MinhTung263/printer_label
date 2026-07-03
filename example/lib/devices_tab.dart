@@ -20,6 +20,9 @@ class DevicesTab extends StatelessWidget {
   final bool isPrinting;
 
   final bool hasBuiltInPrinter;
+  final bool isBuiltInPrinterConnected;
+  final VoidCallback? onConnectBuiltIn;
+  final VoidCallback? onDisconnectBuiltIn;
 
   // Bluetooth inline parameters
   final List<BluetoothDeviceModel> btDevices;
@@ -45,6 +48,9 @@ class DevicesTab extends StatelessWidget {
     this.isCheckingConnection = false,
     this.isPrinting = false,
     this.hasBuiltInPrinter = false,
+    this.isBuiltInPrinterConnected = false,
+    this.onConnectBuiltIn,
+    this.onDisconnectBuiltIn,
     required this.btDevices,
     required this.isScanningBt,
     required this.hasScannedBt,
@@ -290,14 +296,18 @@ class DevicesTab extends StatelessWidget {
   }
 
   Widget _buildBuiltInPrinterCard() {
+    final activeColor = isBuiltInPrinterConnected ? const Color(0xFF22C55E) : Colors.grey.shade400;
+    final cardBgColor = isBuiltInPrinterConnected ? const Color(0xFFF0FDF4) : Colors.grey.shade50;
+    final textColor = isBuiltInPrinterConnected ? const Color(0xFF14532D) : Colors.grey.shade700;
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: const Color(0xFF22C55E).withOpacity(0.25), width: 1.5),
+        side: BorderSide(color: activeColor.withOpacity(0.25), width: 1.5),
       ),
-      color: const Color(0xFFF0FDF4),
+      color: cardBgColor,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
@@ -305,20 +315,20 @@ class DevicesTab extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor: const Color(0xFF22C55E).withOpacity(0.15),
-              child: const Icon(Icons.print, color: Color(0xFF16A34A), size: 22),
+              backgroundColor: activeColor.withOpacity(0.15),
+              child: Icon(Icons.print, color: isBuiltInPrinterConnected ? const Color(0xFF16A34A) : Colors.grey.shade600, size: 22),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Máy in tích hợp sẵn',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
-                      color: Color(0xFF14532D),
+                      color: textColor,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -326,40 +336,66 @@ class DevicesTab extends StatelessWidget {
                     'Được phát hiện tự động qua phần cứng thiết bị',
                     style: TextStyle(
                       fontSize: 11,
-                      color: Colors.green.shade700,
+                      color: isBuiltInPrinterConnected ? Colors.green.shade700 : Colors.grey.shade500,
                     ),
                   ),
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFF22C55E).withOpacity(0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF16A34A),
-                      shape: BoxShape.circle,
-                    ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: activeColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  const SizedBox(width: 4),
-                  const Text(
-                    'Sẵn sàng',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF16A34A),
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: isBuiltInPrinterConnected ? const Color(0xFF16A34A) : Colors.grey.shade600,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isBuiltInPrinterConnected ? 'Đã kết nối' : 'Chưa kết nối',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: isBuiltInPrinterConnected ? const Color(0xFF16A34A) : Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+                if (isBuiltInPrinterConnected) ...[
+                  if (onDisconnectBuiltIn != null) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.link_off, size: 20),
+                      color: const Color(0xFFF43F5E),
+                      tooltip: 'Ngắt kết nối',
+                      onPressed: onDisconnectBuiltIn,
+                    ),
+                  ],
+                ] else ...[
+                  if (onConnectBuiltIn != null) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.link, size: 20),
+                      color: const Color(0xFF4F46E5),
+                      tooltip: 'Kết nối',
+                      onPressed: onConnectBuiltIn,
+                    ),
+                  ],
                 ],
-              ),
+              ],
             ),
           ],
         ),

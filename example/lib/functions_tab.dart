@@ -12,6 +12,7 @@ class FunctionsTab extends StatefulWidget {
   final Function(List<ProductBarcodeModel> filteredProducts) onPrintLabels;
   final String ipAddress;
   final List<ConnectedDevice> connectedDevices;
+  final bool isBuiltInPrinterConnected;
 
   const FunctionsTab({
     super.key,
@@ -21,6 +22,7 @@ class FunctionsTab extends StatefulWidget {
     required this.onPrintLabels,
     required this.ipAddress,
     required this.connectedDevices,
+    this.isBuiltInPrinterConnected = false,
   });
 
   @override
@@ -79,7 +81,11 @@ class _FunctionsTabState extends State<FunctionsTab>
                 ipAddress: widget.ipAddress,
                 connectedDevices: widget.connectedDevices,
               ),
-              EscTab(ipAddress: widget.ipAddress, connectedDevices: widget.connectedDevices),
+              EscTab(
+                ipAddress: widget.ipAddress,
+                connectedDevices: widget.connectedDevices,
+                isBuiltInPrinterConnected: widget.isBuiltInPrinterConnected,
+              ),
               CupStickerTab(ipAddress: widget.ipAddress, connectedDevices: widget.connectedDevices),
             ],
           ),
