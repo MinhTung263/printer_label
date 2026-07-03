@@ -31,11 +31,11 @@ Unlike standard printing packages, `printer_label` comes with pre-configured nat
 
 ## 📱 Platform & Connection Support Matrix
 
-| Connection | Android | iOS | Protocol | Supported Formats |
-| :--- | :---: | :---: | :---: | :--- |
-| **LAN (Wi-Fi)** | ✔ | ✔ | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
-| **Bluetooth** | ✔ | ✔ (BLE) | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
-| **USB** | ✔ | ❌ | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
+| Connection      | Android |   iOS   |    Protocol    | Supported Formats                |
+| :-------------- | :-----: | :-----: | :------------: | :------------------------------- |
+| **LAN (Wi-Fi)** |    ✔    |    ✔    | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
+| **Bluetooth**   |    ✔    | ✔ (BLE) | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
+| **USB**         |    ✔    |   ❌    | TSPL / ESC/POS | Widgets, Images, Direct Barcodes |
 
 ---
 
@@ -44,19 +44,24 @@ Unlike standard printing packages, `printer_label` comes with pre-configured nat
 Here are visual examples of the capabilities of the library:
 
 ### 🏷️ Sample Feature Previews
-| Label Printing (TSPL) | Thermal Receipt (ESC/POS) | Cup Sticker |
-| :---: | :---: | :---: |
+
+|                                             Label Printing (TSPL)                                              |                                          Thermal Receipt (ESC/POS)                                          |                                                     Cup Sticker                                                     |
+| :------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------: |
 | ![Label Print](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/label_tab_single.png) | ![Receipt Print](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/receipt_tab.png) | ![Cup Sticker Print](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/cup_sticker_tab.png) |
 
 ### 📱 Example Dashboard App
+
 The package contains a fully optimized developer dashboard to test LAN, Bluetooth, and USB connection configurations, print layouts, and thermal templates:
 
-![Developer Dashboard](https://github.com/user-attachments/assets/0fe164b2-9bf5-4a4a-a59e-f71a45fdef15)
+| Device Management | Label Sizes | Multi-column TSPL |
+| :---: | :---: | :---: |
+| ![Device Management](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/devices_tab_connected.png) | ![Label Sizes](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/label_tab_sizes.png) | ![Multi-column Labels](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/label_tab_multi_3col.png) |
 
 ### 🖨️ Physical Output Result
+
 Example output on physical TSPL label & ESC/POS receipt paper:
 
-![Physical Output](https://github.com/user-attachments/assets/b41e5700-5462-4b79-bdb7-a729bff82e23)
+![Physical Output](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/physical_output.png)
 
 ---
 
@@ -72,6 +77,7 @@ dependencies:
 ```
 
 Then run:
+
 ```bash
 flutter pub get
 ```
@@ -89,7 +95,7 @@ Add the following permissions to your `android/app/src/main/AndroidManifest.xml`
     <!-- Internet & Network Status for LAN Printers -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    
+
     <!-- Bluetooth Permissions -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
@@ -139,7 +145,9 @@ final bool disconnected = await PrinterLabel.disconnectPrinter(deviceId: lanId);
 ```
 
 #### 🖨️ Built-in POS Printer Control (Android Only)
+
 For devices with integrated thermal printers, you can connect or disconnect the hardware driver cleanly:
+
 ```dart
 // Auto-connect to built-in printer
 final bool connected = await PrinterLabel.autoConnectBuiltIn();
@@ -201,6 +209,7 @@ await LabelPrintService.instance.printLabels<ProductBarcodeModel>(
 ```
 
 #### 💡 Custom Widget Example (No `BarcodeView` dependency)
+
 You can print **any** custom Flutter widget (e.g. price tags, milk tea labels, QR codes) by returning your own layout in `itemBuilder`:
 
 ```dart
@@ -235,6 +244,7 @@ await LabelPrintService.instance.printLabels<MyCustomProduct>(
 If you don't need to print custom widgets, you can print barcodes and QR codes directly by sending raw printer commands (TSPL for labels, ESC/POS for receipts):
 
 #### 🏷️ TSPL (Label Printer)
+
 ```dart
 // Print raw barcode directly
 await PrinterLabel.printBarcode(
@@ -257,6 +267,7 @@ await PrinterLabel.printQRCode(
 ```
 
 #### 🧾 ESC/POS (Receipt Printer)
+
 ```dart
 // Print raw barcode directly
 await ESCPrintService.instance.printBarcode(
@@ -278,6 +289,7 @@ await ESCPrintService.instance.printQRCode(
 To print standard receipt layouts, you can print a Flutter widget directly (which automatically measures the widget's natural height to prevent cutoff or overflows) or send pre-rendered image bytes:
 
 #### Option A: Print Directly from a Flutter Widget (Recommended)
+
 ```dart
 await ESCPrintService.instance.printWidget(
   deviceId: DeviceId.lan('192.168.1.56'),
@@ -288,6 +300,7 @@ await ESCPrintService.instance.printWidget(
 ```
 
 #### Option B: Print from Image Bytes
+
 ```dart
 await ESCPrintService.instance.print(
   deviceId: DeviceId.lan('192.168.1.56'),
@@ -324,11 +337,12 @@ await CupStickerPrinter.printWithWidgets(
 ```
 
 #### 📏 Standard Cup Sticker Sizes Provided:
-* `CupStickerSize.s40x30`: 40 x 30 mm (Mini labels / Cup caps)
-* `CupStickerSize.s50x30`: 50 x 30 mm (Small cups)
-* `CupStickerSize.s60x40`: 60 x 40 mm (Standard size / Most popular)
-* `CupStickerSize.s70x50`: 70 x 50 mm (Large cups)
-* `CupStickerSize.s80x60`: 80 x 60 mm (Extra large labels)
+
+- `CupStickerSize.s40x30`: 40 x 30 mm (Mini labels / Cup caps)
+- `CupStickerSize.s50x30`: 50 x 30 mm (Small cups)
+- `CupStickerSize.s60x40`: 60 x 40 mm (Standard size / Most popular)
+- `CupStickerSize.s70x50`: 70 x 50 mm (Large cups)
+- `CupStickerSize.s80x60`: 80 x 60 mm (Extra large labels)
 
 ---
 
