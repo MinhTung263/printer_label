@@ -44,9 +44,9 @@ Unlike standard printing packages, `printer_label` comes with pre-configured nat
 Here are visual examples of the capabilities of the library:
 
 ### 🏷️ Sample Feature Previews
-| Label Printing (TSPL) | Thermal Receipt (ESC/POS) | Barcode Printing |
+| Label Printing (TSPL) | Thermal Receipt (ESC/POS) | Cup Sticker |
 | :---: | :---: | :---: |
-| ![Label Print](images/image1.png) | ![Receipt Print](images/image2.png) | ![Barcode Print](images/barcode.png) |
+| ![Label Print](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/label_tab_single.png) | ![Receipt Print](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/receipt_tab.png) | ![Cup Sticker Print](https://raw.githubusercontent.com/MinhTung263/printer_label/master/images/cup_sticker_tab.png) |
 
 ### 📱 Example Dashboard App
 The package contains a fully optimized developer dashboard to test LAN, Bluetooth, and USB connection configurations, print layouts, and thermal templates:
