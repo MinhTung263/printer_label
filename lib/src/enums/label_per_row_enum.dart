@@ -25,26 +25,25 @@ class LabelPerRow {
       'single_102_152', _LabelConfig(width: 102, height: 152, gap: 2));
 
   static const doubleLabels = LabelPerRow._internal(
-      'double', _LabelConfig(width: 75, height: 22, gap: 2));
+      'double', _LabelConfig(width: 72, height: 22, gap: 1));
   static const double38x25 = LabelPerRow._internal(
-      'double_38_25', _LabelConfig(width: 81, height: 25, gap: 2));
+      'double_38_25', _LabelConfig(width: 81, height: 25, gap: 1));
   static const double40x30 = LabelPerRow._internal(
-      'double_40_30', _LabelConfig(width: 85, height: 30, gap: 2));
+      'double_40_30', _LabelConfig(width: 85, height: 30, gap: 1));
   static const double46x34 = LabelPerRow._internal(
-      'double_46_34', _LabelConfig(width: 97, height: 34, gap: 2));
+      'double_46_34', _LabelConfig(width: 97, height: 34, gap: 1));
   static const double50x30 = LabelPerRow._internal(
-      'double_50_30', _LabelConfig(width: 105, height: 30, gap: 2));
+      'double_50_30', _LabelConfig(width: 105, height: 30, gap: 1));
   static const double50x50 = LabelPerRow._internal(
-      'double_50_50', _LabelConfig(width: 105, height: 50, gap: 2));
+      'double_50_50', _LabelConfig(width: 105, height: 50, gap: 1));
   static const triple = LabelPerRow._internal(
-      'triple', _LabelConfig(width: 112, height: 22, gap: 2));
+      'triple', _LabelConfig(width: 110, height: 22, gap: 0));
   static const triple30x30 = LabelPerRow._internal(
-      'triple_30_30', _LabelConfig(width: 101, height: 30, gap: 2));
+      'triple_30_30', _LabelConfig(width: 101, height: 30, gap: 0));
   static const triple35x25 = LabelPerRow._internal(
-      'triple_35_25', _LabelConfig(width: 112, height: 25, gap: 2));
+      'triple_35_25', _LabelConfig(width: 112, height: 25, gap: 0));
   static const triple26x26 = LabelPerRow._internal(
-      'triple_26_26', _LabelConfig(width: 85, height: 26, gap: 2));
-
+      'triple_26_26', _LabelConfig(width: 85, height: 26, gap: 0));
   static const values = [
     single,
     single35x22,
@@ -72,7 +71,8 @@ class LabelPerRow {
   int? get height => _config.height;
   int? get gap => _config.gap;
 
-  int get count => name.startsWith('double') ? 2 : (name.startsWith('triple') ? 3 : 1);
+  int get count =>
+      name.startsWith('double') ? 2 : (name.startsWith('triple') ? 3 : 1);
 
   String get title => switch (name) {
         'single' => '50x30mm (Mặc định)',
