@@ -25,6 +25,13 @@ allprojects {
 }
 
 apply plugin: 'com.android.library'
+
+android {
+    buildTypes {
+        profile {}
+    }
+}
+
 apply plugin: 'kotlin-android'
 
 android {

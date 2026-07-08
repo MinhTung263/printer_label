@@ -67,11 +67,11 @@ class _EscTabState extends State<EscTab> {
     try {
       // In trực tiếp thông qua luồng tự động kết nối máy in tích hợp sẵn
       await ESCPrintService.instance.printWidget(
-        widget: const ThermalReceiptPreview(
-          size: TicketSize.mm58,
+        widget: ThermalReceiptPreview(
+          size: _selectedSize,
           isForPrinting: true,
         ),
-        size: TicketSize.mm58,
+        size: _selectedSize,
       );
       if (mounted) {
         showTopNotification(
