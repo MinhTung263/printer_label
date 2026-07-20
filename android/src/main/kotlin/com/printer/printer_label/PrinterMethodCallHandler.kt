@@ -187,41 +187,7 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 return@thread
             }
 
-            val method = call.method
-            val commandType = if (method.endsWith("_esc") || method == "print_image_esc") "ESC" else "TSPL"
-
-            // Lọc các kết nối thực tế hợp lệ khớp kiểu in
-            val validConns = mutableListOf<IDeviceConnection>()
-            val invalidConns = mutableListOf<Pair<IDeviceConnection, String>>()
-
-            conns.forEach { conn ->
-                val deviceId = plugin.connections.entries.find { it.value == conn }?.key
-                if (deviceId != null) {
-                    val mode = plugin.printerModes[deviceId]
-                    if (mode != null && mode != commandType) {
-                        val msg = if (mode == "ESC") {
-                            "Chọn sai kiểu in (Máy in này là kiểu ESC/POS)"
-                        } else {
-                            "Chọn sai kiểu in (Máy in này là kiểu TSPL)"
-                        }
-                        invalidConns.add(Pair(conn, msg))
-                    } else {
-                        validConns.add(conn)
-                    }
-                } else {
-                    validConns.add(conn)
-                }
-            }
-
-            // Nếu không có bất kỳ kết nối nào khớp kiểu in
-            if (validConns.isEmpty()) {
-                Handler(Looper.getMainLooper()).post {
-                    val firstErr = invalidConns.firstOrNull()?.second ?: "Chọn sai kiểu in"
-                    result.error("WRONG_PRINTER_TYPE", firstErr, null)
-                }
-                return@thread
-            }
-
+            val validConns = conns
             val total = validConns.size
             val successCount = java.util.concurrent.atomic.AtomicInteger(0)
             val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
