@@ -118,6 +118,36 @@ class UrovoPrinterManager {
             e.printStackTrace()
         }
     }
+
+    fun prnDrawText(text: String, x: Int, y: Int, fontName: String, fontSize: Int, bold: Boolean, italic: Boolean, rotate: Int) {
+        if (!isSupported()) return
+        try {
+            val method = printerManagerClass?.getMethod(
+                "prn_drawText", 
+                String::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, 
+                String::class.java, Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, 
+                Boolean::class.javaPrimitiveType, Int::class.javaPrimitiveType
+            )
+            method?.invoke(printerManagerObj, text, x, y, fontName, fontSize, bold, italic, rotate)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun drawBarcode(data: String, x: Int, y: Int, barcodeType: Int, width: Int, height: Int, rotate: Int) {
+        if (!isSupported()) return
+        try {
+            val method = printerManagerClass?.getMethod(
+                "drawBarcode",
+                String::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType
+            )
+            method?.invoke(printerManagerObj, data, x, y, barcodeType, width, height, rotate)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
     
     // Kiểm tra nhanh xem đây có phải là thiết bị Urovo không
     companion object {

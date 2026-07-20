@@ -950,6 +950,80 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         )
     }
 
+    internal fun printTextESCUrovo(call: MethodCall, result: Result) {
+        kotlin.concurrent.thread {
+            try {
+                val text = call.argument<String>("text") ?: ""
+                val urovoPrinter = UrovoPrinterManager()
+                if (!urovoPrinter.isSupported()) {
+                    Handler(Looper.getMainLooper()).post { result.error("UROVO_ERROR", "Not supported", null) }
+                    return@thread
+                }
+
+                urovoPrinter.openPrinter()
+                urovoPrinter.setupPage(384, -1)
+                urovoPrinter.prnDrawText(text, 0, 0, "sans-serif", 24, false, false, 0)
+                urovoPrinter.printPage(0)
+                urovoPrinter.paperFeed(100)
+                urovoPrinter.closePrinter()
+                
+                Handler(Looper.getMainLooper()).post { result.success(true) }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
+            }
+        }
+    }
+
+    internal fun printBarcodeESCUrovo(call: MethodCall, result: Result) {
+        kotlin.concurrent.thread {
+            try {
+                val code = call.argument<String>("code") ?: ""
+                val urovoPrinter = UrovoPrinterManager()
+                if (!urovoPrinter.isSupported()) {
+                    Handler(Looper.getMainLooper()).post { result.error("UROVO_ERROR", "Not supported", null) }
+                    return@thread
+                }
+
+                urovoPrinter.openPrinter()
+                urovoPrinter.setupPage(384, -1)
+                // Barcode type 8 corresponds to CODE128 in Urovo SDK
+                urovoPrinter.drawBarcode(code, 40, 0, 8, 2, 60, 0)
+                urovoPrinter.printPage(0)
+                urovoPrinter.paperFeed(100)
+                urovoPrinter.closePrinter()
+                
+                Handler(Looper.getMainLooper()).post { result.success(true) }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
+            }
+        }
+    }
+
+    internal fun printQrCodeESCUrovo(call: MethodCall, result: Result) {
+        kotlin.concurrent.thread {
+            try {
+                val code = call.argument<String>("code") ?: ""
+                val urovoPrinter = UrovoPrinterManager()
+                if (!urovoPrinter.isSupported()) {
+                    Handler(Looper.getMainLooper()).post { result.error("UROVO_ERROR", "Not supported", null) }
+                    return@thread
+                }
+
+                urovoPrinter.openPrinter()
+                urovoPrinter.setupPage(384, -1)
+                // For Urovo QR code is usually barcode type 58
+                urovoPrinter.drawBarcode(code, 40, 0, 58, 6, 60, 0)
+                urovoPrinter.printPage(0)
+                urovoPrinter.paperFeed(100)
+                urovoPrinter.closePrinter()
+                
+                Handler(Looper.getMainLooper()).post { result.success(true) }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
+            }
+        }
+    }
+
     internal fun toast(str: String) = Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
 
     companion object {

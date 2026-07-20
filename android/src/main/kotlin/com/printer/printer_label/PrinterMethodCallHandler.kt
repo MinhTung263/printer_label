@@ -96,12 +96,6 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                 }
     
-                "print_text_esc" -> {
-                    runPrintJob(call, result) { conn, targetResult ->
-                        plugin.printThermal.printTextESC(call, conn, targetResult)
-                    }
-                }
-    
                 "print_barcode" -> {
                     runPrintJob(call, result) { conn, targetResult ->
                         plugin.printBarcode(call, conn, targetResult)
@@ -111,6 +105,34 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 "print_qrcode" -> {
                     runPrintJob(call, result) { conn, targetResult ->
                         plugin.printQRCode(call, conn, targetResult)
+                    }
+                }
+    
+                "print_text_esc" -> {
+                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                        plugin.printTextESCUrovo(call, result)
+                    } else {
+                        runPrintJob(call, result) { conn, targetResult ->
+                            plugin.printThermal.printTextESC(call, conn, targetResult)
+                        }
+                    }
+                }
+                "print_barcode_esc" -> {
+                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                        plugin.printBarcodeESCUrovo(call, result)
+                    } else {
+                        runPrintJob(call, result) { conn, targetResult ->
+                            plugin.printThermal.printBarcodeESC(call, conn, targetResult)
+                        }
+                    }
+                }
+                "print_qrcode_esc" -> {
+                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                        plugin.printQrCodeESCUrovo(call, result)
+                    } else {
+                        runPrintJob(call, result) { conn, targetResult ->
+                            plugin.printThermal.printQRCodeESC(call, conn, targetResult)
+                        }
                     }
                 }
     
