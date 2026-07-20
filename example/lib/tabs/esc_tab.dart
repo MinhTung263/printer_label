@@ -24,8 +24,10 @@ class _EscTabState extends State<EscTab> {
   bool _isPrintingEsc = false;
   TicketSize _selectedSize = TicketSize.mm80;
   bool _hasBuiltInPrinter = false;
+  int _printQuantity = 1; // Số lượng in
 
-  bool get _isBuiltInPrinterActive => _hasBuiltInPrinter && widget.isBuiltInPrinterConnected;
+  bool get _isBuiltInPrinterActive =>
+      _hasBuiltInPrinter && widget.isBuiltInPrinterConnected;
 
   List<String?> get _targetDeviceIds {
     if (widget.connectedDevices.isNotEmpty) {
@@ -54,7 +56,6 @@ class _EscTabState extends State<EscTab> {
           _selectedSize = paperSize == 80 ? TicketSize.mm80 : TicketSize.mm58;
         }
       });
-
     }
   }
 
@@ -65,14 +66,15 @@ class _EscTabState extends State<EscTab> {
   Future<void> _printBuiltInExample() async {
     setState(() => _isPrintingEsc = true);
     try {
-      // In trực tiếp thông qua luồng tự động kết nối máy in tích hợp sẵn
-      await ESCPrintService.instance.printWidget(
-        widget: ThermalReceiptPreview(
+      for (int i = 0; i < _printQuantity; i++) {
+        await ESCPrintService.instance.printWidget(
+          widget: ThermalReceiptPreview(
+            size: _selectedSize,
+            isForPrinting: true,
+          ),
           size: _selectedSize,
-          isForPrinting: true,
-        ),
-        size: _selectedSize,
-      );
+        );
+      }
       if (mounted) {
         showTopNotification(
           context,
@@ -99,14 +101,19 @@ class _EscTabState extends State<EscTab> {
       // In toàn bộ hóa đơn dưới dạng hình ảnh trên tất cả thiết bị đang kết nối
       for (final deviceId in _targetDeviceIds) {
         try {
-          await ESCPrintService.instance.printWidget(
-            deviceId: deviceId,
-            widget: ThermalReceiptPreview(
+          for (int i = 0; i < _printQuantity; i++) {
+            await ESCPrintService.instance.printWidget(
+              deviceId: deviceId,
+              widget: ThermalReceiptPreview(
+                size: _selectedSize,
+                isForPrinting: true,
+              ),
               size: _selectedSize,
-              isForPrinting: true,
-            ),
-            size: _selectedSize,
-          );
+            );
+            if (_printQuantity > 1) {
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+          }
         } catch (e) {
           debugPrint('Lỗi in hóa đơn trên $deviceId: $e');
           if (mounted) {
@@ -199,6 +206,94 @@ class _EscTabState extends State<EscTab> {
                   subtitle:
                       'Sử dụng giao thức in hoá đơn nhiệt ESC/POS thông thường.',
                 ),
+                
+                // Chọn số lượng in
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Chọn khổ giấy
+                      Row(
+                        children: [
+                          const Text('Khổ giấy: ', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black54)),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<TicketSize>(
+                                value: _selectedSize,
+                                isDense: true,
+                                icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6366F1)),
+                                style: const TextStyle(
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                                onChanged: (TicketSize? newSize) {
+                                  if (newSize != null) {
+                                    setState(() {
+                                      _selectedSize = newSize;
+                                    });
+                                  }
+                                },
+                                items: const [
+                                  DropdownMenuItem(value: TicketSize.mm80, child: Text('K80')),
+                                  DropdownMenuItem(value: TicketSize.mm58, child: Text('K57')),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Chọn số lượng in
+                      Row(
+                        children: [
+                          const Text('Số lượng: ', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black54)),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                value: _printQuantity,
+                                isDense: true,
+                                icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6366F1)),
+                                style: const TextStyle(
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                                onChanged: (int? newQty) {
+                                  if (newQty != null) {
+                                    setState(() {
+                                      _printQuantity = newQty;
+                                    });
+                                  }
+                                },
+                                items: [1, 2, 3, 5, 10].map((int value) {
+                                  return DropdownMenuItem<int>(
+                                    value: value,
+                                    child: Text('$value'),
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
 
                 // Khu vực hiển thị hóa đơn giả lập giống hệt ticket.png
                 Center(
@@ -211,7 +306,7 @@ class _EscTabState extends State<EscTab> {
             ),
           ),
         ),
-        // ─── Print button & Dropdown ───────────────────────────────────────
+        // ─── Print button ──────────────────────────────────────────────────
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -226,93 +321,55 @@ class _EscTabState extends State<EscTab> {
               ),
             ],
           ),
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              // Dropdown chọn khổ giấy
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<TicketSize>(
-                    value: _selectedSize,
-                    icon: const Icon(Icons.arrow_drop_down,
-                        color: Color(0xFF6366F1)),
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                    onChanged: (TicketSize? newSize) {
-                      if (newSize != null) {
-                        setState(() {
-                          _selectedSize = newSize;
-                        });
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: SizedBox(
+            width: double.infinity,
+            height: 40,
+            child: ElevatedButton.icon(
+              onPressed: _isPrintingEsc
+                  ? null
+                  : () {
+                      if (widget.connectedDevices.isEmpty &&
+                          !_isBuiltInPrinterActive) {
+                        _showNoConnectionMsg();
+                        return;
+                      }
+
+                      if (widget.connectedDevices.isEmpty &&
+                          _isBuiltInPrinterActive) {
+                        _printBuiltInExample();
+                      } else {
+                        _printExample();
                       }
                     },
-                    items: const [
-                      DropdownMenuItem(
-                        value: TicketSize.mm80,
-                        child: Text('K80 (80mm)'),
+              icon: _isPrintingEsc
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
-                      DropdownMenuItem(
-                        value: TicketSize.mm58,
-                        child: Text('K57 (58mm)'),
-                      ),
-                    ],
-                  ),
+                    )
+                  : const Icon(Icons.print, size: 18),
+              label: Text(
+                _isPrintingEsc ? 'ĐANG IN...' : 'IN HOÁ ĐƠN',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
                 ),
               ),
-              const SizedBox(width: 12),
-              // Nút in thử
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _isPrintingEsc
-                      ? null
-                      : () {
-                          if (widget.connectedDevices.isEmpty &&
-                              !_isBuiltInPrinterActive) {
-                            _showNoConnectionMsg();
-                            return;
-                          }
-
-                          if (widget.connectedDevices.isEmpty &&
-                              _isBuiltInPrinterActive) {
-                            _printBuiltInExample();
-                          } else {
-                            _printExample();
-                          }
-                        },
-                  icon: _isPrintingEsc
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : const Icon(Icons.print),
-                  label: Text(
-                      _isPrintingEsc ? 'Đang in...' : 'In thử hoá đơn ESC'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6366F1),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    elevation: 0,
-                  ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
-            ],
+            ),
           ),
         ),
         // ─── Raw print (dev) ───────────────────────────────────────────────

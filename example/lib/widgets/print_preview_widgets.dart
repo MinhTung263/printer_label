@@ -109,13 +109,13 @@ class RawPrintBar extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: color,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
                     child: Text(buttons[i].label,
-                        style: const TextStyle(fontSize: 12)),
+                        style: const TextStyle(fontSize: 11)),
                   ),
                 ),
               ],

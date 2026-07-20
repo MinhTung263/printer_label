@@ -438,29 +438,38 @@ class _MyHomePageState extends State<MyHomePage>
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Row(
-          children: [
-            Icon(Icons.print_outlined, color: Color(0xFF4F46E5)),
-            SizedBox(width: 8),
-            Text(
-              "Printer Dashboard",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-            ),
-          ],
-        ),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        bottom: TabBar(
+        title: TabBar(
           controller: _tabController,
           labelColor: const Color(0xFF4F46E5),
           unselectedLabelColor: const Color(0xFF64748B),
           indicatorColor: const Color(0xFF4F46E5),
           indicatorWeight: 3,
+          dividerColor: Colors.transparent,
           tabs: const [
-            Tab(icon: Icon(Icons.devices), text: "Thiết bị"),
-            Tab(icon: Icon(Icons.print), text: "Chức năng"),
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.devices, size: 20),
+                  SizedBox(width: 8),
+                  Text("Thiết bị"),
+                ],
+              ),
+            ),
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.print, size: 20),
+                  SizedBox(width: 8),
+                  Text("Chức năng"),
+                ],
+              ),
+            ),
           ],
         ),
+        elevation: 0,
+        backgroundColor: Colors.white,
       ),
       body: SafeArea(
         child: TabBarView(
