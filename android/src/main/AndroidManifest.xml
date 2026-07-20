@@ -8,4 +8,5 @@
         <package android:name="com.urovo.printerservice" />
         <package android:name="android.printservice.urovoprint" />
     </queries>
+    <uses-permission android:name="smartpos.deviceservice.permission.Printer" />
 </manifest>

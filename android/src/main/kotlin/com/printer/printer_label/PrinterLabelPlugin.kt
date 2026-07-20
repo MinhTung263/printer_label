@@ -724,6 +724,106 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         }
     }
 
+    internal fun printLabelUrovo(call: MethodCall, result: Result) {
+        kotlin.concurrent.thread {
+            try {
+                val type = call.argument<String>("type")
+                if (type != "TSPL") {
+                    Handler(Looper.getMainLooper()).post { result.success(false) }
+                    return@thread
+                }
+
+                val images: List<ByteArray>? = call.argument<List<ByteArray>>("images")
+                if (images.isNullOrEmpty()) {
+                    Handler(Looper.getMainLooper()).post { result.success(false) }
+                    return@thread
+                }
+
+                val size = call.argument<Map<String, Any>>("size")
+                val (sizeWidth, sizeHeight) = extractSizeImage(size)
+                
+                // 8 dots per mm
+                val targetWidthDots = sizeWidth * 8
+                val targetHeightDots = sizeHeight * 8
+
+                val urovoPrinter = UrovoPrinterManager()
+                if (!urovoPrinter.isSupported()) {
+                    Handler(Looper.getMainLooper()).post { 
+                        result.error("UROVO_ERROR", "Urovo PrinterManager not supported", null) 
+                    }
+                    return@thread
+                }
+
+                urovoPrinter.openPrinter()
+                
+                // Tối ưu tốc độ in
+                urovoPrinter.setSpeedLevel(9)
+                urovoPrinter.setGrayLevel(0)
+                
+                images.forEach { imageData ->
+                    val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size) ?: return@forEach
+                    
+                    val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidthDots, targetHeightDots, true)
+                    
+                    urovoPrinter.setupPage(targetWidthDots, targetHeightDots)
+                    urovoPrinter.drawBitmap(scaledBitmap, 0, 0)
+                    urovoPrinter.printPage(0)
+
+                    if (scaledBitmap != bitmap) {
+                        scaledBitmap.recycle()
+                    }
+                    bitmap.recycle()
+                }
+
+                urovoPrinter.closePrinter()
+                Handler(Looper.getMainLooper()).post { result.success(true) }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
+            }
+        }
+    }
+
+    internal fun printImageESCUrovo(call: MethodCall, result: Result) {
+        kotlin.concurrent.thread {
+            try {
+                val image: ByteArray? = call.argument<ByteArray>("image")
+                if (image == null) {
+                    Handler(Looper.getMainLooper()).post { result.success(false) }
+                    return@thread
+                }
+
+                val urovoPrinter = UrovoPrinterManager()
+                if (!urovoPrinter.isSupported()) {
+                    Handler(Looper.getMainLooper()).post { 
+                        result.error("UROVO_ERROR", "Urovo PrinterManager not supported", null) 
+                    }
+                    return@thread
+                }
+
+                urovoPrinter.openPrinter()
+                
+                // Tối ưu tốc độ: Speed level cao nhất (9), độ đậm nhạt thấp nhất (0) để in nhanh nhất
+                urovoPrinter.setSpeedLevel(9)
+                urovoPrinter.setGrayLevel(0)
+
+                val bitmap = android.graphics.BitmapFactory.decodeByteArray(image, 0, image.size)
+                if (bitmap != null) {
+                    // Sử dụng chiều dài thực tế của ảnh thay vì -1
+                    urovoPrinter.setupPage(bitmap.width, -1)
+                    urovoPrinter.drawBitmap(bitmap, 0, 0)
+                    urovoPrinter.printPage(0)
+                    urovoPrinter.paperFeed(120) // Đẩy giấy lên thêm 1.5cm để cắt bill
+                    bitmap.recycle()
+                }
+
+                urovoPrinter.closePrinter()
+                Handler(Looper.getMainLooper()).post { result.success(true) }
+            } catch (e: Exception) {
+                Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
+            }
+        }
+    }
+
     internal fun printText(call: MethodCall, conn: IDeviceConnection, result: Result) {
         try {
             val text = call.argument<String>("text") ?: ""
