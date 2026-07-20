@@ -81,8 +81,12 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
     
                 "print_label" -> {
-                    runPrintJob(call, result) { conn, targetResult ->
-                        plugin.printLabel(call, conn, targetResult)
+                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                        plugin.printLabelUrovo(call, result)
+                    } else {
+                        runPrintJob(call, result) { conn, targetResult ->
+                            plugin.printLabel(call, conn, targetResult)
+                        }
                     }
                 }
     
@@ -111,9 +115,13 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
     
                 "print_image_esc" -> {
-                    runPrintJob(call, result) { conn, targetResult ->
-                        val isTargetBuiltIn = plugin.bluetoothManager.isConnectionToBuiltInPrinter(conn)
-                        plugin.printThermal.printImageESC(call, conn, targetResult, isTargetBuiltIn)
+                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                        plugin.printImageESCUrovo(call, result)
+                    } else {
+                        runPrintJob(call, result) { conn, targetResult ->
+                            val isTargetBuiltIn = plugin.bluetoothManager.isConnectionToBuiltInPrinter(conn)
+                            plugin.printThermal.printImageESC(call, conn, targetResult, isTargetBuiltIn)
+                        }
                     }
                 }
     
