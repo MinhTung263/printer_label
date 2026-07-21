@@ -415,12 +415,26 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                     name.contains("iMin", ignoreCase = true) || 
                     name.contains("Pax", ignoreCase = true) || 
                     name.contains("Urovo", ignoreCase = true) || 
+                    name.contains("B68", ignoreCase = true) ||
+                    name.contains("P068", ignoreCase = true) ||
+                    name.contains("SmartPos", ignoreCase = true) ||
                     name.contains("InnerPrinter", ignoreCase = true) ||
                     name.contains("Inner Printer", ignoreCase = true) ||
+                    name.contains("BluetoothPrinter", ignoreCase = true) ||
+                    name.contains("Bluetooth Printer", ignoreCase = true) ||
                     name.contains("Builtin Printer", ignoreCase = true) ||
                     name.contains("Built-in Printer", ignoreCase = true)) {
                     printerMac = device.address
                 }
+            }
+
+            if (printerMac == null) {
+                // Fallback: Nếu không khớp tên, tìm thiết bị Bluetooth đầu tiên được nhận dạng là máy in
+                val fallbackDevice = pairedDevices?.firstOrNull {
+                    val majorClass = it.bluetoothClass?.majorDeviceClass
+                    majorClass == android.bluetooth.BluetoothClass.Device.Major.IMAGING || isPrinter(it)
+                }
+                printerMac = fallbackDevice?.address
             }
 
             val mac = printerMac ?: run {
@@ -946,6 +960,8 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                    name.contains("Urovo", ignoreCase = true) || 
                    name.contains("InnerPrinter", ignoreCase = true) ||
                    name.contains("Inner Printer", ignoreCase = true) ||
+                   name.contains("BluetoothPrinter", ignoreCase = true) ||
+                   name.contains("Bluetooth Printer", ignoreCase = true) ||
                    name.contains("Builtin Printer", ignoreCase = true) ||
                    name.contains("Built-in Printer", ignoreCase = true)
         } catch (e: Exception) {

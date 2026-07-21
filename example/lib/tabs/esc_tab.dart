@@ -46,14 +46,14 @@ class _EscTabState extends State<EscTab> {
   }
 
   Future<void> _checkBuiltInPrinter() async {
-    final paperSize = await PrinterLabel.getBuiltInPrinterPaperSize();
-    final hasPrinter = paperSize > 0;
+    final type = await PrinterLabel.getBuiltInPrinterType();
+    final hasPrinter = type != BuiltInPrinterType.none;
     if (mounted) {
       setState(() {
         _hasBuiltInPrinter = hasPrinter;
         // Tự động chọn khổ giấy mặc định khớp với máy in tích hợp sẵn (K57 hoặc K80)
         if (hasPrinter) {
-          _selectedSize = paperSize == 80 ? TicketSize.mm80 : TicketSize.mm58;
+          _selectedSize = type.paperSize == 80 ? TicketSize.mm80 : TicketSize.mm58;
         }
       });
     }
@@ -64,6 +64,10 @@ class _EscTabState extends State<EscTab> {
   }
 
   Future<void> _printBuiltInExample() async {
+    if (!widget.isBuiltInPrinterConnected) {
+      _showNoConnectionMsg();
+      return;
+    }
     setState(() => _isPrintingEsc = true);
     try {
       for (int i = 0; i < _printQuantity; i++) {
@@ -206,7 +210,7 @@ class _EscTabState extends State<EscTab> {
                   subtitle:
                       'Sử dụng giao thức in hoá đơn nhiệt ESC/POS thông thường.',
                 ),
-                
+
                 // Chọn số lượng in
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -216,10 +220,14 @@ class _EscTabState extends State<EscTab> {
                       // Chọn khổ giấy
                       Row(
                         children: [
-                          const Text('Khổ giấy: ', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black54)),
+                          const Text('Khổ giấy: ',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black54)),
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(8),
@@ -229,7 +237,8 @@ class _EscTabState extends State<EscTab> {
                               child: DropdownButton<TicketSize>(
                                 value: _selectedSize,
                                 isDense: true,
-                                icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6366F1)),
+                                icon: const Icon(Icons.arrow_drop_down,
+                                    color: Color(0xFF6366F1)),
                                 style: const TextStyle(
                                   color: Colors.black87,
                                   fontWeight: FontWeight.bold,
@@ -243,8 +252,12 @@ class _EscTabState extends State<EscTab> {
                                   }
                                 },
                                 items: const [
-                                  DropdownMenuItem(value: TicketSize.mm80, child: Text('K80')),
-                                  DropdownMenuItem(value: TicketSize.mm58, child: Text('K57')),
+                                  DropdownMenuItem(
+                                      value: TicketSize.mm80,
+                                      child: Text('K80')),
+                                  DropdownMenuItem(
+                                      value: TicketSize.mm58,
+                                      child: Text('K57')),
                                 ],
                               ),
                             ),
@@ -254,10 +267,14 @@ class _EscTabState extends State<EscTab> {
                       // Chọn số lượng in
                       Row(
                         children: [
-                          const Text('Số lượng: ', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black54)),
+                          const Text('Số lượng: ',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black54)),
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(8),
@@ -267,7 +284,8 @@ class _EscTabState extends State<EscTab> {
                               child: DropdownButton<int>(
                                 value: _printQuantity,
                                 isDense: true,
-                                icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6366F1)),
+                                icon: const Icon(Icons.arrow_drop_down,
+                                    color: Color(0xFF6366F1)),
                                 style: const TextStyle(
                                   color: Colors.black87,
                                   fontWeight: FontWeight.bold,
@@ -348,8 +366,7 @@ class _EscTabState extends State<EscTab> {
                       height: 14,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(Colors.white),
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
                   : const Icon(Icons.print, size: 18),

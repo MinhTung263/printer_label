@@ -71,13 +71,15 @@ class DevicesTab extends StatelessWidget {
         const SizedBox(height: 24),
 
         // ─── Section 2: Kết nối LAN ──────────────────────────────────────
-        _buildSectionHeader("KẾT NỐI MÁY IN QUA MẠNG LAN / WI-FI", Icons.settings_ethernet),
+        _buildSectionHeader(
+            "KẾT NỐI MÁY IN QUA MẠNG LAN / WI-FI", Icons.settings_ethernet),
         const SizedBox(height: 8),
         _buildLanConnectionCard(context),
         const SizedBox(height: 24),
 
         // ─── Section 3: Quét Bluetooth ───────────────────────────────────
-        _buildSectionHeader("MÁY IN BLUETOOTH XUNG QUANH", Icons.bluetooth_searching),
+        _buildSectionHeader(
+            "MÁY IN BLUETOOTH XUNG QUANH", Icons.bluetooth_searching),
         const SizedBox(height: 8),
         _buildBluetoothScanCard(context),
         const SizedBox(height: 24),
@@ -123,7 +125,8 @@ class DevicesTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
           child: Column(
             children: [
-              Icon(Icons.print_disabled_outlined, size: 44, color: Colors.grey.shade300),
+              Icon(Icons.print_disabled_outlined,
+                  size: 44, color: Colors.grey.shade300),
               const SizedBox(height: 12),
               const Text(
                 "Chưa có máy in nào được kết nối",
@@ -147,159 +150,169 @@ class DevicesTab extends StatelessWidget {
 
     return Column(
       children: [
-        if (hasBuiltInPrinter)
-          _buildBuiltInPrinterCard(),
+        if (hasBuiltInPrinter) _buildBuiltInPrinterCard(),
         ...connectedDevices.map((device) {
-        final (IconData icon, Color color) = switch (device.type) {
-          'USB' => (Icons.usb, const Color(0xFF0D9488)),
-          'LAN' => (Icons.lan, const Color(0xFF3B82F6)),
-          'BT' => (Icons.bluetooth, const Color(0xFF6366F1)),
-          _ => (Icons.device_unknown, Colors.grey),
-        };
+          final (IconData icon, Color color) = switch (device.type) {
+            'USB' => (Icons.usb, const Color(0xFF0D9488)),
+            'LAN' => (Icons.lan, const Color(0xFF3B82F6)),
+            'BT' => (Icons.bluetooth, const Color(0xFF6366F1)),
+            _ => (Icons.device_unknown, Colors.grey),
+          };
 
-        final isMainLan = device.type == 'LAN' && isConnected;
+          final isMainLan = device.type == 'LAN' && isConnected;
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 10),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: color.withOpacity(0.15), width: 1.2),
-          ),
-          color: Colors.white,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: color.withOpacity(0.1),
-                  child: Icon(icon, color: color, size: 22),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        device.label,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E293B),
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: color.withOpacity(0.15), width: 1.2),
+            ),
+            color: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: color.withOpacity(0.1),
+                    child: Icon(icon, color: color, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          device.label,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E293B),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFDCFCE7),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF16A34A),
-                                    shape: BoxShape.circle,
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDCFCE7),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF16A34A),
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
+                                  const SizedBox(width: 4),
+                                  const Text(
+                                    "Đã kết nối",
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF16A34A),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (isMainLan) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDBEAFE),
+                                  borderRadius: BorderRadius.circular(6),
                                 ),
-                                const SizedBox(width: 4),
-                                const Text(
-                                  "Đã kết nối",
+                                child: const Text(
+                                  "Chính",
                                   style: TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.bold,
-                                    color: Color(0xFF16A34A),
+                                    color: Color(0xFF1D4ED8),
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                          if (isMainLan) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFDBEAFE),
-                                borderRadius: BorderRadius.circular(6),
                               ),
-                              child: const Text(
-                                "Chính",
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1D4ED8),
-                                ),
-                              ),
-                            ),
+                            ],
                           ],
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        device.id,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF64748B),
-                          fontFamily: 'monospace',
                         ),
-                        overflow: TextOverflow.ellipsis,
+                        const SizedBox(height: 6),
+                        Text(
+                          device.id,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF64748B),
+                            fontFamily: 'monospace',
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (onCheckPrinterStatus != null) ...[
+                        isCheckingStatus
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Color(0xFF0D9488)),
+                                  ),
+                                ),
+                              )
+                            : IconButton(
+                                icon: const Icon(Icons.info_outline, size: 20),
+                                color: const Color(0xFF0D9488),
+                                tooltip: 'Kiểm tra trạng thái máy in',
+                                onPressed: isCheckingConnection
+                                    ? null
+                                    : () => onCheckPrinterStatus!(device),
+                              ),
+                      ],
+                      IconButton(
+                        icon: const Icon(Icons.link_off, size: 20),
+                        color: const Color(0xFFF43F5E),
+                        tooltip: 'Ngắt kết nối',
+                        onPressed: () => onDisconnectDevice(device),
                       ),
                     ],
                   ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (onCheckPrinterStatus != null) ...[
-                      isCheckingStatus
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 8),
-                              child: SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)),
-                                ),
-                              ),
-                            )
-                          : IconButton(
-                              icon: const Icon(Icons.info_outline, size: 20),
-                              color: const Color(0xFF0D9488),
-                              tooltip: 'Kiểm tra trạng thái máy in',
-                              onPressed: isCheckingConnection ? null : () => onCheckPrinterStatus!(device),
-                            ),
-                    ],
-                    IconButton(
-                      icon: const Icon(Icons.link_off, size: 20),
-                      color: const Color(0xFFF43F5E),
-                      tooltip: 'Ngắt kết nối',
-                      onPressed: () => onDisconnectDevice(device),
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      }),
+          );
+        }),
       ],
     );
   }
 
   Widget _buildBuiltInPrinterCard() {
-    final activeColor = isBuiltInPrinterConnected ? const Color(0xFF22C55E) : Colors.grey.shade400;
-    final cardBgColor = isBuiltInPrinterConnected ? const Color(0xFFF0FDF4) : Colors.grey.shade50;
-    final textColor = isBuiltInPrinterConnected ? const Color(0xFF14532D) : Colors.grey.shade700;
-    
+    final activeColor = isBuiltInPrinterConnected
+        ? const Color(0xFF22C55E)
+        : Colors.grey.shade400;
+    final cardBgColor = isBuiltInPrinterConnected
+        ? const Color(0xFFF0FDF4)
+        : Colors.grey.shade50;
+    final textColor = isBuiltInPrinterConnected
+        ? const Color(0xFF14532D)
+        : Colors.grey.shade700;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
@@ -316,7 +329,11 @@ class DevicesTab extends StatelessWidget {
             CircleAvatar(
               radius: 22,
               backgroundColor: activeColor.withOpacity(0.15),
-              child: Icon(Icons.print, color: isBuiltInPrinterConnected ? const Color(0xFF16A34A) : Colors.grey.shade600, size: 22),
+              child: Icon(Icons.print,
+                  color: isBuiltInPrinterConnected
+                      ? const Color(0xFF16A34A)
+                      : Colors.grey.shade600,
+                  size: 22),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -336,7 +353,9 @@ class DevicesTab extends StatelessWidget {
                     'Được phát hiện tự động qua phần cứng thiết bị',
                     style: TextStyle(
                       fontSize: 11,
-                      color: isBuiltInPrinterConnected ? Colors.green.shade700 : Colors.grey.shade500,
+                      color: isBuiltInPrinterConnected
+                          ? Colors.green.shade700
+                          : Colors.grey.shade500,
                     ),
                   ),
                 ],
@@ -346,7 +365,8 @@ class DevicesTab extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: activeColor.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
@@ -358,17 +378,23 @@ class DevicesTab extends StatelessWidget {
                         width: 6,
                         height: 6,
                         decoration: BoxDecoration(
-                          color: isBuiltInPrinterConnected ? const Color(0xFF16A34A) : Colors.grey.shade600,
+                          color: isBuiltInPrinterConnected
+                              ? const Color(0xFF16A34A)
+                              : Colors.grey.shade600,
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        isBuiltInPrinterConnected ? 'Đã kết nối' : 'Chưa kết nối',
+                        isBuiltInPrinterConnected
+                            ? 'Đã kết nối'
+                            : 'Chưa kết nối',
                         style: TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.bold,
-                          color: isBuiltInPrinterConnected ? const Color(0xFF16A34A) : Colors.grey.shade600,
+                          color: isBuiltInPrinterConnected
+                              ? const Color(0xFF16A34A)
+                              : Colors.grey.shade600,
                         ),
                       ),
                     ],
@@ -422,7 +448,8 @@ class DevicesTab extends StatelessWidget {
               decoration: InputDecoration(
                 labelText: 'Địa chỉ IP máy in',
                 hintText: 'VD: $defaultPrinterIp',
-                prefixIcon: const Icon(Icons.network_ping, size: 20, color: Color(0xFF64748B)),
+                prefixIcon: const Icon(Icons.network_ping,
+                    size: 20, color: Color(0xFF64748B)),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: Colors.grey.shade300),
@@ -433,11 +460,14 @@ class DevicesTab extends StatelessWidget {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF4F46E5), width: 1.5),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF4F46E5), width: 1.5),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
             ),
             const SizedBox(height: 16),
             Row(
@@ -451,11 +481,13 @@ class DevicesTab extends StatelessWidget {
                             height: 16,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
                             ),
                           )
                         : const Icon(Icons.link, size: 18),
-                    label: Text(isConnecting ? "Đang kết nối..." : "Kết nối mạng LAN"),
+                    label: Text(
+                        isConnecting ? "Đang kết nối..." : "Kết nối mạng LAN"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4F46E5),
                       foregroundColor: Colors.white,
@@ -476,7 +508,8 @@ class DevicesTab extends StatelessWidget {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFFF43F5E),
                       side: const BorderSide(color: Color(0xFFF43F5E)),
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -539,14 +572,14 @@ class DevicesTab extends StatelessWidget {
             ),
           ),
           const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
-
           if (!hasScannedBt)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
               child: Center(
                 child: Column(
                   children: [
-                    Icon(Icons.bluetooth, size: 40, color: Colors.grey.shade300),
+                    Icon(Icons.bluetooth,
+                        size: 40, color: Colors.grey.shade300),
                     const SizedBox(height: 12),
                     const Text(
                       "Nhấn 'Quét Bluetooth' để tìm máy in gần bạn",
@@ -563,7 +596,8 @@ class DevicesTab extends StatelessWidget {
               child: Center(
                 child: Column(
                   children: [
-                    Icon(Icons.bluetooth_disabled_outlined, size: 40, color: Colors.grey.shade300),
+                    Icon(Icons.bluetooth_disabled_outlined,
+                        size: 40, color: Colors.grey.shade300),
                     const SizedBox(height: 12),
                     const Text(
                       "Không tìm thấy máy in Bluetooth nào xung quanh",
@@ -579,18 +613,23 @@ class DevicesTab extends StatelessWidget {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: btDevices.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5, color: Color(0xFFF1F5F9)),
+              separatorBuilder: (_, __) => const Divider(
+                  height: 1, thickness: 0.5, color: Color(0xFFF1F5F9)),
               itemBuilder: (context, index) {
                 final d = btDevices[index];
                 final isConnecting = connectingBtMacs.contains(d.mac);
                 final connectedDevice = connectedDevices.firstWhere(
-                  (cd) => cd.type == 'BT' && (cd.id == d.mac || cd.id == 'BT:${d.mac}'),
-                  orElse: () => const ConnectedDevice(id: '', label: '', type: ''),
+                  (cd) =>
+                      cd.type == 'BT' &&
+                      (cd.id == d.mac || cd.id == 'BT:${d.mac}'),
+                  orElse: () =>
+                      const ConnectedDevice(id: '', label: '', type: ''),
                 );
                 final isAlreadyConnected = connectedDevice.id.isNotEmpty;
 
                 return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: CircleAvatar(
                     radius: 18,
                     backgroundColor: isAlreadyConnected
@@ -609,12 +648,15 @@ class DevicesTab extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
-                      color: isAlreadyConnected ? const Color(0xFF14532D) : const Color(0xFF1E293B),
+                      color: isAlreadyConnected
+                          ? const Color(0xFF14532D)
+                          : const Color(0xFF1E293B),
                     ),
                   ),
                   subtitle: Text(
                     d.mac,
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                    style:
+                        const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -656,7 +698,9 @@ class DevicesTab extends StatelessWidget {
                               borderRadius: BorderRadius.circular(8),
                             ),
                           ),
-                          child: const Text('Kết nối', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          child: const Text('Kết nối',
+                              style: TextStyle(
+                                  fontSize: 11, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ],
@@ -684,7 +728,8 @@ class DevicesTab extends StatelessWidget {
             CircleAvatar(
               radius: 18,
               backgroundColor: Color(0xFFF0FDF4),
-              child: Icon(Icons.info_outline, color: Color(0xFF16A34A), size: 20),
+              child:
+                  Icon(Icons.info_outline, color: Color(0xFF16A34A), size: 20),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -702,7 +747,8 @@ class DevicesTab extends StatelessWidget {
                   SizedBox(height: 2),
                   Text(
                     "Hãy cắm máy in USB qua cáp OTG. Ứng dụng sẽ tự động phát hiện, xin quyền và kết nối ngay lập tức.",
-                    style: TextStyle(fontSize: 11, color: Color(0xFF64748B), height: 1.3),
+                    style: TextStyle(
+                        fontSize: 11, color: Color(0xFF64748B), height: 1.3),
                   ),
                 ],
               ),

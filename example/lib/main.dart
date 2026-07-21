@@ -116,12 +116,23 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   Future<void> _checkBuiltInPrinter() async {
-    final paperSize = await PrinterLabel.getBuiltInPrinterPaperSize();
+    final type = await PrinterLabel.getBuiltInPrinterType();
+    final hasPrinter = type != BuiltInPrinterType.none;
+
     if (mounted) {
       setState(() {
-        _hasBuiltInPrinter = paperSize > 0;
-        _isBuiltInPrinterConnected = paperSize > 0;
+        _hasBuiltInPrinter = hasPrinter;
+        if (!hasPrinter) _isBuiltInPrinterConnected = false;
       });
+    }
+
+    if (!hasPrinter) return;
+
+    // Tự động kết nối ngầm máy in tích hợp khi mở app
+    final connected = await PrinterLabel.autoConnectBuiltIn();
+    
+    if (mounted) {
+      setState(() => _isBuiltInPrinterConnected = connected);
     }
   }
 
@@ -475,7 +486,7 @@ class _MyHomePageState extends State<MyHomePage>
         child: TabBarView(
           controller: _tabController,
           children: [
-             DevicesTab(
+            DevicesTab(
               isConnected: isConnected,
               isConnecting: isConnecting,
               isCheckingStatus: isCheckingStatus,
@@ -495,7 +506,8 @@ class _MyHomePageState extends State<MyHomePage>
                       _isBuiltInPrinterConnected = ok;
                     });
                     if (ok) {
-                      context.showSnackBar('Kết nối máy in tích hợp thành công', backgroundColor: const Color(0xFF10B981));
+                      context.showSnackBar('Kết nối máy in tích hợp thành công',
+                          backgroundColor: const Color(0xFF10B981));
                     } else {
                       context.showSnackBar('Kết nối máy in tích hợp thất bại');
                     }
@@ -510,7 +522,8 @@ class _MyHomePageState extends State<MyHomePage>
                   setState(() {
                     _isBuiltInPrinterConnected = !ok;
                   });
-                  context.showSnackBar('Đã ngắt kết nối máy in tích hợp', backgroundColor: Colors.blueGrey);
+                  context.showSnackBar('Đã ngắt kết nối máy in tích hợp',
+                      backgroundColor: Colors.blueGrey);
                 }
               },
               onCheckConnect: () =>

@@ -2,6 +2,24 @@ import 'dart:io';
 
 import '../src.dart';
 
+enum BuiltInPrinterType {
+  /// Không tìm thấy máy in tích hợp
+  none(0),
+  /// Máy in nhiệt khổ 58mm (K57)
+  mm58(58),
+  /// Máy in nhiệt khổ 80mm (K80)
+  mm80(80);
+
+  final int paperSize;
+  const BuiltInPrinterType(this.paperSize);
+
+  static BuiltInPrinterType fromPaperSize(int size) {
+    if (size == 80) return BuiltInPrinterType.mm80;
+    if (size == 58) return BuiltInPrinterType.mm58;
+    return BuiltInPrinterType.none;
+  }
+}
+
 PrinterLabelPlatform get _platform => PrinterLabelPlatform.instance;
 
 /// Primary public class providing connections and print interfaces
@@ -148,12 +166,13 @@ class PrinterLabel {
     return await _platform.hasBuiltInPrinter();
   }
 
-  /// Gets the paper width of the built-in printer in millimeters (e.g., 58 or 80).
-  /// Returns `0` if the device has no built-in thermal printer.
-  /// Always returns `0` on iOS/Web/Desktop.
-  static Future<int> getBuiltInPrinterPaperSize() async {
-    if (!Platform.isAndroid) return 0;
-    return await _platform.getBuiltInPrinterPaperSize();
+  /// Gets the type (and paper size) of the built-in printer.
+  /// Returns `BuiltInPrinterType.none` if the device has no built-in thermal printer.
+  /// Always returns `BuiltInPrinterType.none` on iOS/Web/Desktop.
+  static Future<BuiltInPrinterType> getBuiltInPrinterType() async {
+    if (!Platform.isAndroid) return BuiltInPrinterType.none;
+    final size = await _platform.getBuiltInPrinterPaperSize();
+    return BuiltInPrinterType.fromPaperSize(size);
   }
 
   /// Retrieves a list of previously paired (bonded) Bluetooth devices.
@@ -162,7 +181,7 @@ class PrinterLabel {
     return await _platform.getBluetoothDevices(filterPrinterOnly: filterPrinterOnly);
   }
 
-  /// Stream emitting discovered Bluetooth devices during active scans.
+  /// Stream emitting discover.                       ed Bluetooth devices during active scans.
   ///
   /// If [filterPrinterOnly] is true (default), only devices recognized as printers are emitted.
   /// Call [startBluetoothScan] before listening to this stream on iOS.

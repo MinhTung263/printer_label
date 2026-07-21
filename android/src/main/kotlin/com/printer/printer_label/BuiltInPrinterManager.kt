@@ -13,10 +13,14 @@ fun isBuiltInPrinter(): Boolean {
            manufacturer.contains("imin") ||
            manufacturer.contains("pax") ||
            manufacturer.contains("urovo") ||
+           manufacturer.contains("smartpeak") ||
+           manufacturer.contains("kozen") ||
            model.contains("sunmi") ||
            model.contains("imin") ||
            model.contains("pax") ||
-           model.contains("urovo")
+           model.contains("urovo") ||
+           model.contains("b68") ||
+           model.contains("p068")
 }
 
 /**
