@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import '../src.dart';
@@ -74,6 +75,64 @@ class PrinterLabel {
   /// Connects to a network LAN printer using the specified [ipAddress].
   static Future<bool> connectLan({required String ipAddress}) async {
     return await _platform.connectLan(ipAddress: ipAddress);
+  }
+
+  /// Discovers LAN printers by scanning the local network for open port 9100.
+  /// 
+  /// Returns a stream of IP addresses (e.g. '192.168.1.10') that have the port open.
+  static Stream<String> discoverLanPrinters({
+    int port = 9100,
+    Duration timeout = const Duration(milliseconds: 500),
+  }) {
+    // ignore: close_sinks
+    final controller = StreamController<String>();
+
+    Future<void> scan() async {
+      try {
+        final interfaces = await NetworkInterface.list(
+          type: InternetAddressType.IPv4,
+          includeLoopback: false,
+        );
+
+        final futures = <Future<void>>[];
+
+        for (var interface in interfaces) {
+          for (var address in interface.addresses) {
+            final ip = address.address;
+            final parts = ip.split('.');
+            if (parts.length != 4) continue;
+            final subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+
+            for (int i = 1; i < 255; i++) {
+              final targetIp = '$subnet.$i';
+              if (targetIp == ip) continue;
+
+              futures.add(
+                Socket.connect(targetIp, port, timeout: timeout).then((socket) {
+                  socket.destroy();
+                  if (!controller.isClosed) {
+                    controller.add(targetIp);
+                  }
+                }).catchError((_) {
+                  // Ignore connection errors (e.g., timeout, connection refused)
+                }),
+              );
+            }
+          }
+        }
+
+        await Future.wait(futures);
+      } catch (e) {
+        // Ignore network errors
+      } finally {
+        if (!controller.isClosed) {
+          await controller.close();
+        }
+      }
+    }
+
+    scan();
+    return controller.stream;
   }
 
   /// Prints labels using TSPL commands from [labelModel].

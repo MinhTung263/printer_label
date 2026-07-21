@@ -106,6 +106,12 @@ class _MyHomePageState extends State<MyHomePage>
   StreamSubscription<BluetoothDeviceModel>? _btScanSub;
   final Set<String> _connectingBtMacs = {};
 
+  // Trạng thái quét mạng LAN
+  List<String> _lanDevices = [];
+  bool _isScanningLan = false;
+  bool _hasScannedLan = false;
+  StreamSubscription<String>? _lanScanSub;
+
   @override
   void initState() {
     super.initState();
@@ -143,6 +149,7 @@ class _MyHomePageState extends State<MyHomePage>
     focusNode.dispose();
     _usbSub?.cancel();
     _btScanSub?.cancel();
+    _lanScanSub?.cancel();
     if (Platform.isIOS) {
       PrinterLabel.stopBluetoothScan();
     }
@@ -175,6 +182,33 @@ class _MyHomePageState extends State<MyHomePage>
         _removeConnectedDevice(event.deviceId);
       }
     });
+  }
+
+  void _startLanScan() {
+    if (!mounted) return;
+    setState(() {
+      _isScanningLan = true;
+      _hasScannedLan = true;
+      _lanDevices.clear();
+    });
+
+    _lanScanSub?.cancel();
+    _lanScanSub = PrinterLabel.discoverLanPrinters().listen(
+      (ip) {
+        if (!mounted) return;
+        setState(() {
+          if (!_lanDevices.contains(ip)) {
+            _lanDevices.add(ip);
+          }
+        });
+      },
+      onDone: () {
+        if (mounted) setState(() => _isScanningLan = false);
+      },
+      onError: (_) {
+        if (mounted) setState(() => _isScanningLan = false);
+      },
+    );
   }
 
   Future<void> _startBtScan() async {
@@ -497,6 +531,14 @@ class _MyHomePageState extends State<MyHomePage>
               connectedDevices: _connectedDevices,
               hasBuiltInPrinter: _hasBuiltInPrinter,
               isBuiltInPrinterConnected: _isBuiltInPrinterConnected,
+              lanDevices: _lanDevices,
+              isScanningLan: _isScanningLan,
+              hasScannedLan: _hasScannedLan,
+              onRefreshLanScan: _startLanScan,
+              onConnectLanDevice: (ip) {
+                textEditingController.text = ip;
+                _connectLanPrinter();
+              },
               onConnectBuiltIn: () async {
                 setState(() => isConnecting = true);
                 try {

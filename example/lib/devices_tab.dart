@@ -24,6 +24,13 @@ class DevicesTab extends StatelessWidget {
   final VoidCallback? onConnectBuiltIn;
   final VoidCallback? onDisconnectBuiltIn;
 
+  // LAN inline parameters
+  final List<String> lanDevices;
+  final bool isScanningLan;
+  final bool hasScannedLan;
+  final VoidCallback onRefreshLanScan;
+  final Function(String ip) onConnectLanDevice;
+
   // Bluetooth inline parameters
   final List<BluetoothDeviceModel> btDevices;
   final bool isScanningBt;
@@ -51,6 +58,11 @@ class DevicesTab extends StatelessWidget {
     this.isBuiltInPrinterConnected = false,
     this.onConnectBuiltIn,
     this.onDisconnectBuiltIn,
+    required this.lanDevices,
+    required this.isScanningLan,
+    required this.hasScannedLan,
+    required this.onRefreshLanScan,
+    required this.onConnectLanDevice,
     required this.btDevices,
     required this.isScanningBt,
     required this.hasScannedBt,
@@ -518,6 +530,100 @@ class DevicesTab extends StatelessWidget {
                 ],
               ],
             ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Hoặc chọn máy in trong mạng",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF334155),
+                  ),
+                ),
+                if (isScanningLan)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  TextButton.icon(
+                    onPressed: onRefreshLanScan,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text("Quét"),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF4F46E5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                    ),
+                  ),
+              ],
+            ),
+            if (lanDevices.isEmpty && hasScannedLan && !isScanningLan)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: Text(
+                    "Không tìm thấy máy in LAN nào.\nHãy kiểm tra lại mạng của máy in.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
+                ),
+              )
+            else if (lanDevices.isNotEmpty)
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(top: 8),
+                itemCount: lanDevices.length,
+                separatorBuilder: (_, __) => Divider(
+                  height: 1,
+                  color: Colors.grey.shade100,
+                ),
+                itemBuilder: (context, index) {
+                  final ip = lanDevices[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(
+                      backgroundColor:
+                          const Color(0xFF4F46E5).withOpacity(0.1),
+                      child: const Icon(Icons.print,
+                          color: Color(0xFF4F46E5), size: 20),
+                    ),
+                    title: const Text(
+                      'Máy in LAN',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    subtitle: Text(
+                      ip,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    trailing: OutlinedButton(
+                      onPressed: () => onConnectLanDevice(ip),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF4F46E5),
+                        side: const BorderSide(color: Color(0xFF4F46E5)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text("Kết nối"),
+                    ),
+                  );
+                },
+              ),
           ],
         ),
       ),
