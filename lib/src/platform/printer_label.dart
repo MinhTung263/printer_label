@@ -82,46 +82,96 @@ class PrinterLabel {
   /// Returns a stream of IP addresses (e.g. '192.168.1.10') that have the port open.
   static Stream<String> discoverLanPrinters({
     int port = 9100,
-    Duration timeout = const Duration(milliseconds: 500),
+    Duration timeout = const Duration(milliseconds: 2000),
   }) {
     // ignore: close_sinks
     final controller = StreamController<String>();
 
-    Future<void> scan() async {
-      try {
+    Future<List<String>> getLocalIps() async {
+      List<String> validIps = [];
+      for (int retry = 0; retry < 5; retry++) {
         final interfaces = await NetworkInterface.list(
           type: InternetAddressType.IPv4,
           includeLoopback: false,
         );
-
-        final futures = <Future<void>>[];
-
+        validIps.clear();
         for (var interface in interfaces) {
           for (var address in interface.addresses) {
             final ip = address.address;
-            final parts = ip.split('.');
-            if (parts.length != 4) continue;
-            final subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
-
-            for (int i = 1; i < 255; i++) {
-              final targetIp = '$subnet.$i';
-              if (targetIp == ip) continue;
-
-              futures.add(
-                Socket.connect(targetIp, port, timeout: timeout).then((socket) {
-                  socket.destroy();
-                  if (!controller.isClosed) {
-                    controller.add(targetIp);
-                  }
-                }).catchError((_) {
-                  // Ignore connection errors (e.g., timeout, connection refused)
-                }),
-              );
+            bool isClassB = false;
+            if (ip.startsWith('172.')) {
+              final parts = ip.split('.');
+              if (parts.length >= 2) {
+                final secondOctet = int.tryParse(parts[1]) ?? 0;
+                isClassB = secondOctet >= 16 && secondOctet <= 31;
+              }
+            }
+            if (ip.startsWith('192.168.') || ip.startsWith('10.') || isClassB) {
+              validIps.add(ip);
             }
           }
         }
+        if (validIps.isNotEmpty) break;
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      return validIps;
+    }
 
-        await Future.wait(futures);
+    Future<int> scanPass(List<String> validIps) async {
+      int foundCount = 0;
+
+      for (var ip in validIps) {
+        final parts = ip.split('.');
+        if (parts.length != 4) continue;
+        final subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+
+        // Chia nhỏ (batch) mỗi lần quét 50 IP để tránh gây nghẽn Router (SYN flood)
+        // Router mạng gia đình thường sẽ drop packet nếu gửi 254 TCP kết nối cùng 1 lúc.
+        const int batchSize = 50;
+        final Duration batchTimeout = const Duration(milliseconds: 500);
+
+        for (int i = 1; i < 255; i += batchSize) {
+          final futures = <Future<void>>[];
+          
+          for (int j = i; j < i + batchSize && j < 255; j++) {
+            final targetIp = '$subnet.$j';
+            if (targetIp == ip) continue;
+
+            futures.add(
+              Socket.connect(targetIp, port, timeout: batchTimeout).then((socket) {
+                socket.destroy();
+                if (!controller.isClosed) {
+                  foundCount++;
+                  controller.add(targetIp);
+                }
+              }).catchError((_) {
+                // Ignore connection errors
+              }),
+            );
+          }
+          
+          // Đợi batch hiện tại xong (tối đa 500ms) rồi mới quét batch tiếp theo
+          await Future.wait(futures);
+          
+          if (controller.isClosed) break;
+        }
+      }
+      return foundCount;
+    }
+
+    Future<void> runScan() async {
+      try {
+        // Lần quét 1
+        List<String> currentIps = await getLocalIps();
+        int found = await scanPass(currentIps);
+
+        // Nếu không tìm thấy máy in nào, có thể do OS đang cache IP cũ hoặc ARP chưa cập nhật
+        if (found == 0 && !controller.isClosed) {
+          await Future.delayed(const Duration(milliseconds: 800)); // Chờ OS ổn định
+          List<String> newIps = await getLocalIps();
+          // Quét lại lần 2 (Auto retry)
+          await scanPass(newIps);
+        }
       } catch (e) {
         // Ignore network errors
       } finally {
@@ -131,7 +181,7 @@ class PrinterLabel {
       }
     }
 
-    scan();
+    runScan();
     return controller.stream;
   }
 

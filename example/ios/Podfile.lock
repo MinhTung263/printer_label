@@ -27,7 +27,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
-  printer_label: 6bad541fe7e8ca7ce9984a3b3d23c261e30dc1f2
+  printer_label: c38c67133050aeb0f0e962bb830f100a23f3d8f6
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
 
 PODFILE CHECKSUM: 3f50fa96dc602fee9487701c817dcc07a03f09c1
