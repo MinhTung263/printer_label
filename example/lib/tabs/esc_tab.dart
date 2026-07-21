@@ -459,7 +459,7 @@ class ThermalReceiptPreview extends StatelessWidget {
           children: [
             // Header cửa hàng
             const Text(
-              'PRINTER LABEL',
+              'PRINTER LABEL CAFE',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
@@ -470,33 +470,12 @@ class ThermalReceiptPreview extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             const Text(
-              'Hotline: 0202122223332',
+              'Đ/c: 68 P. Tôn Thất Tùng, Đống Đa, Hà Nội',
               textAlign: TextAlign.center,
               style: TextStyle(fontFamily: 'serif'),
             ),
             const Text(
-              'Hà Nội',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '15-01-2026 17:07:19',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
-            ),
-            const Text(
-              'Ngày 15 tháng 01 năm 2026',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
-            ),
-            const Text(
-              '15/01/2026',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
-            ),
-            const Text(
-              '15-01-2026',
+              'Hotline: 0909.123.456',
               textAlign: TextAlign.center,
               style: TextStyle(fontFamily: 'serif'),
             ),
@@ -504,7 +483,7 @@ class ThermalReceiptPreview extends StatelessWidget {
 
             // Tên hóa đơn
             const Text(
-              'HÓA ĐƠN BÁN HÀNG',
+              'PHIẾU THANH TOÁN',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
@@ -516,17 +495,12 @@ class ThermalReceiptPreview extends StatelessWidget {
 
             // Thông tin chi tiết hóa đơn
             const _ReceiptRow(
-              left: 'DH1558',
-              right: '15-01-2026 17:07:19',
-              isLeftBold: true,
+              left: 'Số phiếu: HD-1558',
+              right: 'Ngày: 15/01/2026 17:07',
             ),
             const _ReceiptRow(
-              left: 'Mã cơ quan thuế',
-              right: 'M1-26-J1PP1-11031611359',
-            ),
-            const _ReceiptRow(
-              left: 'Khách hàng',
-              right: 'Khách lẻ không lấy hóa đơn',
+              left: 'Thu ngân: Nguyễn Văn A',
+              right: 'Bàn: 05',
             ),
             const SizedBox(height: 10),
 
@@ -648,7 +622,7 @@ class ThermalReceiptPreview extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Bánh sừng bò trứng muối',
+                          Text('Bánh sừng bò',
                               style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontFamily: 'serif')),
@@ -679,75 +653,47 @@ class ThermalReceiptPreview extends StatelessWidget {
             const SizedBox(height: 8),
 
             // Phần tính tiền tổng cộng
-            const _ReceiptRow(left: 'Tạm tính', right: '164,000'),
-            const _ReceiptRow(left: 'Tổng cộng', right: '164,000'),
-            const _ReceiptRow(
-                left: 'Tổng tiền thuế (VAT 10%)', right: '16,400'),
-            const _ReceiptRow(left: 'Giảm trừ thuế', right: ''),
+            const _ReceiptRow(left: 'Tổng tiền', right: '164,000'),
+            const _ReceiptRow(left: 'Giảm giá (10%)', right: '-16,400'),
             const _ReceiptRow(
               left: 'Khách phải trả',
-              right: '180,400',
+              right: '147,600',
               isRightBold: true,
             ),
+            const SizedBox(height: 4),
+            const _ReceiptRow(left: 'Tiền khách đưa', right: '150,000'),
+            const _ReceiptRow(left: 'Tiền thối lại', right: '2,400'),
 
             const SizedBox(height: 8),
             const Divider(color: Colors.black, height: 1, thickness: 1),
             const SizedBox(height: 12),
             const Text(
-              'Thanh toán Chuyển khoản',
+              'Wi-Fi: PrinterLabelCafe\nPass: 12345678',
               textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
+              style: TextStyle(fontFamily: 'serif', fontSize: 13),
             ),
+            const SizedBox(height: 8),
             const Text(
-              'CẢM ƠN QUÝ KHÁCH',
+              'XIN CẢM ƠN VÀ HẸN GẶP LẠI!',
               textAlign: TextAlign.center,
               style:
                   TextStyle(fontWeight: FontWeight.bold, fontFamily: 'serif'),
             ),
-            const SizedBox(height: 8),
-            const Divider(color: Colors.black, height: 1, thickness: 1),
             const SizedBox(height: 12),
             // Mã QR tra cứu vẽ bằng QrImageView
-            const Text(
-              'Mã QR tra cứu',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
-            ),
-            const SizedBox(height: 8),
             Center(
               child: QrImageView(
                 data: 'https://github.com/MinhTung263/printer_label',
                 version: QrVersions.auto,
-                size: 100.0,
+                size: 80.0,
                 gapless: false,
-                foregroundColor: Colors.black,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             const Text(
-              'Mã tra cứu',
+              'Quét để xem Menu',
               textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
-            ),
-            const Text(
-              '4u2gzeq367i8',
-              textAlign: TextAlign.center,
-              style:
-                  TextStyle(fontWeight: FontWeight.bold, fontFamily: 'serif'),
-            ),
-            const Text(
-              'Tra cứu hóa đơn tại',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontFamily: 'serif'),
-            ),
-            const Text(
-              'https://github.com/MinhTung263/printer_label',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                decoration: TextDecoration.underline,
-                fontFamily: 'serif',
-                fontSize: 11,
-              ),
+              style: TextStyle(fontFamily: 'serif', fontSize: 11),
             ),
           ],
         ),
