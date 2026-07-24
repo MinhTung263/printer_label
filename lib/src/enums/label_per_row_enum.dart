@@ -66,6 +66,15 @@ class LabelPerRow {
     triple26x26,
   ];
 
+  /// Tìm khổ tem theo [name] đã lưu (VD 'single_40_30'); trả null nếu không khớp.
+  static LabelPerRow? fromName(String? name) {
+    if (name == null) return null;
+    for (final e in values) {
+      if (e.name == name) return e;
+    }
+    return null;
+  }
+
   // Lấy thông tin
   int? get width => _config.width;
   int? get height => _config.height;

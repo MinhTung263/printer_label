@@ -12,6 +12,20 @@ import net.posprinter.POSConst
 import net.posprinter.POSPrinter
 
 class PrinterThermal {
+    companion object {
+        // Khóa gửi RIÊNG cho TỪNG máy in (theo đối tượng IDeviceConnection).
+        // SDK POSConnect có hàng đợi + luồng gửi riêng cho mỗi connection, nên 2 máy
+        // KHÁC nhau in được song song. Chỉ cần tuần tự hóa các lần gửi trên CÙNG một
+        // máy (nhiều chunk/nhiều job vào chung 1 connection) để byte không chèn vào
+        // nhau gây in ra ký tự rác. Nhờ vậy in cùng lúc 2 máy không phải đợi nhau.
+        @JvmStatic
+        val sendLocks = java.util.concurrent.ConcurrentHashMap<IDeviceConnection, Any>()
+
+        @JvmStatic
+        fun lockFor(conn: IDeviceConnection): Any =
+            sendLocks.getOrPut(conn) { Any() }
+    }
+
     fun printImageESC(
         call: MethodCall,
         curConnect: IDeviceConnection,
@@ -66,27 +80,31 @@ class PrinterThermal {
                 
                 val allBytes = stream.toByteArray()
 
-                if (isBluetooth && !isTargetBuiltIn) {
-                    // Cấu hình vừa tầm cân bằng cho máy in Bluetooth ngoài: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
-                    val chunkSize = 120
-                    var offset = 0
-                    var bytesSentInBlock = 0
-                    while (offset < allBytes.size) {
-                        val count = Math.min(chunkSize, allBytes.size - offset)
-                        val chunk = allBytes.copyOfRange(offset, offset + count)
-                        curConnect.sendSync(chunk)
-                        offset += count
-                        bytesSentInBlock += count
-                        
-                        Thread.sleep(4)
-                        if (bytesSentInBlock >= 1500) {
-                            Thread.sleep(80)
-                            bytesSentInBlock = 0
+                // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection).
+                // Các máy khác dùng khóa khác nên vẫn in song song, không đợi nhau.
+                synchronized(lockFor(curConnect)) {
+                    if (isBluetooth && !isTargetBuiltIn) {
+                        // Cấu hình vừa tầm cân bằng cho máy in Bluetooth ngoài: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
+                        val chunkSize = 120
+                        var offset = 0
+                        var bytesSentInBlock = 0
+                        while (offset < allBytes.size) {
+                            val count = Math.min(chunkSize, allBytes.size - offset)
+                            val chunk = allBytes.copyOfRange(offset, offset + count)
+                            curConnect.sendSync(chunk)
+                            offset += count
+                            bytesSentInBlock += count
+
+                            Thread.sleep(4)
+                            if (bytesSentInBlock >= 1500) {
+                                Thread.sleep(80)
+                                bytesSentInBlock = 0
+                            }
                         }
+                    } else {
+                        // In lập tức không trễ đối với cổng USB, LAN hoặc máy in tích hợp sẵn
+                        curConnect.sendSync(allBytes)
                     }
-                } else {
-                    // In lập tức không trễ đối với cổng USB, LAN hoặc máy in tích hợp sẵn
-                    curConnect.sendSync(allBytes)
                 }
 
                 Handler(Looper.getMainLooper()).post {
@@ -153,10 +171,12 @@ class PrinterThermal {
         val printer = POSPrinter(curConnect)
         val text = call.argument<String>("text") ?: ""
         try {
-            printer.initializePrinter()
-                .printText(text, 0, POSConst.ALIGNMENT_LEFT, 0)
-                .feedLine()
-                .cutHalfAndFeed(1)
+            synchronized(lockFor(curConnect)) {
+                printer.initializePrinter()
+                    .printText(text, 0, POSConst.ALIGNMENT_LEFT, 0)
+                    .feedLine()
+                    .cutHalfAndFeed(1)
+            }
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
@@ -185,10 +205,12 @@ class PrinterThermal {
                 "CODE93" -> 72
                 else -> 73
             }
-            printer.initializePrinter()
-                .printBarCode(code, type, width, height, 2)
-                .feedLine()
-                .cutHalfAndFeed(1)
+            synchronized(lockFor(curConnect)) {
+                printer.initializePrinter()
+                    .printBarCode(code, type, width, height, 2)
+                    .feedLine()
+                    .cutHalfAndFeed(1)
+            }
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
@@ -220,8 +242,10 @@ class PrinterThermal {
             
             // 5. Cut paper (GS V 66 1)
             stream.write(byteArrayOf(0x1D, 0x56, 0x42, 0x01))
-            
-            curConnect.sendData(stream.toByteArray())
+
+            synchronized(lockFor(curConnect)) {
+                curConnect.sendData(stream.toByteArray())
+            }
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)

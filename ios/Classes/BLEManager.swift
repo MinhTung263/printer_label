@@ -20,6 +20,23 @@ final class BLEManager: NSObject {
     private let connectTimeoutInterval: TimeInterval = 5.0 // 5 giây
 
     private let minScanRSSI: Int = -70
+
+    // Hàng đợi ghi TUẦN TỰ RIÊNG cho TỪNG máy in (theo identifier). Mỗi máy BLE là
+    // một peripheral độc lập, nên 2 máy KHÁC nhau ghi song song được — chỉ cần
+    // các gói trên CÙNG một máy đi tuần tự để không chèn vào nhau gây in ra rác.
+    // Nhờ vậy in cùng lúc nhiều máy không phải đợi nhau.
+    private var writeQueues: [String: DispatchQueue] = [:]
+    private let writeQueuesLock = NSLock()
+
+    private func writeQueue(for identifier: String) -> DispatchQueue {
+        writeQueuesLock.lock()
+        defer { writeQueuesLock.unlock() }
+        if let q = writeQueues[identifier] { return q }
+        let q = DispatchQueue(label: "com.printer.printer_label.ble.write.\(identifier)")
+        writeQueues[identifier] = q
+        return q
+    }
+
     var scanEventSink: FlutterEventSink?
     /// true = chỉ hiển thị thiết bị BLE được nhận dạng là máy in, false = tất cả thiết bị
     var filterPrinterOnly: Bool = true
@@ -162,8 +179,10 @@ final class BLEManager: NSObject {
         let safeMaxChunkSize = 180
         let chunkSize = min(peripheral.maximumWriteValueLength(for: writeType), safeMaxChunkSize)
         
-        // Đưa việc ghi dữ liệu vào Background Thread để tránh block Main Thread (gây khựng UI)
-        DispatchQueue.global(qos: .userInitiated).async {
+        // Ghi trên hàng đợi TUẦN TỰ RIÊNG của máy này: vừa tránh block Main Thread
+        // (gây khựng UI), vừa đảm bảo các gói trên cùng máy không chèn vào nhau.
+        // Máy khác có hàng đợi riêng nên vẫn in song song.
+        writeQueue(for: identifier).async {
             var offset = 0
             
             while offset < data.count {

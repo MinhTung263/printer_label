@@ -701,20 +701,25 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 }
                 bitmap.recycle()
  
-                printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
-                    .gapMm(gapWidth, gapHeight)
-                    .reference(0, 0)
-                    .direction(0)
-                    .cls()
-                    .bitmap(
-                        0,
-                        0,
-                        TSPLConst.BMP_MODE_OVERWRITE,
-                        targetWidthDots,
-                        shifted,
-                        AlgorithmType.Threshold
-                    )
-                    .print(1)
+                // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection), khớp
+                // với cơ chế khóa của luồng ESC. Các máy khác dùng khóa khác nên vẫn
+                // in song song, không đợi nhau.
+                synchronized(PrinterThermal.lockFor(conn)) {
+                    printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
+                        .gapMm(gapWidth, gapHeight)
+                        .reference(0, 0)
+                        .direction(0)
+                        .cls()
+                        .bitmap(
+                            0,
+                            0,
+                            TSPLConst.BMP_MODE_OVERWRITE,
+                            targetWidthDots,
+                            shifted,
+                            AlgorithmType.Threshold
+                        )
+                        .print(1)
+                }
 
                 shifted.recycle()
             }
