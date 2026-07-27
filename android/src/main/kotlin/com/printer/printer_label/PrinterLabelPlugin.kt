@@ -64,6 +64,11 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     internal val connectionTypes = mutableMapOf<String, ConnectionType>()
     internal var isBuiltInPrinterDisabled = false
 
+    // Tập deviceId được đánh dấu tường minh là MÁY IN TÍCH HỢP ngay khi kết nối.
+    // Đây là nguồn nhận diện CHÍNH (chính xác cho mọi hãng), thay vì đoán lại
+    // qua tên Bluetooth. Nhận diện theo tên chỉ còn là lớp dự phòng.
+    internal val builtInDeviceIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     // Maps stable USB id → actual device path (e.g. /dev/bus/usb/001/002)
     // Updated each time the device is attached so rawId() always has the current path.
     private val usbDevicePaths = mutableMapOf<String, String>()
@@ -303,18 +308,24 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         val deviceId = call.argument<String>("device_id")
         val targets = mutableListOf<IDeviceConnection>()
 
-        // 1. Nếu thiết bị hỗ trợ in trực tiếp (Built-in Printer), luôn ưu tiên kết nối và thêm nó vào targets đầu tiên
-        if (isBuiltInPrinter() && !isBuiltInPrinterDisabled) {
-            val isConnected = connections.values.any { bluetoothManager.isConnectionToBuiltInPrinter(it) && it.isConnect }
-            if (!isConnected) {
-                bluetoothManager.autoConnectBuiltInSync()
+        // 1. Máy in tích hợp CHỈ được in khi được chọn tường minh bằng device_id == "BUILT_IN".
+        //    Trước đây built-in luôn tự động được thêm vào mọi lệnh in nên nó luôn tự in ra;
+        //    nay chỉ kết nối và thêm nó khi người dùng chủ động chỉ định.
+        if (deviceId == "BUILT_IN") {
+            if (isBuiltInPrinter() && !isBuiltInPrinterDisabled) {
+                val isConnected = connections.values.any { bluetoothManager.isConnectionToBuiltInPrinter(it) && it.isConnect }
+                if (!isConnected) {
+                    bluetoothManager.autoConnectBuiltInSync()
+                }
+                val builtInConn = connections.entries.firstOrNull {
+                    bluetoothManager.isConnectionToBuiltInPrinter(it.value) && isConnectionActive(it.key)
+                }?.value
+                if (builtInConn != null) {
+                    targets.add(builtInConn)
+                }
             }
-            val builtInConn = connections.entries.firstOrNull { 
-                bluetoothManager.isConnectionToBuiltInPrinter(it.value) && isConnectionActive(it.key) 
-            }?.value
-            if (builtInConn != null) {
-                targets.add(builtInConn)
-            }
+            // device_id là sentinel built-in — không tiếp tục xử lý như một khóa kết nối thường.
+            return targets
         }
 
         // 2. Thêm thiết bị được chỉ định cụ thể qua deviceId (nếu có)
@@ -435,6 +446,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                     builtInEntry.value.close()
                     connections.remove(builtInEntry.key)
                     connectionTypes.remove(builtInEntry.key)
+                    builtInDeviceIds.remove(builtInEntry.key)
                 }
                 isBuiltInPrinterDisabled = true
                 result.success(true)
@@ -443,6 +455,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             connections[deviceId]?.close()
             connections.remove(deviceId)
             connectionTypes.remove(deviceId)
+            builtInDeviceIds.remove(deviceId)
             result.success(true)
         } catch (e: Exception) {
             result.error("DISCONNECT_ERROR", e.message, null)
@@ -454,6 +467,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             connections.values.forEach { runCatching { it.close() } }
             connections.clear()
             connectionTypes.clear()
+            builtInDeviceIds.clear()
             result.success(true)
         } catch (e: Exception) {
             result.error("DISCONNECT_ERROR", e.message, null)

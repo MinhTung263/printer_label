@@ -109,7 +109,8 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
     
                 "print_text_esc" -> {
-                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                    // Máy Urovo tích hợp chỉ in khi được chọn tường minh (device_id == "BUILT_IN").
+                    if (isBuiltInTarget(call) && UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
                         plugin.printTextESCUrovo(call, result)
                     } else {
                         runPrintJob(call, result) { conn, targetResult ->
@@ -118,7 +119,7 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                 }
                 "print_barcode_esc" -> {
-                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                    if (isBuiltInTarget(call) && UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
                         plugin.printBarcodeESCUrovo(call, result)
                     } else {
                         runPrintJob(call, result) { conn, targetResult ->
@@ -127,7 +128,7 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                 }
                 "print_qrcode_esc" -> {
-                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                    if (isBuiltInTarget(call) && UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
                         plugin.printQrCodeESCUrovo(call, result)
                     } else {
                         runPrintJob(call, result) { conn, targetResult ->
@@ -135,9 +136,9 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                         }
                     }
                 }
-    
+
                 "print_image_esc" -> {
-                    if (UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
+                    if (isBuiltInTarget(call) && UrovoPrinterManager.isUrovoDevice() && !plugin.isBuiltInPrinterDisabled) {
                         plugin.printImageESCUrovo(call, result)
                     } else {
                         runPrintJob(call, result) { conn, targetResult ->
@@ -206,6 +207,10 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
             result.error("METHOD_CALL_ERROR", e.message, null)
         }
     }
+
+    /** Lệnh in có chủ đích nhắm tới máy in tích hợp không (device_id == "BUILT_IN"). */
+    private fun isBuiltInTarget(call: MethodCall): Boolean =
+        call.argument<String>("device_id") == "BUILT_IN"
 
     private fun runPrintJob(call: MethodCall, result: Result, job: (IDeviceConnection, Result) -> Unit) {
         kotlin.concurrent.thread {

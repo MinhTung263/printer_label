@@ -263,7 +263,7 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         btScanReceiver = null
     }
 
-    internal fun connectBt(macAddress: String, result: Result) {
+    internal fun connectBt(macAddress: String, result: Result, markBuiltIn: Boolean = false) {
         val deviceId = "BT:$macAddress"
         try {
             if (macAddress.isEmpty()) {
@@ -276,6 +276,11 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             }
 
             stopBluetoothScan()
+
+            // Đánh dấu tường minh đây là máy in tích hợp (luồng auto-connect built-in).
+            if (markBuiltIn) {
+                plugin.builtInDeviceIds.add(deviceId)
+            }
 
             plugin.pendingConnects[deviceId] = PrinterLabelPlugin.PendingConnect(result, ConnectionType.BT, deviceId)
             runCatching { plugin.connections[deviceId]?.close() }
@@ -306,9 +311,12 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
 
         requestConnectPermissions { granted ->
             if (granted) {
-                // 1. Kiểm tra xem đã có kết nối nào đang hoạt động chưa
-                val activeConn = plugin.connections.values.firstOrNull { it.isConnect }
-                if (activeConn != null) {
+                // 1. Chỉ coi là đã kết nối khi có kết nối MÁY IN TÍCH HỢP đang hoạt động
+                //    (không tính máy ngoài), để không bỏ qua bước đánh dấu built-in.
+                val hasBuiltInConn = plugin.connections.entries.any {
+                    isConnectionToBuiltInPrinter(it.value) && plugin.isConnectionActive(it.key)
+                }
+                if (hasBuiltInConn) {
                     result.success(true)
                     return@requestConnectPermissions
                 }
@@ -407,34 +415,17 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
 
     private fun findAndConnectBuiltInPrinter(adapter: BluetoothAdapter, result: Result) {
         try {
-            var printerMac: String? = null
             val pairedDevices: Set<BluetoothDevice>? = adapter.bondedDevices
-            pairedDevices?.forEach { device ->
-                val name = device.name ?: ""
-                if (name.contains("SUNMI", ignoreCase = true) || 
-                    name.contains("iMin", ignoreCase = true) || 
-                    name.contains("Pax", ignoreCase = true) || 
-                    name.contains("Urovo", ignoreCase = true) || 
-                    name.contains("B68", ignoreCase = true) ||
-                    name.contains("P068", ignoreCase = true) ||
-                    name.contains("SmartPos", ignoreCase = true) ||
-                    name.contains("InnerPrinter", ignoreCase = true) ||
-                    name.contains("Inner Printer", ignoreCase = true) ||
-                    name.contains("BluetoothPrinter", ignoreCase = true) ||
-                    name.contains("Bluetooth Printer", ignoreCase = true) ||
-                    name.contains("Builtin Printer", ignoreCase = true) ||
-                    name.contains("Built-in Printer", ignoreCase = true)) {
-                    printerMac = device.address
-                }
-            }
-
+            // 1) Ưu tiên khớp theo tên (dùng danh sách chung)
+            var printerMac: String? = pairedDevices?.firstOrNull {
+                isBuiltInPrinterName(it.name)
+            }?.address
+            // 2) Fallback: thiết bị Bluetooth được nhận dạng là máy in (IMAGING/isPrinter)
             if (printerMac == null) {
-                // Fallback: Nếu không khớp tên, tìm thiết bị Bluetooth đầu tiên được nhận dạng là máy in
-                val fallbackDevice = pairedDevices?.firstOrNull {
+                printerMac = pairedDevices?.firstOrNull {
                     val majorClass = it.bluetoothClass?.majorDeviceClass
                     majorClass == android.bluetooth.BluetoothClass.Device.Major.IMAGING || isPrinter(it)
-                }
-                printerMac = fallbackDevice?.address
+                }?.address
             }
 
             val mac = printerMac ?: run {
@@ -442,8 +433,8 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                 return
             }
 
-            // Kết nối bằng hàm connectBt hiện có
-            connectBt(mac, result)
+            // Kết nối và ĐÁNH DẤU đây là máy in tích hợp.
+            connectBt(mac, result, markBuiltIn = true)
         } catch (e: Exception) {
             result.success(false)
         }
@@ -814,6 +805,22 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
 
     companion object {
         internal const val REQUEST_ENABLE_BT = 1001
+
+        // Từ khóa nhận diện tên Bluetooth của máy in tích hợp — chỉ dùng làm LỚP DỰ
+        // PHÒNG (nguồn chính là builtInDeviceIds được đánh dấu lúc kết nối). Gom về
+        // một nơi để không bị lệch danh sách giữa các hàm.
+        private val BUILT_IN_NAME_KEYWORDS = listOf(
+            "SUNMI", "iMin", "Pax", "Urovo", "B68", "P068", "SmartPos",
+            "InnerPrinter", "Inner Printer",
+            "BluetoothPrinter", "Bluetooth Printer",
+            "Builtin Printer", "Built-in Printer"
+        )
+
+        /** Tên Bluetooth [name] có khớp mẫu máy in tích hợp không. */
+        internal fun isBuiltInPrinterName(name: String?): Boolean {
+            if (name.isNullOrEmpty()) return false
+            return BUILT_IN_NAME_KEYWORDS.any { name.contains(it, ignoreCase = true) }
+        }
     }
 
     internal fun autoConnectBuiltInSync(): Boolean {
@@ -883,33 +890,31 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         }
 
         // Tìm MAC address của máy in tích hợp
-        var printerMac: String? = null
         val pairedDevices: Set<BluetoothDevice>? = try {
             adapter.bondedDevices
         } catch (_: SecurityException) {
             null
         }
-        pairedDevices?.forEach { device ->
-            val name = try { device.name ?: "" } catch (_: SecurityException) { "" }
-            if (name.contains("SUNMI", ignoreCase = true) || 
-                name.contains("iMin", ignoreCase = true) || 
-                name.contains("Pax", ignoreCase = true) || 
-                name.contains("Urovo", ignoreCase = true) || 
-                name.contains("InnerPrinter", ignoreCase = true) ||
-                name.contains("Inner Printer", ignoreCase = true) ||
-                name.contains("Builtin Printer", ignoreCase = true) ||
-                name.contains("Built-in Printer", ignoreCase = true)) {
-                printerMac = device.address
-            }
+        // 1) Ưu tiên khớp theo tên (dùng danh sách chung)
+        var printerMac: String? = pairedDevices?.firstOrNull {
+            val name = try { it.name } catch (_: SecurityException) { null }
+            isBuiltInPrinterName(name)
+        }?.address
+        // 2) Fallback: thiết bị Bluetooth được nhận dạng là máy in (IMAGING/isPrinter)
+        if (printerMac == null) {
+            printerMac = pairedDevices?.firstOrNull {
+                val majorClass = try { it.bluetoothClass?.majorDeviceClass } catch (_: SecurityException) { null }
+                majorClass == android.bluetooth.BluetoothClass.Device.Major.IMAGING || isPrinter(it)
+            }?.address
         }
 
         val mac = printerMac ?: return false
-        
-        // Kết nối đồng bộ bằng CountDownLatch
-        return connectBtSync(mac)
+
+        // Kết nối đồng bộ và ĐÁNH DẤU đây là máy in tích hợp.
+        return connectBtSync(mac, markBuiltIn = true)
     }
 
-    internal fun connectBtSync(macAddress: String): Boolean {
+    internal fun connectBtSync(macAddress: String, markBuiltIn: Boolean = false): Boolean {
         val deviceId = "BT:$macAddress"
         try {
             if (macAddress.isEmpty()) return false
@@ -931,10 +936,14 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                 latch.countDown()
             }
             device.connect(plugin.rawId(deviceId), listener)
-            
+
             // Chờ tối đa 3.5 giây cho việc kết nối hoàn tất
             latch.await(3500, java.util.concurrent.TimeUnit.MILLISECONDS)
-            return device.isConnect
+            val connected = device.isConnect
+            if (connected && markBuiltIn) {
+                plugin.builtInDeviceIds.add(deviceId)
+            }
+            return connected
         } catch (e: Exception) {
             e.printStackTrace()
             return false
@@ -944,26 +953,18 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
     internal fun isConnectionToBuiltInPrinter(conn: IDeviceConnection): Boolean {
         // Tìm deviceId của connection này trong map
         val deviceId = plugin.connections.entries.find { it.value == conn }?.key ?: return false
-        
-        // Nếu không phải kết nối Bluetooth thì chắc chắn không phải máy in tích hợp ảo
+
+        // NGUỒN CHÍNH: connection đã được đánh dấu tường minh là built-in khi kết nối.
+        // Chính xác cho mọi hãng, không phụ thuộc tên Bluetooth.
+        if (plugin.builtInDeviceIds.contains(deviceId)) return true
+
+        // DỰ PHÒNG: nếu vì lý do nào đó chưa được đánh dấu, thử nhận diện qua tên BT.
         if (plugin.connectionTypes[deviceId] != ConnectionType.BT) return false
-        
-        // Kiểm tra tên Bluetooth device xem có phải máy in ảo tích hợp không
         try {
             val btAdapter = (plugin.mContext?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
             val mac = deviceId.substringAfter("BT:")
             val btDevice = btAdapter?.getRemoteDevice(mac)
-            val name = btDevice?.name ?: ""
-            return name.contains("SUNMI", ignoreCase = true) || 
-                   name.contains("iMin", ignoreCase = true) || 
-                   name.contains("Pax", ignoreCase = true) || 
-                   name.contains("Urovo", ignoreCase = true) || 
-                   name.contains("InnerPrinter", ignoreCase = true) ||
-                   name.contains("Inner Printer", ignoreCase = true) ||
-                   name.contains("BluetoothPrinter", ignoreCase = true) ||
-                   name.contains("Bluetooth Printer", ignoreCase = true) ||
-                   name.contains("Builtin Printer", ignoreCase = true) ||
-                   name.contains("Built-in Printer", ignoreCase = true)
+            return isBuiltInPrinterName(btDevice?.name)
         } catch (e: Exception) {
             return false
         }

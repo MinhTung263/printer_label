@@ -30,13 +30,25 @@ class _EscTabState extends State<EscTab> {
       _hasBuiltInPrinter && widget.isBuiltInPrinterConnected;
 
   List<String?> get _targetDeviceIds {
+    final ids = <String?>[];
+
+    // Luôn thêm tất cả máy ngoài đang kết nối.
     if (widget.connectedDevices.isNotEmpty) {
-      return widget.connectedDevices.map((d) => d.id).toList();
+      ids.addAll(widget.connectedDevices.map((d) => d.id));
     }
+
+    // Máy in tích hợp chỉ in khi được chỉ định tường minh bằng DeviceId.builtIn.
+    // Nếu built-in đang bật thì thêm vào danh sách để in song song cùng máy ngoài.
     if (_isBuiltInPrinterActive) {
-      return [null]; // null đại diện cho máy in tích hợp sẵn
+      ids.add(DeviceId.builtIn);
     }
-    return [DeviceId.lan(widget.ipAddress)];
+
+    // Không có máy nào ở trên: fallback in ra máy LAN theo IP đã nhập.
+    if (ids.isEmpty) {
+      ids.add(DeviceId.lan(widget.ipAddress));
+    }
+
+    return ids;
   }
 
   @override
@@ -63,38 +75,6 @@ class _EscTabState extends State<EscTab> {
     showTopNotification(context, 'Vui lòng kết nối máy in trước khi in!');
   }
 
-  Future<void> _printBuiltInExample() async {
-    if (!widget.isBuiltInPrinterConnected) {
-      _showNoConnectionMsg();
-      return;
-    }
-    setState(() => _isPrintingEsc = true);
-    try {
-      for (int i = 0; i < _printQuantity; i++) {
-        await ESCPrintService.instance.printWidget(
-          widget: ThermalReceiptPreview(
-            size: _selectedSize,
-            isForPrinting: true,
-          ),
-          size: _selectedSize,
-        );
-      }
-      if (mounted) {
-        showTopNotification(
-          context,
-          'Đã kết nối và gửi lệnh in máy in tích hợp sẵn thành công!',
-          isError: false,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi in tự động máy in tích hợp: $e');
-      }
-    } finally {
-      if (mounted) setState(() => _isPrintingEsc = false);
-    }
-  }
-
   Future<void> _printExample() async {
     if (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive) {
       _showNoConnectionMsg();
@@ -102,27 +82,26 @@ class _EscTabState extends State<EscTab> {
     }
     setState(() => _isPrintingEsc = true);
     try {
-      // In toàn bộ hóa đơn dưới dạng hình ảnh trên tất cả thiết bị đang kết nối
-      for (final deviceId in _targetDeviceIds) {
+      final deviceIds = _targetDeviceIds.whereType<String>().toList();
+      // Mỗi bản in: chụp ảnh MỘT lần rồi gửi SONG SONG tới tất cả máy.
+      for (int i = 0; i < _printQuantity; i++) {
         try {
-          for (int i = 0; i < _printQuantity; i++) {
-            await ESCPrintService.instance.printWidget(
-              deviceId: deviceId,
-              widget: ThermalReceiptPreview(
-                size: _selectedSize,
-                isForPrinting: true,
-              ),
+          await ESCPrintService.instance.printWidgetToDevices(
+            deviceIds: deviceIds,
+            widget: ThermalReceiptPreview(
               size: _selectedSize,
-            );
-            if (_printQuantity > 1) {
-              await Future.delayed(const Duration(milliseconds: 500));
-            }
-          }
+              isForPrinting: true,
+            ),
+            size: _selectedSize,
+          );
         } catch (e) {
-          debugPrint('Lỗi in hóa đơn trên $deviceId: $e');
+          debugPrint('Lỗi in hóa đơn: $e');
           if (mounted) {
-            showTopNotification(context, 'Lỗi in trên $deviceId: $e');
+            showTopNotification(context, 'Lỗi in: $e');
           }
+        }
+        if (_printQuantity > 1 && i < _printQuantity - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
         }
       }
     } finally {
@@ -353,12 +332,8 @@ class _EscTabState extends State<EscTab> {
                         return;
                       }
 
-                      if (widget.connectedDevices.isEmpty &&
-                          _isBuiltInPrinterActive) {
-                        _printBuiltInExample();
-                      } else {
-                        _printExample();
-                      }
+                      // _printExample() đã bao gồm cả built-in (qua _targetDeviceIds).
+                      _printExample();
                     },
               icon: _isPrintingEsc
                   ? const SizedBox(

@@ -27,6 +27,38 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
   }
 
   @override
+  Future<void> printWidgetToDevices({
+    required Widget widget,
+    required TicketSize size,
+    required List<String> deviceIds,
+    double? pixelRatio,
+  }) async {
+    if (deviceIds.isEmpty) return;
+
+    // Chụp ảnh widget MỘT lần duy nhất rồi tối ưu kích thước, tránh render lại cho từng máy.
+    final imageBytes = await WidgetCaptureHelper.captureFromLongWidget(
+      widget,
+      pixelRatio: pixelRatio ?? (size == TicketSize.mm58 ? 1.6 : 1.8),
+    );
+    final resizedImage = await resizeThermalImage(
+      imageBytes: imageBytes,
+      size: size,
+    );
+    final model = PrintThermalModel(image: resizedImage, size: size);
+
+    // Gửi lệnh in tới tất cả máy SONG SONG. Native tuần tự hóa theo từng
+    // connection nên các máy khác nhau không phải đợi nhau.
+    await Future.wait(
+      deviceIds.map(
+        (id) => PrinterLabel.printESC(
+          deviceId: id,
+          printThermalModel: model,
+        ),
+      ),
+    );
+  }
+
+  @override
   Future<void> print({
     String? deviceId,
     PrinterConnectionType? connectionType,

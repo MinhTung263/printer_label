@@ -27,6 +27,24 @@ class ESCPrintService {
     );
   }
 
+  /// Chụp [widget] một lần rồi in song song ra tất cả [deviceIds].
+  ///
+  /// Phù hợp khi in cùng một hóa đơn ra nhiều máy cùng lúc (ví dụ nhiều máy
+  /// ngoài kèm máy in tích hợp) mà không phải render lại ảnh hay in tuần tự.
+  Future<void> printWidgetToDevices({
+    required Widget widget,
+    required TicketSize size,
+    required List<String> deviceIds,
+    double? pixelRatio,
+  }) {
+    return ESCPrintServicePlatform.instance.printWidgetToDevices(
+      widget: widget,
+      size: size,
+      deviceIds: deviceIds,
+      pixelRatio: pixelRatio,
+    );
+  }
+
   /// Prints a thermal receipt from the specified [model].
   Future<void> print({
     String? deviceId,
@@ -39,8 +57,6 @@ class ESCPrintService {
       model: model,
     );
   }
-
-
 
   /// Prints raw text directly using ESC/POS printer commands.
   Future<void> printText({

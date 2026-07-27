@@ -136,7 +136,7 @@ class _MyHomePageState extends State<MyHomePage>
 
     // Tự động kết nối ngầm máy in tích hợp khi mở app
     final connected = await PrinterLabel.autoConnectBuiltIn();
-    
+
     if (mounted) {
       setState(() => _isBuiltInPrinterConnected = connected);
     }

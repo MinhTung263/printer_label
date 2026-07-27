@@ -27,6 +27,18 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
     double? pixelRatio,
   });
 
+  /// Chụp [widget] một lần rồi in song song ra tất cả [deviceIds].
+  ///
+  /// Dùng khi cần in cùng một hóa đơn ra nhiều máy (máy ngoài + máy tích hợp).
+  /// Ảnh chỉ được render một lần và các lệnh gửi chạy song song để không phải
+  /// đợi từng máy in xong tuần tự.
+  Future<void> printWidgetToDevices({
+    required Widget widget,
+    required TicketSize size,
+    required List<String> deviceIds,
+    double? pixelRatio,
+  });
+
   Future<void> print({
     String? deviceId,
     PrinterConnectionType? connectionType,
