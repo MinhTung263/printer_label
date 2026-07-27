@@ -327,10 +327,19 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     }
 
     private func routeToBLE(_ data: Data, identifier: String?) {
+        // sendToPrinter là fire-and-forget nên không có FlutterResult để trả lỗi về Dart.
+        // Log lại để chẩn đoán được khi máy in nhận thiếu dữ liệu.
+        let logFailure: (String) -> (Any?) -> Void = { target in
+            return { res in
+                if let error = res as? FlutterError {
+                    print("[PrinterLabelPlugin] ❌ BLE write failed (\(target)): \(error.code) \(error.message ?? "")")
+                }
+            }
+        }
         if let id = identifier, !id.isEmpty {
-            BLEManager.shared.writeData(data, toIdentifier: id) { _ in }
+            BLEManager.shared.writeData(data, toIdentifier: id, result: logFailure(id))
         } else {
-            BLEManager.shared.writeDataToFirstConnected(data) { _ in }
+            BLEManager.shared.writeDataToFirstConnected(data, result: logFailure("first-connected"))
         }
     }
 
