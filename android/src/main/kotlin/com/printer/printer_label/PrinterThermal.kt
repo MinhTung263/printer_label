@@ -24,6 +24,34 @@ class PrinterThermal {
         @JvmStatic
         fun lockFor(conn: IDeviceConnection): Any =
             sendLocks.getOrPut(conn) { Any() }
+
+        /**
+         * Gửi hết [data] theo từng gói [chunkSize] và KIỂM TRA số byte thật sự gửi được.
+         *
+         * `sendSync` trả về số byte đã gửi, có thể NHỎ HƠN số byte đưa vào khi buffer
+         * máy in/socket đầy (hay gặp với đơn dài, ảnh vài chục–trăm KB). Trước đây giá
+         * trị trả về bị bỏ qua nên phần dữ liệu thiếu biến mất âm thầm: máy in vẫn đợi
+         * cho đủ số byte mà lệnh `GS v 0` khai báo, treo luôn và ăn mất cả lệnh cắt lẫn
+         * job in kế tiếp. Ở đây gửi tiếp đúng phần còn lại, và ném lỗi nếu không gửi
+         * nổi để lớp trên báo thất bại thay vì báo thành công giả.
+         */
+        @JvmStatic
+        fun sendAllSync(conn: IDeviceConnection, data: ByteArray, chunkSize: Int) {
+            var offset = 0
+            while (offset < data.size) {
+                val count = Math.min(chunkSize, data.size - offset)
+                val chunk = data.copyOfRange(offset, offset + count)
+                val sent = conn.sendSync(chunk)
+                if (sent <= 0) {
+                    throw java.io.IOException(
+                        "Gửi dữ liệu tới máy in thất bại tại byte $offset/${data.size} " +
+                            "(sendSync trả về $sent). Máy in có thể đã mất kết nối hoặc đầy buffer."
+                    )
+                }
+                // sendSync có thể gửi thiếu -> chỉ tiến đúng số byte đã gửi được.
+                offset += sent
+            }
+        }
     }
 
     fun printImageESC(
@@ -56,6 +84,33 @@ class PrinterThermal {
                     return@thread
                 }
                 val isBluetooth = curConnect.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH
+
+                // LAN/USB: để SDK tự dựng + gửi lệnh ảnh, đúng như bản 2.0.9 vẫn chạy tốt.
+                //
+                // Bộ encoder raster thủ công bên dưới sinh ra ở commit 83ac36d để chữa lỗi
+                // RIÊNG của Bluetooth (ảnh lệch, QR bị tách), nhưng lại áp cho MỌI kết nối.
+                // Nó nhồi cả bill vào MỘT lệnh `GS v 0` duy nhất; đơn ngắn thì vừa, còn đơn
+                // dài sinh ảnh cao hàng nghìn dòng, vượt giới hạn chiều cao mỗi lệnh raster
+                // của máy in (Epson chỉ nhận vài trăm dòng/lệnh). Khi vượt, máy in hủy chế
+                // độ raster và diễn giải byte ảnh còn lại thành VĂN BẢN -> giấy ra đầy ký tự
+                // rác, không cắt, và treo luôn các job in sau.
+                //
+                // `printBitmap` của SDK tự chia dải nội bộ nên đơn dài bao nhiêu cũng in tốt.
+                if (!isBluetooth && !isTargetBuiltIn) {
+                    val printer = POSPrinter(curConnect)
+                    val paperWidth: Int? = call.argument<Int>("size")
+                    synchronized(lockFor(curConnect)) {
+                        printer.initializePrinter()
+                            .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, paperWidth ?: 576)
+                            .feedLine()
+                            .cutHalfAndFeed(1)
+                    }
+                    bitmap.recycle()
+                    Handler(Looper.getMainLooper()).post {
+                        result.success(true)
+                    }
+                    return@thread
+                }
 
                 // Dựng dữ liệu ảnh thô (GS v 0) sử dụng bộ nhị phân hóa chất lượng cao (threshold 200) để giữ nguyên chất lượng ảnh gốc của Flutter
                 val rasterBytes = getEscPosRasterBytes(bitmap)
@@ -91,9 +146,16 @@ class PrinterThermal {
                         while (offset < allBytes.size) {
                             val count = Math.min(chunkSize, allBytes.size - offset)
                             val chunk = allBytes.copyOfRange(offset, offset + count)
-                            curConnect.sendSync(chunk)
-                            offset += count
-                            bytesSentInBlock += count
+                            val sent = curConnect.sendSync(chunk)
+                            if (sent <= 0) {
+                                throw java.io.IOException(
+                                    "Gửi dữ liệu tới máy in Bluetooth thất bại tại byte " +
+                                        "$offset/${allBytes.size} (sendSync trả về $sent)."
+                                )
+                            }
+                            // Tiến theo số byte THẬT SỰ gửi được, không phải số muốn gửi.
+                            offset += sent
+                            bytesSentInBlock += sent
 
                             Thread.sleep(4)
                             if (bytesSentInBlock >= 1500) {
@@ -102,8 +164,13 @@ class PrinterThermal {
                             }
                         }
                     } else {
-                        // In lập tức không trễ đối với cổng USB, LAN hoặc máy in tích hợp sẵn
-                        curConnect.sendSync(allBytes)
+                        // USB/LAN/máy in tích hợp: cũng phải chia gói. Gửi cả cục cho đơn
+                        // dài (ảnh vài chục–trăm KB) làm tràn buffer máy in/socket:
+                        // sendSync chỉ gửi được một phần, phần còn lại bị mất. Máy in vẫn
+                        // đợi cho đủ số byte mà lệnh GS v 0 đã khai báo nên treo luôn —
+                        // ăn mất cả lệnh cắt và job in kế tiếp.
+                        // Gói 4KB lớn hơn Bluetooth nhiều nên vẫn nhanh, không cần sleep.
+                        sendAllSync(curConnect, allBytes, 4096)
                     }
                 }
 
@@ -122,44 +189,65 @@ class PrinterThermal {
         val width = bitmap.width
         val height = bitmap.height
         val widthBytes = (width + 7) / 8
-        
+
         val stream = java.io.ByteArrayOutputStream()
-        
-        // GS v 0 0 xL xH yL yH
-        val xL = widthBytes % 256
-        val xH = widthBytes / 256
-        val yL = height % 256
-        val yH = height / 256
-        
-        stream.write(byteArrayOf(0x1D, 0x76, 0x30, 0x00, xL.toByte(), xH.toByte(), yL.toByte(), yH.toByte()))
-        
+
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-        
-        for (y in 0 until height) {
-            for (xByte in 0 until widthBytes) {
-                var byteVal = 0
-                for (bit in 0 until 8) {
-                    val x = xByte * 8 + bit
-                    if (x < width) {
-                        val pixel = pixels[y * width + x]
-                        val alpha = (pixel shr 24) and 0xff
-                        if (alpha > 50) {
-                            val red = (pixel shr 16) and 0xff
-                            val green = (pixel shr 8) and 0xff
-                            val blue = pixel and 0xff
-                            val gray = (0.299 * red + 0.587 * green + 0.114 * blue).toInt()
-                            // Tăng ngưỡng lên 200 giúp giữ nguyên chất lượng ảnh gốc, làm chữ in ra đen đậm, sắc nét
-                            if (gray < 200) {
-                                byteVal = byteVal or (1 shl (7 - bit))
+
+        // Chia ảnh thành nhiều DẢI, mỗi dải là MỘT lệnh `GS v 0` riêng.
+        //
+        // Trước đây cả bill dài được nhồi vào một lệnh `GS v 0` duy nhất. Đơn ngắn thì
+        // chạy tốt, nhưng đơn dài sinh ảnh cao hàng nghìn dòng — vượt giới hạn chiều cao
+        // mỗi lệnh raster của máy in (máy Epson thường chỉ nhận vài trăm dòng/lệnh). Khi
+        // vượt, máy in hủy chế độ raster và diễn giải các byte ảnh còn lại thành VĂN BẢN,
+        // nên giấy ra đầy ký tự rác và không cắt.
+        //
+        // 128 dòng/dải nằm an toàn dưới giới hạn của mọi model phổ biến; các dải in liền
+        // nhau nên ảnh vẫn liền mạch, không có khoảng trắng chen vào.
+        val bandHeight = 128
+
+        var y0 = 0
+        while (y0 < height) {
+            val bandRows = Math.min(bandHeight, height - y0)
+
+            // GS v 0 m xL xH yL yH — yL/yH là chiều cao của DẢI này, luôn <= 128 nên
+            // không bao giờ tràn 2 byte.
+            stream.write(
+                byteArrayOf(
+                    0x1D, 0x76, 0x30, 0x00,
+                    (widthBytes % 256).toByte(), (widthBytes / 256).toByte(),
+                    (bandRows % 256).toByte(), (bandRows / 256).toByte()
+                )
+            )
+
+            for (y in y0 until y0 + bandRows) {
+                for (xByte in 0 until widthBytes) {
+                    var byteVal = 0
+                    for (bit in 0 until 8) {
+                        val x = xByte * 8 + bit
+                        if (x < width) {
+                            val pixel = pixels[y * width + x]
+                            val alpha = (pixel shr 24) and 0xff
+                            if (alpha > 50) {
+                                val red = (pixel shr 16) and 0xff
+                                val green = (pixel shr 8) and 0xff
+                                val blue = pixel and 0xff
+                                val gray = (0.299 * red + 0.587 * green + 0.114 * blue).toInt()
+                                // Tăng ngưỡng lên 200 giúp giữ nguyên chất lượng ảnh gốc, làm chữ in ra đen đậm, sắc nét
+                                if (gray < 200) {
+                                    byteVal = byteVal or (1 shl (7 - bit))
+                                }
                             }
                         }
                     }
+                    stream.write(byteVal)
                 }
-                stream.write(byteVal)
             }
+
+            y0 += bandRows
         }
-        
+
         return stream.toByteArray()
     }
 

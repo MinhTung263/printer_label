@@ -25,6 +25,7 @@ class _EscTabState extends State<EscTab> {
   TicketSize _selectedSize = TicketSize.mm80;
   bool _hasBuiltInPrinter = false;
   int _printQuantity = 1; // Số lượng in
+  bool _isLongReceipt = false; // Hóa đơn dài (~70cm)
 
   bool get _isBuiltInPrinterActive =>
       _hasBuiltInPrinter && widget.isBuiltInPrinterConnected;
@@ -91,6 +92,7 @@ class _EscTabState extends State<EscTab> {
             widget: ThermalReceiptPreview(
               size: _selectedSize,
               isForPrinting: true,
+              isLongReceipt: _isLongReceipt,
             ),
             size: _selectedSize,
           );
@@ -292,10 +294,37 @@ class _EscTabState extends State<EscTab> {
                   ),
                 ),
 
+                // Chọn Hóa đơn dài (~70cm)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Hóa đơn dài (~70cm):',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black54,
+                        ),
+                      ),
+                      Switch(
+                        value: _isLongReceipt,
+                        activeThumbColor: const Color(0xFF6366F1),
+                        onChanged: (bool value) {
+                          setState(() {
+                            _isLongReceipt = value;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
                 // Khu vực hiển thị hóa đơn giả lập giống hệt ticket.png
                 Center(
                   child: ThermalReceiptPreview(
                     size: _selectedSize,
+                    isLongReceipt: _isLongReceipt,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -401,17 +430,62 @@ class _EscTabState extends State<EscTab> {
 class ThermalReceiptPreview extends StatelessWidget {
   final TicketSize size;
   final bool isForPrinting; // Cờ xác định khi chụp ảnh in ấn
+  final bool isLongReceipt; // Cờ xác định in hoá đơn dài test (~70cm)
 
   const ThermalReceiptPreview({
     super.key,
     required this.size,
     this.isForPrinting = false,
+    this.isLongReceipt = false,
   });
 
   @override
   Widget build(BuildContext context) {
     // Chiều rộng động theo khổ giấy để tạo cảm giác thực tế
     final double width = size == TicketSize.mm58 ? 240.0 : 320.0;
+
+    final List<ReceiptItem> items = [];
+    if (isLongReceipt) {
+      final candidates = [
+        ('Cà phê muối đặc biệt', 35000.0),
+        ('Trà lài đác thơm', 45000.0),
+        ('Bánh sừng bò', 39000.0),
+        ('Trà sữa trân châu', 40000.0),
+        ('Nước cam ép tươi', 35000.0),
+        ('Sinh tố bơ sáp', 50000.0),
+        ('Cacao nóng cốt dừa', 45000.0),
+        ('Bánh mì chảo đặc biệt', 55000.0),
+        ('Mì Ý sốt bò bằm', 65000.0),
+        ('Hồng trà sủi bọt', 38000.0),
+        ('Matcha đá xay', 48000.0),
+        ('Bạc sỉu cốt dừa', 35000.0),
+        ('Trà đào cam sả', 42000.0),
+        ('Khoai tây chiên bơ', 30000.0),
+        ('Xúc xích nướng', 25000.0),
+      ];
+      for (int i = 0; i < 60; i++) {
+        final cand = candidates[i % candidates.length];
+        final name = '${cand.$1} #${i + 1}';
+        final price = cand.$2;
+        final qty = (i % 3) + 1;
+        items.add(ReceiptItem(name: name, price: price, qty: qty));
+      }
+    } else {
+      items.addAll([
+        const ReceiptItem(name: 'Cà phê muối đặc biệt', price: 35000.0, qty: 1),
+        const ReceiptItem(name: 'Trà lài đác thơm', price: 45000.0, qty: 2),
+        const ReceiptItem(name: 'Bánh sừng bò', price: 39000.0, qty: 1),
+      ]);
+    }
+
+    double subtotal = 0;
+    for (final item in items) {
+      subtotal += item.amount;
+    }
+    final discount = subtotal * 0.1;
+    final totalToPay = subtotal - discount;
+    final double cashReceived = ((totalToPay / 10000).ceil() * 10000).toDouble();
+    final change = cashReceived - totalToPay;
 
     final content = Container(
       color: Colors
@@ -487,9 +561,9 @@ class ThermalReceiptPreview extends StatelessWidget {
                 2: FlexColumnWidth(3), // Thành tiền
               },
               defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-              children: const [
+              children: [
                 // Header của bảng
-                TableRow(
+                const TableRow(
                   decoration: BoxDecoration(
                     border: Border(
                       top: BorderSide(color: Colors.black, width: 1),
@@ -523,104 +597,37 @@ class ThermalReceiptPreview extends StatelessWidget {
                   ],
                 ),
 
-                // Sản phẩm 1
-                TableRow(
+                ...items.map((item) => TableRow(
                   children: [
                     Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Cà phê muối đặc biệt',
-                              style: TextStyle(
+                          Text(item.name,
+                              style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontFamily: 'serif')),
-                          Text('Đơn giá: 35,000',
+                          Text('Đơn giá: ${_formatCurrency(item.price)}',
                               style:
-                                  TextStyle(fontSize: 10, fontFamily: 'serif')),
+                                  const TextStyle(fontSize: 10, fontFamily: 'serif')),
                         ],
                       ),
                     ),
                     Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('1',
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text('${item.qty}',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontFamily: 'serif')),
+                          style: const TextStyle(fontFamily: 'serif')),
                     ),
                     Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('35,000',
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text(_formatCurrency(item.amount),
                           textAlign: TextAlign.right,
-                          style: TextStyle(fontFamily: 'serif')),
+                          style: const TextStyle(fontFamily: 'serif')),
                     ),
                   ],
-                ),
-
-                // Sản phẩm 2
-                TableRow(
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Trà lài đác thơm',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontFamily: 'serif')),
-                          Text('Đơn giá: 45,000',
-                              style:
-                                  TextStyle(fontSize: 10, fontFamily: 'serif')),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('2',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontFamily: 'serif')),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('90,000',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(fontFamily: 'serif')),
-                    ),
-                  ],
-                ),
-
-                // Sản phẩm 3
-                TableRow(
-                  children: [
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Bánh sừng bò',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontFamily: 'serif')),
-                          Text('Đơn giá: 39,000',
-                              style:
-                                  TextStyle(fontSize: 10, fontFamily: 'serif')),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('1',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontFamily: 'serif')),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('39,000',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(fontFamily: 'serif')),
-                    ),
-                  ],
-                ),
+                )),
               ],
             ),
 
@@ -628,16 +635,16 @@ class ThermalReceiptPreview extends StatelessWidget {
             const SizedBox(height: 8),
 
             // Phần tính tiền tổng cộng
-            const _ReceiptRow(left: 'Tổng tiền', right: '164,000'),
-            const _ReceiptRow(left: 'Giảm giá (10%)', right: '-16,400'),
-            const _ReceiptRow(
+            _ReceiptRow(left: 'Tổng tiền', right: _formatCurrency(subtotal)),
+            _ReceiptRow(left: 'Giảm giá (10%)', right: '-${_formatCurrency(discount)}'),
+            _ReceiptRow(
               left: 'Khách phải trả',
-              right: '147,600',
+              right: _formatCurrency(totalToPay),
               isRightBold: true,
             ),
             const SizedBox(height: 4),
-            const _ReceiptRow(left: 'Tiền khách đưa', right: '150,000'),
-            const _ReceiptRow(left: 'Tiền thối lại', right: '2,400'),
+            _ReceiptRow(left: 'Tiền khách đưa', right: _formatCurrency(cashReceived)),
+            _ReceiptRow(left: 'Tiền thối lại', right: _formatCurrency(change)),
 
             const SizedBox(height: 8),
             const Divider(color: Colors.black, height: 1, thickness: 1),
@@ -787,4 +794,25 @@ class TicketClipper extends CustomClipper<Path> {
 
   @override
   bool shouldReclip(CustomClipper<Path> oldClipper) => false;
+}
+
+class ReceiptItem {
+  final String name;
+  final double price;
+  final int qty;
+
+  const ReceiptItem({
+    required this.name,
+    required this.price,
+    required this.qty,
+  });
+
+  double get amount => price * qty;
+}
+
+String _formatCurrency(double amount) {
+  return amount.toStringAsFixed(0).replaceAllMapped(
+    RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+    (Match m) => '${m[1]},',
+  );
 }
