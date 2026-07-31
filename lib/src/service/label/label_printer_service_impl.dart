@@ -16,25 +16,26 @@ class LabelPrintServiceImpl extends LabelPrintServicePlatform {
     required Widget Function(T item) itemBuilder,
     required int Function(T item) quantity,
   }) async {
-    final images = await LabelFromWidget.captureImages<T>(
+    // Gửi từng lô ảnh ngay khi render xong thay vì chờ render toàn bộ. Với dải dài
+    // (VD 500 tem), chờ render hết khiến socket tới máy in im lặng quá lâu và bị
+    // ngắt vì idle timeout -> lệnh in thất bại.
+    await LabelFromWidget.captureImages<T>(
       items,
       context,
       labelPerRow: labelPerRow,
       itemBuilder: itemBuilder,
       quantity: quantity,
-    );
-
-    if (images.isEmpty) return;
-
-    final model = LabelModel(
-      images: images,
-      labelPerRow: labelPerRow,
-    );
-
-    await PrinterLabel.printLabel(
-      deviceId: deviceId,
-      connectionType: connectionType,
-      labelModel: model,
+      onBatch: (batch) async {
+        if (batch.isEmpty) return;
+        await PrinterLabel.printLabel(
+          deviceId: deviceId,
+          connectionType: connectionType,
+          labelModel: LabelModel(
+            images: batch,
+            labelPerRow: labelPerRow,
+          ),
+        );
+      },
     );
   }
 

@@ -36,14 +36,17 @@ class LabelPerRow {
       'double_50_30', _LabelConfig(width: 105, height: 30, gap: 1));
   static const double50x50 = LabelPerRow._internal(
       'double_50_50', _LabelConfig(width: 105, height: 50, gap: 1));
+  // width phải chọn sao cho pitch NGANG in ra khớp bề rộng tem thật (35mm), vì ảnh
+  // bị scale từ totalWidgetWidth lên width*8 dots. width=110 cho pitch 36.47mm ->
+  // lệch +1.47mm mỗi tem, dồn tích lũy sang phải. width=106 cho pitch 35.14mm.
   static const triple = LabelPerRow._internal(
-      'triple', _LabelConfig(width: 110, height: 22, gap: 0));
+      'triple', _LabelConfig(width: 106, height: 22, gap: 1));
   static const triple30x30 = LabelPerRow._internal(
-      'triple_30_30', _LabelConfig(width: 101, height: 30, gap: 0));
+      'triple_30_30', _LabelConfig(width: 101, height: 30, gap: 1));
   static const triple35x25 = LabelPerRow._internal(
-      'triple_35_25', _LabelConfig(width: 112, height: 25, gap: 0));
+      'triple_35_25', _LabelConfig(width: 112, height: 25, gap: 1));
   static const triple26x26 = LabelPerRow._internal(
-      'triple_26_26', _LabelConfig(width: 85, height: 26, gap: 0));
+      'triple_26_26', _LabelConfig(width: 85, height: 26, gap: 1));
   static const values = [
     single,
     single35x22,
@@ -82,6 +85,18 @@ class LabelPerRow {
 
   int get count =>
       name.startsWith('double') ? 2 : (name.startsWith('triple') ? 3 : 1);
+
+  /// Có gửi lệnh TSPL `HOME` trước mỗi lần in hay không.
+  ///
+  /// `HOME` bảo máy dùng cảm biến dò khe decal để canh lại về đúng đầu tem, xóa
+  /// sai số đẩy giấy tích lũy. Chỉ cần cho khổ 3 tem: mỗi ảnh phủ 3 tem nên số
+  /// lần đẩy giấy ít hơn 3 lần so với khổ 1-2 tem, sai số mỗi bước lớn hơn và
+  /// dồn nhanh -> nội dung trôi khỏi ô tem.
+  ///
+  /// Với `single`/`double` thì pitch (height + gap) đã khớp decal nên sau `PRINT`
+  /// máy đã nằm đúng đầu tem kế tiếp; thêm `HOME` sẽ đẩy thừa đúng một hàng ->
+  /// in một hàng lại bỏ trắng một hàng.
+  bool get useHome => name.startsWith('triple');
 
   String get title => switch (name) {
         'single' => '50x30mm (Mặc định)',

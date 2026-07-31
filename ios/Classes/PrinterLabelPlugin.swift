@@ -399,6 +399,10 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let gapWidthMM = gapMap?["width"] as? Int ?? 2
         let gapHeightMM = gapMap?["height"] as? Int ?? 0
         
+        // Chỉ khổ 3 tem cần HOME (xem LabelPerRow.useHome). Bật cho khổ 1-2 tem sẽ đẩy
+        // thừa một hàng -> in một hàng lại bỏ trắng một hàng.
+        let useHome = args["use_home"] as? Bool ?? false
+
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
 
@@ -413,11 +417,16 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 cmd.setGapWithDistance(gapWidthMM, offset: gapHeightMM)
                 cmd.setReferenceXPos(0, yPos: 0)
                 cmd.setPrintDirection(.normal, mirror: .normal)
+                if useHome {
+                    // Dò khe decal để canh lại đầu tem, xóa sai số đẩy giấy tích lũy.
+                    cmd.setHome()
+                }
                 cmd.setCLS()
 
                 guard let uiImage = imageFromFlutter(imageData) else { return }
-                // Compensate for printer's 20-dot hardware offset on the left.
-                let drawX: CGFloat = -20.0
+                // Bù dải trắng leftPadding của widget Dart (8px logic -> ~1.16mm sau khi
+                // scale). -8 dots = -1mm đưa tem đầu về sát mép trái mà không cắt mất.
+                let drawX: CGFloat = -8.0
                 guard let cgImage = resizeImage(uiImage, targetWidth: CGFloat(targetWidth), targetHeight: CGFloat(targetHeight), drawX: drawX) else { return }
 
                 cmd.addBitmap(

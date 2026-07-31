@@ -692,6 +692,9 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             val gap = call.argument<Map<String, Any>>("gap")
             val gapWidth = (gap?.get("width") as? Number)?.toDouble() ?: 2.0
             val gapHeight = (gap?.get("height") as? Number)?.toDouble() ?: 0.0
+            // Chỉ khổ 3 tem cần HOME (xem LabelPerRow.useHome). Bật cho khổ 1-2 tem sẽ
+            // đẩy thừa một hàng -> in một hàng lại bỏ trắng một hàng.
+            val useHome = call.argument<Boolean>("use_home") ?: false
 
             val targetWidthDots = sizeWidth * 8
             val targetHeightDots = sizeHeight * 8
@@ -699,22 +702,23 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             images.forEach { imageData ->
                 val bitmap =
                     BitmapFactory.decodeByteArray(imageData, 0, imageData.size) ?: return@forEach
-                
+
                 // Scale bitmap to exactly targetWidthDots and targetHeightDots
                 val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidthDots, targetHeightDots, true)
- 
-                // Compensate for printer's 20-dot hardware offset on the left
-                val shiftX = -20f
+
+                // Bù dải trắng leftPadding của widget Dart (8px logic -> ~1.16mm sau khi
+                // scale). -8 dots = -1mm đưa tem đầu về sát mép trái mà không cắt mất.
+                val shiftX = -8f
                 val shifted = Bitmap.createBitmap(targetWidthDots, targetHeightDots, scaledBitmap.config ?: Bitmap.Config.ARGB_8888)
                 val canvas = android.graphics.Canvas(shifted)
                 canvas.drawColor(android.graphics.Color.WHITE)
                 canvas.drawBitmap(scaledBitmap, shiftX, 0f, null)
-                
+
                 if (scaledBitmap != bitmap) {
                     scaledBitmap.recycle()
                 }
                 bitmap.recycle()
- 
+
                 // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection), khớp
                 // với cơ chế khóa của luồng ESC. Các máy khác dùng khóa khác nên vẫn
                 // in song song, không đợi nhau.
@@ -723,7 +727,11 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                         .gapMm(gapWidth, gapHeight)
                         .reference(0, 0)
                         .direction(0)
-                        .cls()
+                    if (useHome) {
+                        // Dò khe decal để canh lại đầu tem, xóa sai số đẩy giấy tích lũy.
+                        printer.home()
+                    }
+                    printer.cls()
                         .bitmap(
                             0,
                             0,

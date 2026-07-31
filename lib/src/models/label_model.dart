@@ -29,6 +29,7 @@ class LabelModel {
         'width': label.gap,
         'height': 0,
       },
+      'use_home': label.useHome,
     };
     return map;
   }

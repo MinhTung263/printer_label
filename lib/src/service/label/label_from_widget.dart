@@ -14,6 +14,15 @@ class LabelFromWidget {
   ///
   /// Group items according to the [labelPerRow] count, builds widgets using [itemBuilder],
   /// replicates each item based on its [quantity], and renders the row as a PNG.
+  ///
+  /// Nếu truyền [onBatch], mỗi lô ảnh vừa render xong được gửi đi ngay thay vì dồn
+  /// lại. Điều này quan trọng với dải dài: gửi hết mới in nghĩa là socket tới máy in
+  /// im lặng suốt quá trình render (500 tem mất khá lâu), và máy in / router sẽ đóng
+  /// kết nối vì idle timeout -> lệnh in cuối cùng thất bại. Gửi theo lô giữ đường
+  /// truyền luôn có dữ liệu, đồng thời máy in bắt đầu chạy ngay sau lô đầu.
+  ///
+  /// Khi có [onBatch], hàm trả về list rỗng — ảnh chỉ sống trong phạm vi mỗi lần
+  /// gọi [onBatch] nên không giữ toàn bộ trong RAM.
   static Future<List<Uint8List>> captureImages<T>(
     List<T> items,
     BuildContext context, {
@@ -23,6 +32,7 @@ class LabelFromWidget {
     required int Function(T item) quantity,
     LabelPerRow labelPerRow = LabelPerRow.doubleLabels,
     double? spacer,
+    Future<void> Function(List<Uint8List> batch)? onBatch,
   }) async {
     final int itemsPerRow = labelPerRow.count;
     final List<Uint8List> images = [];
@@ -130,7 +140,13 @@ class LabelFromWidget {
           ),
         ),
       );
-      images.addAll(captured);
+      // Gửi ngay lô vừa render xong: máy in chạy song song với việc render lô sau,
+      // và đường truyền không bị im lặng đủ lâu để máy in ngắt kết nối.
+      if (onBatch != null) {
+        await onBatch(captured);
+      } else {
+        images.addAll(captured);
+      }
 
       // Yield to the main thread so it can draw a frame between batches.
       await Future.delayed(const Duration(milliseconds: 16));
