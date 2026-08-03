@@ -59,7 +59,7 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
   }
 
   @override
-  Future<void> openDrawer() async {
+  Future<bool> openDrawer() async {
     return PrinterLabel.openDrawer();
   }
 

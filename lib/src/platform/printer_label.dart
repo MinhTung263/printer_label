@@ -229,7 +229,8 @@ class PrinterLabel {
   }
 
   /// Opens the cash drawer connected to the thermal printer via ESC/POS command (ESC p) or native cash drawer port.
-  static Future<void> openDrawer() async {
+  /// Returns `true` if the open command was successfully dispatched to a printer or native POS cash drawer.
+  static Future<bool> openDrawer() async {
     return await _platform.openDrawer();
   }
 

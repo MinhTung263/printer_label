@@ -513,54 +513,8 @@ class _MyHomePageState extends State<MyHomePage>
             ),
           ],
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilledButton.icon(
-              onPressed: () async {
-                try {
-                  await PrinterLabel.openDrawer();
-                  if (context.mounted) {
-                    showTopNotification(context, 'Đã gửi lệnh mở két sắt',
-                        isError: false);
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    showTopNotification(context, 'Lỗi mở két sắt: $e');
-                  }
-                }
-              },
-              icon: const Icon(Icons.lock_open, size: 16),
-              label: const Text('Mở Két'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF0D9488),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              ),
-            ),
-          ),
-        ],
         elevation: 0,
         backgroundColor: Colors.white,
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          try {
-            await PrinterLabel.openDrawer();
-            if (context.mounted) {
-              showTopNotification(context, 'Đã gửi lệnh mở két sắt',
-                  isError: false);
-            }
-          } catch (e) {
-            if (context.mounted) {
-              showTopNotification(context, 'Lỗi mở két sắt: $e');
-            }
-          }
-        },
-        icon: const Icon(Icons.lock_open),
-        label: const Text('MỞ KÉT SẮT'),
-        backgroundColor: const Color(0xFF0D9488),
-        foregroundColor: Colors.white,
       ),
       body: SafeArea(
         child: TabBarView(

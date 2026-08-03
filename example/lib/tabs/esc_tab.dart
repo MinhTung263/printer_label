@@ -112,23 +112,6 @@ class _EscTabState extends State<EscTab> {
     }
   }
 
-  Future<void> _openDrawer() async {
-    try {
-      await PrinterLabel.openDrawer();
-      if (mounted) {
-        showTopNotification(context, 'Đã gửi lệnh mở két sắt', isError: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        showTopNotification(context, 'Lỗi mở két sắt: $e');
-      }
-    }
-  }
-
-  Future<void> _printBatchThenOpenDrawer() async {
-    await _openDrawer();
-  }
-
   Future<void> _printRawText() async {
     for (final deviceId in _targetDeviceIds) {
       try {
@@ -350,7 +333,7 @@ class _EscTabState extends State<EscTab> {
             ),
           ),
         ),
-        // ─── Print & Drawer Action Buttons ─────────────────────────────────
+        // ─── Print Action Button ───────────────────────────────────────────
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -365,120 +348,47 @@ class _EscTabState extends State<EscTab> {
               ),
             ],
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              // Nút Mở Két Sắt Độc Lập
-              Expanded(
-                flex: 2,
-                child: SizedBox(
-                  height: 42,
-                  child: OutlinedButton.icon(
-                    onPressed: _isPrintingEsc ? null : () => _openDrawer(),
-                    icon: const Icon(Icons.lock_open, size: 16),
-                    label: const Text(
-                      'MỞ KÉT',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF0D9488),
-                      side: const BorderSide(color: Color(0xFF0D9488)),
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: SizedBox(
+            height: 44,
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _isPrintingEsc
+                  ? null
+                  : () {
+                      if (widget.connectedDevices.isEmpty &&
+                          !_isBuiltInPrinterActive) {
+                        _showNoConnectionMsg();
+                        return;
+                      }
+                      _printExample();
+                    },
+              icon: _isPrintingEsc
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
-                    ),
-                  ),
+                    )
+                  : const Icon(Icons.print, size: 18),
+              label: Text(
+                _isPrintingEsc ? 'ĐANG IN...' : 'IN HÓA ĐƠN',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(width: 8),
-
-              // Nút In Hoá Đơn Thường
-              Expanded(
-                flex: 3,
-                child: SizedBox(
-                  height: 42,
-                  child: ElevatedButton.icon(
-                    onPressed: _isPrintingEsc
-                        ? null
-                        : () {
-                            if (widget.connectedDevices.isEmpty &&
-                                !_isBuiltInPrinterActive) {
-                              _showNoConnectionMsg();
-                              return;
-                            }
-                            _printExample();
-                          },
-                    icon: _isPrintingEsc
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
-                        : const Icon(Icons.print, size: 16),
-                    label: Text(
-                      _isPrintingEsc ? 'ĐANG IN...' : 'IN HÓA ĐƠN',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6366F1),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              const SizedBox(width: 8),
-
-              // Nút In Bộ Vé Rồi Mới Mở Két (Test Scenario)
-              Expanded(
-                flex: 3,
-                child: SizedBox(
-                  height: 42,
-                  child: ElevatedButton.icon(
-                    onPressed: _isPrintingEsc
-                        ? null
-                        : () {
-                            if (widget.connectedDevices.isEmpty &&
-                                !_isBuiltInPrinterActive) {
-                              _showNoConnectionMsg();
-                              return;
-                            }
-                            _printBatchThenOpenDrawer();
-                          },
-                    icon: const Icon(Icons.point_of_sale, size: 16),
-                    label: Text(
-                      'IN $_printQuantity VÉ + KÉT',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF059669),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
         // ─── Raw print (dev) ───────────────────────────────────────────────
@@ -486,7 +396,6 @@ class _EscTabState extends State<EscTab> {
           color: Colors.indigo.shade600,
           title: 'In thô ESC/POS (dev)',
           buttons: [
-            (label: 'Mở két sắt', onPressed: () => _openDrawer()),
             (
               label: 'In Text',
               onPressed: () =>

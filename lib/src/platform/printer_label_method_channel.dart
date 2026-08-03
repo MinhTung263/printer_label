@@ -146,13 +146,14 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<void> openDrawer() async {
+  Future<bool> openDrawer() async {
     try {
-      await _channel.invokeMethod<void>(
+      final res = await _channel.invokeMethod<bool>(
           PrinterMethod.open_drawer.name);
+      return res ?? false;
     } catch (e, stack) {
       debugPrint("Error opening drawer: $e\n$stack");
-      rethrow;
+      return false;
     }
   }
 

@@ -1,5 +1,6 @@
 import 'package:example/connected_device.dart';
 import 'package:example/tabs/cup_sticker_tab.dart';
+import 'package:example/tabs/drawer_tab.dart';
 import 'package:example/tabs/esc_tab.dart';
 import 'package:example/tabs/label_tab.dart';
 import 'package:flutter/material.dart';
@@ -34,9 +35,10 @@ class _FunctionsTabState extends State<FunctionsTab>
   late TabController _tabController;
 
   static const _tabs = [
-    Tab(icon: Icon(Icons.label_outline, size: 20), text: 'Nhãn'),
     Tab(icon: Icon(Icons.receipt_long, size: 20), text: 'Hoá đơn'),
+    Tab(icon: Icon(Icons.label_outline, size: 20), text: 'Nhãn'),
     Tab(icon: Icon(Icons.local_drink_outlined, size: 20), text: 'Tem trà sữa'),
+    Tab(icon: Icon(Icons.lock_open_rounded, size: 20), text: 'Mở két'),
   ];
 
   @override
@@ -73,6 +75,11 @@ class _FunctionsTabState extends State<FunctionsTab>
           child: TabBarView(
             controller: _tabController,
             children: [
+              EscTab(
+                ipAddress: widget.ipAddress,
+                connectedDevices: widget.connectedDevices,
+                isBuiltInPrinterConnected: widget.isBuiltInPrinterConnected,
+              ),
               LabelTab(
                 products: widget.products,
                 selectedRow: widget.selectedRow,
@@ -81,12 +88,12 @@ class _FunctionsTabState extends State<FunctionsTab>
                 ipAddress: widget.ipAddress,
                 connectedDevices: widget.connectedDevices,
               ),
-              EscTab(
-                ipAddress: widget.ipAddress,
-                connectedDevices: widget.connectedDevices,
-                isBuiltInPrinterConnected: widget.isBuiltInPrinterConnected,
-              ),
-              CupStickerTab(ipAddress: widget.ipAddress, connectedDevices: widget.connectedDevices),
+              CupStickerTab(
+                  ipAddress: widget.ipAddress,
+                  connectedDevices: widget.connectedDevices),
+              CashDrawerTab(
+                  ipAddress: widget.ipAddress,
+                  connectedDevices: widget.connectedDevices),
             ],
           ),
         ),

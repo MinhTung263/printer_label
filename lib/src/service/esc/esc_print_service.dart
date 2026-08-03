@@ -46,7 +46,7 @@ class ESCPrintService {
   }
 
   /// Opens the cash drawer connected to the thermal printer via ESC/POS command (ESC p) or native cash drawer port.
-  Future<void> openDrawer() {
+  Future<bool> openDrawer() {
     return ESCPrintServicePlatform.instance.openDrawer();
   }
 

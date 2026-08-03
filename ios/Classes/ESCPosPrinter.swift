@@ -144,8 +144,8 @@ final class ESCPosPrinter {
 
             var out = Data()
             out.append(contentsOf: [0x1B, 0x70, 0x00, 0x19, 0xFA, 0x1B, 0x70, 0x01, 0x19, 0xFA])
-            plugin?.sendToPrinter(out, deviceId: deviceId, connectionType: connectionType)
-            result(true)
+            let sent = plugin?.sendToPrinter(out, deviceId: deviceId, connectionType: connectionType) ?? false
+            result(sent)
         } catch {
             print("[ESCPosPrinter] ❌ openDrawer error: \(error)")
             result(false)
