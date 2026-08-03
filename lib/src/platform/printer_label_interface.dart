@@ -92,7 +92,10 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   /// Opens the connected cash drawer via ESC/POS command (ESC p) or native cash drawer port.
   /// Returns `true` if the open command was successfully dispatched to a connected printer/POS device.
-  Future<bool> openDrawer();
+  Future<bool> openDrawer({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+  });
 
   /// Connects to a Bluetooth printer using its identifier [macAddress].
   ///

@@ -59,8 +59,27 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
   }
 
   @override
-  Future<bool> openDrawer() async {
-    return PrinterLabel.openDrawer();
+  Future<bool> openDrawer({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+  }) async {
+    return PrinterLabel.openDrawer(
+      deviceId: deviceId,
+      connectionType: connectionType,
+    );
+  }
+
+  @override
+  Future<void> openDrawerMultiDevices({
+    required List<String> deviceIds,
+  }) async {
+    await Future.wait(
+      deviceIds.map(
+        (id) => PrinterLabel.openDrawer(
+          deviceId: id,
+        ),
+      ),
+    );
   }
 
   @override

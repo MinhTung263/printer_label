@@ -46,8 +46,23 @@ class ESCPrintService {
   }
 
   /// Opens the cash drawer connected to the thermal printer via ESC/POS command (ESC p) or native cash drawer port.
-  Future<bool> openDrawer() {
-    return ESCPrintServicePlatform.instance.openDrawer();
+  Future<bool> openDrawer({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+  }) {
+    return ESCPrintServicePlatform.instance.openDrawer(
+      deviceId: deviceId,
+      connectionType: connectionType,
+    );
+  }
+
+  /// Opens the cash drawer on multiple specified printer devices concurrently.
+  Future<void> openDrawerMultiDevices({
+    required List<String> deviceIds,
+  }) {
+    return ESCPrintServicePlatform.instance.openDrawerMultiDevices(
+      deviceIds: deviceIds,
+    );
   }
 
   /// Prints a thermal receipt from the specified [model].

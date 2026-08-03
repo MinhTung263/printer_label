@@ -314,21 +314,21 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             }
         } else {
             print("[PrinterLabelPlugin] → Route: Default (no deviceId)")
+            var sent = false
             if BLEManager.shared.hasAnyConnection() {
-                print("[PrinterLabelPlugin] → Fallback to first BLE device")
-                BLEManager.shared.writeDataToFirstConnected(data) { _ in }
-                return true
-            } else {
-                let ips = LANPrinterManager.shared.getConnectedPrinters()
-                print("[PrinterLabelPlugin] Found \(ips.count) LAN printers: \(ips)")
-                if ips.isEmpty {
-                    return false
-                }
+                print("[PrinterLabelPlugin] → Broadcast to all connected BLE devices")
+                BLEManager.shared.writeDataToAllConnected(data) { _ in }
+                sent = true
+            }
+            let ips = LANPrinterManager.shared.getConnectedPrinters()
+            print("[PrinterLabelPlugin] Found \(ips.count) LAN printers: \(ips)")
+            if !ips.isEmpty {
                 for ip in ips {
                     LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
                 }
-                return true
+                sent = true
             }
+            return sent
         }
     }
 

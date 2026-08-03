@@ -46,7 +46,15 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
   });
 
   /// Opens the connected cash drawer via ESC/POS command (ESC p) or native cash drawer port.
-  Future<bool> openDrawer();
+  Future<bool> openDrawer({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+  });
+
+  /// Opens the cash drawer on multiple specified printer devices concurrently.
+  Future<void> openDrawerMultiDevices({
+    required List<String> deviceIds,
+  });
 
 
 

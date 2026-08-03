@@ -146,10 +146,18 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<bool> openDrawer() async {
+  Future<bool> openDrawer({
+    String? deviceId,
+    PrinterConnectionType? connectionType,
+  }) async {
     try {
       final res = await _channel.invokeMethod<bool>(
-          PrinterMethod.open_drawer.name);
+        PrinterMethod.open_drawer.name,
+        {
+          if (deviceId != null) 'device_id': deviceId,
+          if (connectionType != null) 'connection_type': connectionType.name,
+        },
+      );
       return res ?? false;
     } catch (e, stack) {
       debugPrint("Error opening drawer: $e\n$stack");

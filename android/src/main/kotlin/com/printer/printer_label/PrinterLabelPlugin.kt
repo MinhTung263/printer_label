@@ -377,18 +377,11 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             }
         } else {
             // 3. Nếu không chỉ định deviceId, thêm tất cả các kết nối ngoại vi khác đang hoạt động
-            if (isBuiltInPrinter()) {
-                connections.entries.forEach { (key, conn) ->
-                    if (isConnectionActive(key) && !bluetoothManager.isConnectionToBuiltInPrinter(conn)) {
-                        if (!targets.contains(conn)) {
-                            targets.add(conn)
-                        }
+            connections.entries.forEach { (key, conn) ->
+                if (isConnectionActive(key) && (!isBuiltInPrinter() || !bluetoothManager.isConnectionToBuiltInPrinter(conn))) {
+                    if (!targets.contains(conn)) {
+                        targets.add(conn)
                     }
-                }
-            } else {
-                val activeKey = connections.keys.firstOrNull { isConnectionActive(it) }
-                if (activeKey != null) {
-                    connections[activeKey]?.let { targets.add(it) }
                 }
             }
         }

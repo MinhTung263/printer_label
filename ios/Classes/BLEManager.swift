@@ -444,6 +444,18 @@ final class BLEManager: NSObject {
         writeData(data, toIdentifier: firstKey, result: result)
     }
 
+    func writeDataToAllConnected(_ data: Data, completion: @escaping (Bool) -> Void) {
+        let keys = withState { Array(connectedPeripherals.keys) }
+        guard !keys.isEmpty else {
+            completion(false)
+            return
+        }
+        for key in keys {
+            writeData(data, toIdentifier: key, result: { _ in })
+        }
+        completion(true)
+    }
+
     // MARK: - Status
     var isBluetoothEnabled: Bool { centralManager.state == .poweredOn }
     func isConnected(identifier: String) -> Bool {
