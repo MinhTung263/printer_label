@@ -128,7 +128,7 @@ class PrinterLabel {
         // Chia nhỏ (batch) mỗi lần quét 50 IP để tránh gây nghẽn Router (SYN flood)
         // Router mạng gia đình thường sẽ drop packet nếu gửi 254 TCP kết nối cùng 1 lúc.
         const int batchSize = 50;
-        final Duration batchTimeout = const Duration(milliseconds: 500);
+        const batchTimeout = Duration(milliseconds: 500);
 
         for (int i = 1; i < 255; i += batchSize) {
           final futures = <Future<void>>[];
@@ -226,6 +226,11 @@ class PrinterLabel {
       connectionType: connectionType,
       printThermalModel: printThermalModel,
     );
+  }
+
+  /// Opens the cash drawer connected to the thermal printer via ESC/POS command (ESC p) or native cash drawer port.
+  static Future<void> openDrawer() async {
+    return await _platform.openDrawer();
   }
 
   // ==========================================

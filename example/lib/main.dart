@@ -100,14 +100,14 @@ class _MyHomePageState extends State<MyHomePage>
   bool _isBuiltInPrinterConnected = false;
 
   // Trạng thái quét Bluetooth inline
-  List<BluetoothDeviceModel> _btDevices = [];
+  final List<BluetoothDeviceModel> _btDevices = [];
   bool _isScanningBt = false;
   bool _hasScannedBt = false;
   StreamSubscription<BluetoothDeviceModel>? _btScanSub;
   final Set<String> _connectingBtMacs = {};
 
   // Trạng thái quét mạng LAN
-  List<String> _lanDevices = [];
+  final List<String> _lanDevices = [];
   bool _isScanningLan = false;
   bool _hasScannedLan = false;
   StreamSubscription<String>? _lanScanSub;
@@ -513,8 +513,54 @@ class _MyHomePageState extends State<MyHomePage>
             ),
           ],
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilledButton.icon(
+              onPressed: () async {
+                try {
+                  await PrinterLabel.openDrawer();
+                  if (context.mounted) {
+                    showTopNotification(context, 'Đã gửi lệnh mở két sắt',
+                        isError: false);
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    showTopNotification(context, 'Lỗi mở két sắt: $e');
+                  }
+                }
+              },
+              icon: const Icon(Icons.lock_open, size: 16),
+              label: const Text('Mở Két'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0D9488),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              ),
+            ),
+          ),
+        ],
         elevation: 0,
         backgroundColor: Colors.white,
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () async {
+          try {
+            await PrinterLabel.openDrawer();
+            if (context.mounted) {
+              showTopNotification(context, 'Đã gửi lệnh mở két sắt',
+                  isError: false);
+            }
+          } catch (e) {
+            if (context.mounted) {
+              showTopNotification(context, 'Lỗi mở két sắt: $e');
+            }
+          }
+        },
+        icon: const Icon(Icons.lock_open),
+        label: const Text('MỞ KÉT SẮT'),
+        backgroundColor: const Color(0xFF0D9488),
+        foregroundColor: Colors.white,
       ),
       body: SafeArea(
         child: TabBarView(
@@ -543,16 +589,15 @@ class _MyHomePageState extends State<MyHomePage>
                 setState(() => isConnecting = true);
                 try {
                   final ok = await PrinterLabel.autoConnectBuiltIn();
-                  if (mounted) {
-                    setState(() {
-                      _isBuiltInPrinterConnected = ok;
-                    });
-                    if (ok) {
-                      context.showSnackBar('Kết nối máy in tích hợp thành công',
-                          backgroundColor: const Color(0xFF10B981));
-                    } else {
-                      context.showSnackBar('Kết nối máy in tích hợp thất bại');
-                    }
+                  if (!context.mounted) return;
+                  setState(() {
+                    _isBuiltInPrinterConnected = ok;
+                  });
+                  if (ok) {
+                    context.showSnackBar('Kết nối máy in tích hợp thành công',
+                        backgroundColor: const Color(0xFF10B981));
+                  } else {
+                    context.showSnackBar('Kết nối máy in tích hợp thất bại');
                   }
                 } finally {
                   if (mounted) setState(() => isConnecting = false);
@@ -560,13 +605,12 @@ class _MyHomePageState extends State<MyHomePage>
               },
               onDisconnectBuiltIn: () async {
                 final ok = await PrinterLabel.disconnectBuiltIn();
-                if (mounted) {
-                  setState(() {
-                    _isBuiltInPrinterConnected = !ok;
-                  });
-                  context.showSnackBar('Đã ngắt kết nối máy in tích hợp',
-                      backgroundColor: Colors.blueGrey);
-                }
+                if (!context.mounted) return;
+                setState(() {
+                  _isBuiltInPrinterConnected = !ok;
+                });
+                context.showSnackBar('Đã ngắt kết nối máy in tích hợp',
+                    backgroundColor: Colors.blueGrey);
               },
               onCheckConnect: () =>
                   _checkConnectionState(ipAddress: textEditingController.text),

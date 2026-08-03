@@ -365,4 +365,23 @@ class PrinterThermal {
         
         return stream.toByteArray()
     }
+
+    fun openDrawer(
+        call: MethodCall,
+        curConnect: IDeviceConnection,
+        result: MethodChannel.Result
+    ) {
+        try {
+            val stream = java.io.ByteArrayOutputStream()
+            // ESC p 0 25 250 (Pin 2) & ESC p 1 25 250 (Pin 5)
+            stream.write(byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA.toByte(), 0x1B, 0x70, 0x01, 0x19, 0xFA.toByte()))
+            val bytes = stream.toByteArray()
+            synchronized(lockFor(curConnect)) {
+                curConnect.sendData(bytes)
+            }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("PRINT_ERROR", e.message, null)
+        }
+    }
 }

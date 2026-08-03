@@ -106,7 +106,7 @@ class _CupStickerTabState extends State<CupStickerTab> {
                             borderRadius: BorderRadius.circular(6),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
+                                color: Colors.black.withValues(alpha: 0.06),
                                 blurRadius: 8,
                                 offset: const Offset(0, 3),
                               ),
@@ -244,9 +244,8 @@ class _CupStickerTabState extends State<CupStickerTab> {
                               );
                             } catch (e) {
                               debugPrint('Lỗi in tem trà sữa trên $targetId: $e');
-                              if (mounted) {
-                                showTopNotification(context, 'Lỗi in trên $targetId: $e');
-                              }
+                              if (!context.mounted) return;
+                              showTopNotification(context, 'Lỗi in trên $targetId: $e');
                             }
                           }
                         } finally {

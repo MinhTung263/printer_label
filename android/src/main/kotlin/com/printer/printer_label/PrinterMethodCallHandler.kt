@@ -147,6 +147,23 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                         }
                     }
                 }
+
+                "open_drawer" -> {
+                    try {
+                        if (CashBoxManager.isSupportedDevice()) {
+                            val success = CashBoxManager.openCashBox(plugin.mContext)
+                            if (success) {
+                                result.success(true)
+                                return
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        // Đảm bảo không bao giờ văng app nếu gặp lỗi thiết bị không hỗ trợ
+                    }
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printThermal.openDrawer(call, conn, targetResult)
+                    }
+                }
     
                 "check_printer_status" -> {
                     val conn = plugin.getConn(call)

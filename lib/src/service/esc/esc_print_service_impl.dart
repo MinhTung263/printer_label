@@ -30,7 +30,7 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
   Future<void> printWidgetToDevices({
     required Widget widget,
     required TicketSize size,
-    required List<String> deviceIds,
+    required List<String?> deviceIds,
     double? pixelRatio,
   }) async {
     if (deviceIds.isEmpty) return;
@@ -56,6 +56,11 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
         ),
       ),
     );
+  }
+
+  @override
+  Future<void> openDrawer() async {
+    return PrinterLabel.openDrawer();
   }
 
   @override

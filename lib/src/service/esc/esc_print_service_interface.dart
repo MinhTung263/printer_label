@@ -35,7 +35,7 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
   Future<void> printWidgetToDevices({
     required Widget widget,
     required TicketSize size,
-    required List<String> deviceIds,
+    required List<String?> deviceIds,
     double? pixelRatio,
   });
 
@@ -44,6 +44,9 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
     PrinterConnectionType? connectionType,
     required PrintThermalModel model,
   });
+
+  /// Opens the connected cash drawer via ESC/POS command (ESC p) or native cash drawer port.
+  Future<void> openDrawer();
 
 
 
