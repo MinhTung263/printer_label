@@ -22,5 +22,6 @@ enum PrinterMethod {
   check_printer_status,
   auto_connect_built_in,
   has_built_in_printer,
-  get_built_in_printer_paper_size;
+  get_built_in_printer_paper_size,
+  open_drawer;
 }

@@ -211,6 +211,9 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         case "print_image_esc":
             escPrinter.printImageESC(call: call, result: result)
 
+        case "open_drawer":
+            escPrinter.openDrawer(call: call, result: result)
+
 
         // MARK: Check Connection
         case "checkConnect":

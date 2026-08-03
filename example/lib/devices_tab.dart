@@ -178,7 +178,7 @@ class DevicesTab extends StatelessWidget {
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: color.withOpacity(0.15), width: 1.2),
+              side: BorderSide(color: color.withValues(alpha: 0.15), width: 1.2),
             ),
             color: Colors.white,
             child: Padding(
@@ -188,7 +188,7 @@ class DevicesTab extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 22,
-                    backgroundColor: color.withOpacity(0.1),
+                    backgroundColor: color.withValues(alpha: 0.1),
                     child: Icon(icon, color: color, size: 22),
                   ),
                   const SizedBox(width: 14),
@@ -330,7 +330,7 @@ class DevicesTab extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: activeColor.withOpacity(0.25), width: 1.5),
+        side: BorderSide(color: activeColor.withValues(alpha: 0.25), width: 1.5),
       ),
       color: cardBgColor,
       child: Padding(
@@ -340,7 +340,7 @@ class DevicesTab extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor: activeColor.withOpacity(0.15),
+              backgroundColor: activeColor.withValues(alpha: 0.15),
               child: Icon(Icons.print,
                   color: isBuiltInPrinterConnected
                       ? const Color(0xFF16A34A)
@@ -380,7 +380,7 @@ class DevicesTab extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: activeColor.withOpacity(0.15),
+                    color: activeColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
@@ -591,7 +591,7 @@ class DevicesTab extends StatelessWidget {
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
                       backgroundColor:
-                          const Color(0xFF4F46E5).withOpacity(0.1),
+                          const Color(0xFF4F46E5).withValues(alpha: 0.1),
                       child: const Icon(Icons.print,
                           color: Color(0xFF4F46E5), size: 20),
                     ),
@@ -837,7 +837,7 @@ class DevicesTab extends StatelessWidget {
               child:
                   Icon(Icons.info_outline, color: Color(0xFF16A34A), size: 20),
             ),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

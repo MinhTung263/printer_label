@@ -133,6 +133,25 @@ final class ESCPosPrinter {
         completion(out)
     }
 
+    func openDrawer(
+        call: FlutterMethodCall,
+        result: @escaping FlutterResult
+    ) {
+        do {
+            let args = call.arguments as? [String: Any]
+            let deviceId = args?["device_id"] as? String
+            let connectionType = args?["connection_type"] as? String
+
+            var out = Data()
+            out.append(contentsOf: [0x1B, 0x70, 0x00, 0x19, 0xFA, 0x1B, 0x70, 0x01, 0x19, 0xFA])
+            plugin?.sendToPrinter(out, deviceId: deviceId, connectionType: connectionType)
+            result(true)
+        } catch {
+            print("[ESCPosPrinter] ❌ openDrawer error: \(error)")
+            result(false)
+        }
+    }
+
     /// Chuyển [cgImage] thành lệnh ESC/POS `GS v 0`, chia thành các dải cao
     /// tối đa [bandHeight] dòng (mỗi dải là một lệnh `GS v 0` độc lập).
     /// Truyền `bandHeight >= chiều cao ảnh` để có đúng một lệnh cho toàn ảnh.

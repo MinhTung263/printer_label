@@ -66,7 +66,8 @@ class _EscTabState extends State<EscTab> {
         _hasBuiltInPrinter = hasPrinter;
         // Tự động chọn khổ giấy mặc định khớp với máy in tích hợp sẵn (K57 hoặc K80)
         if (hasPrinter) {
-          _selectedSize = type.paperSize == 80 ? TicketSize.mm80 : TicketSize.mm58;
+          _selectedSize =
+              type.paperSize == 80 ? TicketSize.mm80 : TicketSize.mm58;
         }
       });
     }
@@ -83,7 +84,7 @@ class _EscTabState extends State<EscTab> {
     }
     setState(() => _isPrintingEsc = true);
     try {
-      final deviceIds = _targetDeviceIds.whereType<String>().toList();
+      final deviceIds = _targetDeviceIds.whereType<String?>().toList();
       // Mỗi bản in: chụp ảnh MỘT lần rồi gửi SONG SONG tới tất cả máy.
       for (int i = 0; i < _printQuantity; i++) {
         try {
@@ -109,6 +110,23 @@ class _EscTabState extends State<EscTab> {
     } finally {
       if (mounted) setState(() => _isPrintingEsc = false);
     }
+  }
+
+  Future<void> _openDrawer() async {
+    try {
+      await PrinterLabel.openDrawer();
+      if (mounted) {
+        showTopNotification(context, 'Đã gửi lệnh mở két sắt', isError: false);
+      }
+    } catch (e) {
+      if (mounted) {
+        showTopNotification(context, 'Lỗi mở két sắt: $e');
+      }
+    }
+  }
+
+  Future<void> _printBatchThenOpenDrawer() async {
+    await _openDrawer();
   }
 
   Future<void> _printRawText() async {
@@ -332,7 +350,7 @@ class _EscTabState extends State<EscTab> {
             ),
           ),
         ),
-        // ─── Print button ──────────────────────────────────────────────────
+        // ─── Print & Drawer Action Buttons ─────────────────────────────────
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -341,56 +359,126 @@ class _EscTabState extends State<EscTab> {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 offset: const Offset(0, -4),
                 blurRadius: 8,
               ),
             ],
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: SizedBox(
-            width: double.infinity,
-            height: 40,
-            child: ElevatedButton.icon(
-              onPressed: _isPrintingEsc
-                  ? null
-                  : () {
-                      if (widget.connectedDevices.isEmpty &&
-                          !_isBuiltInPrinterActive) {
-                        _showNoConnectionMsg();
-                        return;
-                      }
-
-                      // _printExample() đã bao gồm cả built-in (qua _targetDeviceIds).
-                      _printExample();
-                    },
-              icon: _isPrintingEsc
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              // Nút Mở Két Sắt Độc Lập
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 42,
+                  child: OutlinedButton.icon(
+                    onPressed: _isPrintingEsc ? null : () => _openDrawer(),
+                    icon: const Icon(Icons.lock_open, size: 16),
+                    label: const Text(
+                      'MỞ KÉT',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF0D9488),
+                      side: const BorderSide(color: Color(0xFF0D9488)),
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                    )
-                  : const Icon(Icons.print, size: 18),
-              label: Text(
-                _isPrintingEsc ? 'ĐANG IN...' : 'IN HOÁ ĐƠN',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
+                    ),
+                  ),
                 ),
               ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+              const SizedBox(width: 8),
+
+              // Nút In Hoá Đơn Thường
+              Expanded(
+                flex: 3,
+                child: SizedBox(
+                  height: 42,
+                  child: ElevatedButton.icon(
+                    onPressed: _isPrintingEsc
+                        ? null
+                        : () {
+                            if (widget.connectedDevices.isEmpty &&
+                                !_isBuiltInPrinterActive) {
+                              _showNoConnectionMsg();
+                              return;
+                            }
+                            _printExample();
+                          },
+                    icon: _isPrintingEsc
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.print, size: 16),
+                    label: Text(
+                      _isPrintingEsc ? 'ĐANG IN...' : 'IN HÓA ĐƠN',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6366F1),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(width: 8),
+
+              // Nút In Bộ Vé Rồi Mới Mở Két (Test Scenario)
+              Expanded(
+                flex: 3,
+                child: SizedBox(
+                  height: 42,
+                  child: ElevatedButton.icon(
+                    onPressed: _isPrintingEsc
+                        ? null
+                        : () {
+                            if (widget.connectedDevices.isEmpty &&
+                                !_isBuiltInPrinterActive) {
+                              _showNoConnectionMsg();
+                              return;
+                            }
+                            _printBatchThenOpenDrawer();
+                          },
+                    icon: const Icon(Icons.point_of_sale, size: 16),
+                    label: Text(
+                      'IN $_printQuantity VÉ + KÉT',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF059669),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         // ─── Raw print (dev) ───────────────────────────────────────────────
@@ -398,6 +486,7 @@ class _EscTabState extends State<EscTab> {
           color: Colors.indigo.shade600,
           title: 'In thô ESC/POS (dev)',
           buttons: [
+            (label: 'Mở két sắt', onPressed: () => _openDrawer()),
             (
               label: 'In Text',
               onPressed: () =>
@@ -484,7 +573,8 @@ class ThermalReceiptPreview extends StatelessWidget {
     }
     final discount = subtotal * 0.1;
     final totalToPay = subtotal - discount;
-    final double cashReceived = ((totalToPay / 10000).ceil() * 10000).toDouble();
+    final double cashReceived =
+        ((totalToPay / 10000).ceil() * 10000).toDouble();
     final change = cashReceived - totalToPay;
 
     final content = Container(
@@ -598,36 +688,36 @@ class ThermalReceiptPreview extends StatelessWidget {
                 ),
 
                 ...items.map((item) => TableRow(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(item.name,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontFamily: 'serif')),
-                          Text('Đơn giá: ${_formatCurrency(item.price)}',
-                              style:
-                                  const TextStyle(fontSize: 10, fontFamily: 'serif')),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Text('${item.qty}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontFamily: 'serif')),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Text(_formatCurrency(item.amount),
-                          textAlign: TextAlign.right,
-                          style: const TextStyle(fontFamily: 'serif')),
-                    ),
-                  ],
-                )),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(item.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontFamily: 'serif')),
+                              Text('Đơn giá: ${_formatCurrency(item.price)}',
+                                  style: const TextStyle(
+                                      fontSize: 10, fontFamily: 'serif')),
+                            ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Text('${item.qty}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontFamily: 'serif')),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Text(_formatCurrency(item.amount),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(fontFamily: 'serif')),
+                        ),
+                      ],
+                    )),
               ],
             ),
 
@@ -636,14 +726,16 @@ class ThermalReceiptPreview extends StatelessWidget {
 
             // Phần tính tiền tổng cộng
             _ReceiptRow(left: 'Tổng tiền', right: _formatCurrency(subtotal)),
-            _ReceiptRow(left: 'Giảm giá (10%)', right: '-${_formatCurrency(discount)}'),
+            _ReceiptRow(
+                left: 'Giảm giá (10%)', right: '-${_formatCurrency(discount)}'),
             _ReceiptRow(
               left: 'Khách phải trả',
               right: _formatCurrency(totalToPay),
               isRightBold: true,
             ),
             const SizedBox(height: 4),
-            _ReceiptRow(left: 'Tiền khách đưa', right: _formatCurrency(cashReceived)),
+            _ReceiptRow(
+                left: 'Tiền khách đưa', right: _formatCurrency(cashReceived)),
             _ReceiptRow(left: 'Tiền thối lại', right: _formatCurrency(change)),
 
             const SizedBox(height: 8),
@@ -700,7 +792,7 @@ class ThermalReceiptPreview extends StatelessWidget {
         clipper: TicketClipper(),
         color: Colors.white,
         elevation: 3,
-        shadowColor: Colors.black.withOpacity(0.15),
+        shadowColor: Colors.black.withValues(alpha: 0.15),
         clipBehavior: Clip.antiAlias,
         child: content,
       ),
@@ -711,13 +803,12 @@ class ThermalReceiptPreview extends StatelessWidget {
 class _ReceiptRow extends StatelessWidget {
   final String left;
   final String right;
-  final bool isLeftBold;
+
   final bool isRightBold;
 
   const _ReceiptRow({
     required this.left,
     required this.right,
-    this.isLeftBold = false,
     this.isRightBold = false,
   });
 
@@ -732,9 +823,9 @@ class _ReceiptRow extends StatelessWidget {
             flex: 5,
             child: Text(
               left,
-              style: TextStyle(
+              style: const TextStyle(
                 fontFamily: 'serif',
-                fontWeight: isLeftBold ? FontWeight.bold : FontWeight.normal,
+                fontWeight: FontWeight.normal,
               ),
             ),
           ),
@@ -812,7 +903,7 @@ class ReceiptItem {
 
 String _formatCurrency(double amount) {
   return amount.toStringAsFixed(0).replaceAllMapped(
-    RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-    (Match m) => '${m[1]},',
-  );
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (Match m) => '${m[1]},',
+      );
 }

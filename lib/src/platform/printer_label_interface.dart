@@ -90,6 +90,9 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required PrintThermalModel printThermalModel,
   });
 
+  /// Opens the connected cash drawer via ESC/POS command (ESC p) or native cash drawer port.
+  Future<void> openDrawer();
+
   /// Connects to a Bluetooth printer using its identifier [macAddress].
   ///
   /// - iOS: [macAddress] represents the CBPeripheral UUID string.

@@ -34,7 +34,7 @@ class ESCPrintService {
   Future<void> printWidgetToDevices({
     required Widget widget,
     required TicketSize size,
-    required List<String> deviceIds,
+    required List<String?> deviceIds,
     double? pixelRatio,
   }) {
     return ESCPrintServicePlatform.instance.printWidgetToDevices(
@@ -43,6 +43,11 @@ class ESCPrintService {
       deviceIds: deviceIds,
       pixelRatio: pixelRatio,
     );
+  }
+
+  /// Opens the cash drawer connected to the thermal printer via ESC/POS command (ESC p) or native cash drawer port.
+  Future<void> openDrawer() {
+    return ESCPrintServicePlatform.instance.openDrawer();
   }
 
   /// Prints a thermal receipt from the specified [model].

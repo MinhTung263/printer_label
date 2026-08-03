@@ -146,6 +146,17 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<void> openDrawer() async {
+    try {
+      await _channel.invokeMethod<void>(
+          PrinterMethod.open_drawer.name);
+    } catch (e, stack) {
+      debugPrint("Error opening drawer: $e\n$stack");
+      rethrow;
+    }
+  }
+
+  @override
   Future<bool> connectBluetooth({required String macAddress}) async {
     final targetMac = macAddress.trim();
     if (targetMac.isEmpty) return false;
