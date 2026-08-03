@@ -282,7 +282,18 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                 plugin.builtInDeviceIds.add(deviceId)
             }
 
-            plugin.pendingConnects[deviceId] = PrinterLabelPlugin.PendingConnect(result, ConnectionType.BT, deviceId)
+            // Connect trùng deviceId: gộp result vào lệnh đang chờ thay vì ghi đè, nếu
+            // không result của lệnh trước bị mất -> Future treo tới timeout và timeout
+            // handler đóng luôn kết nối vừa thành công.
+            val existing = plugin.pendingConnects.putIfAbsent(
+                deviceId,
+                PrinterLabelPlugin.PendingConnect(result, ConnectionType.BT, deviceId)
+            )
+            if (existing != null) {
+                synchronized(existing.results) { existing.results.add(result) }
+                return
+            }
+
             runCatching { plugin.connections[deviceId]?.close() }
 
             val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_BLUETOOTH) ?: run {

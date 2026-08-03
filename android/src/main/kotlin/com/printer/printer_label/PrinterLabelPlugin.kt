@@ -58,10 +58,14 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     // ─── Multi-connection store ───────────────────────────────────────────────
     // Key   = device id: MAC address | IP address | stable USB id (USB:v{vid}_p{pid}_s{serial})
     // Value = active IDeviceConnection
-    internal val connections = mutableMapOf<String, IDeviceConnection>()
+    //
+    // ConcurrentHashMap: kết nối nhiều máy in song song (VD Future.wait ở tầng Dart)
+    // ghi vào các map này từ nhiều luồng cùng lúc. LinkedHashMap thường sẽ hỏng cấu
+    // trúc nội bộ khi ghi đồng thời -> mất kết nối của máy khác.
+    internal val connections = java.util.concurrent.ConcurrentHashMap<String, IDeviceConnection>()
 
     // Type label for each connection: "USB" | "LAN" | "BT"
-    internal val connectionTypes = mutableMapOf<String, ConnectionType>()
+    internal val connectionTypes = java.util.concurrent.ConcurrentHashMap<String, ConnectionType>()
     internal var isBuiltInPrinterDisabled = false
 
     // Tập deviceId được đánh dấu tường minh là MÁY IN TÍCH HỢP ngay khi kết nối.
@@ -74,13 +78,30 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     private val usbDevicePaths = mutableMapOf<String, String>()
 
     // Pending connect state — keyed by deviceId so parallel connects don't clash
+    //
+    // [results] là danh sách vì nhiều lệnh connect cùng deviceId có thể chồng nhau
+    // (VD Future.wait kiểm tra nhiều máy in song song). Tất cả phải nhận cùng một kết
+    // quả; nếu chỉ giữ một result thì lệnh bị ghi đè sẽ treo tới timeout, và timeout
+    // handler đóng luôn kết nối vừa thành công.
     internal data class PendingConnect(
-        val result: Result,
+        val results: MutableList<Result>,
         val type: ConnectionType,
         val deviceId: String
-    )
+    ) {
+        constructor(result: Result, type: ConnectionType, deviceId: String) :
+            this(java.util.Collections.synchronizedList(mutableListOf(result)), type, deviceId)
 
-    internal val pendingConnects = mutableMapOf<String, PendingConnect>()
+        /** Trả [value] cho mọi lệnh đang chờ, đảm bảo mỗi result chỉ gọi một lần. */
+        fun complete(value: Boolean) {
+            synchronized(results) {
+                results.forEach { runCatching { it.success(value) } }
+                results.clear()
+            }
+        }
+    }
+
+    internal val pendingConnects =
+        java.util.concurrent.ConcurrentHashMap<String, PendingConnect>()
 
     @Volatile internal var isDetached = false
 
@@ -378,28 +399,29 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     /** Build a per-device IConnectListener so parallel connects don't race. */
     internal fun makeConnectListener(deviceId: String): IConnectListener =
         IConnectListener { code, _, _ ->
-            val pending = pendingConnects[deviceId]
             val isBuiltIn = isBuiltInPrinter()
 
             when (code) {
                 POSConnect.CONNECT_SUCCESS -> {
-                    pending?.result?.success(true)
+                    // remove() nguyên tử ngay từ đầu: đọc rồi remove ở cuối là hai bước
+                    // rời nhau, timeout handler có thể xen vào giữa và đóng kết nối này.
+                    val pending = pendingConnects.remove(deviceId)
+                    pending?.complete(true)
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thành công!")
                     }
                     if (pending?.type == ConnectionType.USB) emitUsbEvent(deviceId, true)
-                    pendingConnects.remove(deviceId)
                 }
 
                 POSConnect.CONNECT_FAIL, POSConnect.CONNECT_INTERRUPT -> {
+                    val pending = pendingConnects.remove(deviceId)
                     runCatching { connections[deviceId]?.close() }
                     connections.remove(deviceId)
                     connectionTypes.remove(deviceId)
-                    pending?.result?.success(false)
+                    pending?.complete(false)
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thất bại hoặc bị gián đoạn")
                     }
-                    pendingConnects.remove(deviceId)
                 }
 
                 POSConnect.SEND_FAIL -> {
@@ -492,13 +514,19 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
     internal fun scheduleConnectTimeout(deviceId: String) {
         Handler(Looper.getMainLooper()).postDelayed({
-            if (isDetached || !pendingConnects.containsKey(deviceId)) return@postDelayed
+            if (isDetached) return@postDelayed
+
+            // remove() nguyên tử: chỉ trả về non-null nếu timeout thật sự thắng cuộc đua
+            // với IConnectListener. Trước đây containsKey() rồi remove() là hai bước rời
+            // nhau, nên CONNECT_SUCCESS xen vào giữa sẽ bị timeout đóng mất kết nối vừa
+            // thành công — lỗi này lộ ra khi kết nối nhiều máy in song song.
+            val pending = pendingConnects.remove(deviceId) ?: return@postDelayed
+
             runCatching { connections[deviceId]?.close() }
             connections.remove(deviceId)
             connectionTypes.remove(deviceId)
-            pendingConnects[deviceId]?.result?.success(false)
-            pendingConnects.remove(deviceId)
-            
+            pending.complete(false)
+
             if (!isBuiltInPrinter()) {
                 toast("Kết nối $deviceId hết thời gian chờ")
             }
@@ -508,7 +536,26 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     internal fun connectNet(ipAddress: String, result: Result) {
         val deviceId = "LAN:$ipAddress"
         try {
-            pendingConnects[deviceId] = PendingConnect(result, ConnectionType.LAN, deviceId)
+            // Đã kết nối sẵn thì trả về ngay. Nếu không, đoạn close() bên dưới sẽ đóng
+            // kết nối đang dùng được — khi nhiều máy connect song song, máy này có thể
+            // bị ngắt giữa lúc máy khác vừa kết nối xong.
+            if (isConnectionActive(deviceId)) {
+                result.success(true)
+                return
+            }
+
+            // Connect trùng deviceId: gộp result vào lệnh đang chờ để cả hai cùng nhận
+            // kết quả thật, thay vì ghi đè (làm mất result của lệnh trước -> Future treo
+            // tới timeout, rồi timeout handler đóng luôn kết nối vừa thành công).
+            val existing = pendingConnects.putIfAbsent(
+                deviceId,
+                PendingConnect(result, ConnectionType.LAN, deviceId)
+            )
+            if (existing != null) {
+                synchronized(existing.results) { existing.results.add(result) }
+                return
+            }
+
             runCatching { connections[deviceId]?.close() }
             val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET) ?: run {
                 pendingConnects.remove(deviceId)
@@ -545,7 +592,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 toast("Người dùng từ chối quyền USB")
                 val d = device ?: return
                 val deviceId = stableUsbId(d)
-                pendingConnects[deviceId]?.result?.success(false)
+                pendingConnects[deviceId]?.complete(false)
                 pendingConnects.remove(deviceId)
             }
         }
@@ -605,7 +652,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         usbDevicePaths[deviceId] = device.deviceName  // keep path current on each attempt
         if (attempt > 3) {
             toast("Kết nối USB thất bại sau nhiều lần thử")
-            pendingConnects[deviceId]?.result?.success(false)
+            pendingConnects[deviceId]?.complete(false)
             pendingConnects.remove(deviceId)
             return
         }
