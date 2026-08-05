@@ -234,8 +234,13 @@ class PrinterThermal {
                                 val green = (pixel shr 8) and 0xff
                                 val blue = pixel and 0xff
                                 val gray = (0.299 * red + 0.587 * green + 0.114 * blue).toInt()
-                                // Tăng ngưỡng lên 200 giúp giữ nguyên chất lượng ảnh gốc, làm chữ in ra đen đậm, sắc nét
-                                if (gray < 200) {
+                                // Ngưỡng 128 (giữa thang xám) là mức chuẩn cho nhị phân hoá.
+                                //
+                                // Ngưỡng 200 trước đây kéo cả pixel xám nhạt (180-199) của
+                                // viền anti-alias thành đen tuyền, làm nét chữ phình ra lởm
+                                // chởm — font càng lớn viền anti-alias càng dài nên càng lộ
+                                // (dễ thấy ở cỡ 16-22). 128 chỉ giữ phần thân nét thật.
+                                if (gray < 128) {
                                     byteVal = byteVal or (1 shl (7 - bit))
                                 }
                             }

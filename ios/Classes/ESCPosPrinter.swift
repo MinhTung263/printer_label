@@ -155,7 +155,7 @@ final class ESCPosPrinter {
     /// Chuyển [cgImage] thành lệnh ESC/POS `GS v 0`, chia thành các dải cao
     /// tối đa [bandHeight] dòng (mỗi dải là một lệnh `GS v 0` độc lập).
     /// Truyền `bandHeight >= chiều cao ảnh` để có đúng một lệnh cho toàn ảnh.
-    /// Ngưỡng nhị phân hóa 200 và điều kiện alpha > 50 khớp với bản Android
+    /// Ngưỡng nhị phân hóa 128 và điều kiện alpha > 50 khớp với bản Android
     /// để hai nền tảng cho ra bản in giống nhau.
     private func escPosRasterBytes(from cgImage: CGImage, bandHeight: Int) -> Data? {
         let width = cgImage.width
@@ -208,8 +208,13 @@ final class ESCPosPrinter {
                         let green = Double(pixels[idx + 1])
                         let blue = Double(pixels[idx + 2])
                         let gray = Int(0.299 * red + 0.587 * green + 0.114 * blue)
-                        // Ngưỡng 200 giúp chữ in ra đen đậm, sắc nét (giống Android)
-                        if gray < 200 {
+                        // Ngưỡng 128 (giữa thang xám) là mức chuẩn cho nhị phân hoá.
+                        //
+                        // Ngưỡng 200 trước đây kéo cả pixel xám nhạt (180-199) của viền
+                        // anti-alias thành đen tuyền, làm nét chữ phình ra lởm chởm —
+                        // font càng lớn viền anti-alias càng dài nên càng lộ (dễ thấy ở
+                        // cỡ 16-22). Giữ khớp với Android (PrinterThermal.kt).
+                        if gray < 128 {
                             byteVal |= (1 << (7 - bit))
                         }
                     }
