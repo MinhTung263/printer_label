@@ -78,18 +78,24 @@ class PrinterLabel {
   }
 
   /// Discovers LAN printers by scanning the local network for open port 9100.
-  /// 
+  ///
   /// Returns a stream of IP addresses (e.g. '192.168.1.10') that have the port open.
+  ///
+  /// [timeout] is the per-IP TCP connect timeout. Printers on the same LAN normally
+  /// answer well under 100ms, so the short default keeps a full /24 sweep fast.
+  /// Raise it only for congested networks or printers behind a slow AP.
   static Stream<String> discoverLanPrinters({
     int port = 9100,
-    Duration timeout = const Duration(milliseconds: 2000),
+    Duration? timeout,
   }) {
     // ignore: close_sinks
     final controller = StreamController<String>();
 
     Future<List<String>> getLocalIps() async {
       List<String> validIps = [];
-      for (int retry = 0; retry < 5; retry++) {
+      // 3 lần thử là đủ để WiFi kịp cấp IP sau khi vừa bật; 5 lần chỉ thêm 1s chờ
+      // vô ích khi thiết bị thực sự không có mạng LAN.
+      for (int retry = 0; retry < 3; retry++) {
         final interfaces = await NetworkInterface.list(
           type: InternetAddressType.IPv4,
           includeLoopback: false,
@@ -117,45 +123,84 @@ class PrinterLabel {
       return validIps;
     }
 
+    // IP đã phát ra stream — chặn trùng khi lần quét 2 chạy lại, và khi thiết bị có
+    // nhiều interface cùng subnet (VD WiFi + VPN) làm subnet bị quét lặp.
+    final Set<String> emitted = <String>{};
+
     Future<int> scanPass(List<String> validIps) async {
       int foundCount = 0;
 
+      // Gộp theo subnet: hai IP cùng subnet (WiFi + hotspot/VPN) sẽ sinh cùng dải quét,
+      // quét lặp chỉ làm chậm gấp đôi và tăng tải router — trên iOS còn kéo theo timeout.
+      final Set<String> subnets = <String>{};
       for (var ip in validIps) {
         final parts = ip.split('.');
         if (parts.length != 4) continue;
-        final subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+        subnets.add('${parts[0]}.${parts[1]}.${parts[2]}');
+      }
 
-        // Chia nhỏ (batch) mỗi lần quét 50 IP để tránh gây nghẽn Router (SYN flood)
-        // Router mạng gia đình thường sẽ drop packet nếu gửi 254 TCP kết nối cùng 1 lúc.
-        const int batchSize = 50;
-        const batchTimeout = Duration(milliseconds: 500);
+      final Set<String> ownIps = validIps.toSet();
 
-        for (int i = 1; i < 255; i += batchSize) {
-          final futures = <Future<void>>[];
-          
-          for (int j = i; j < i + batchSize && j < 255; j++) {
-            final targetIp = '$subnet.$j';
-            if (targetIp == ip) continue;
-
-            futures.add(
-              Socket.connect(targetIp, port, timeout: batchTimeout).then((socket) {
-                socket.destroy();
-                if (!controller.isClosed) {
-                  foundCount++;
-                  controller.add(targetIp);
-                }
-              }).catchError((_) {
-                // Ignore connection errors
-              }),
-            );
-          }
-          
-          // Đợi batch hiện tại xong (tối đa 500ms) rồi mới quét batch tiếp theo
-          await Future.wait(futures);
-          
-          if (controller.isClosed) break;
+      // Hàng đợi phẳng tất cả IP cần quét (mọi subnet gộp chung).
+      final List<String> targets = <String>[];
+      for (var subnet in subnets) {
+        for (int j = 1; j < 255; j++) {
+          final targetIp = '$subnet.$j';
+          // IP của chính thiết bị — bỏ qua, không tự quét mình.
+          if (ownIps.contains(targetIp)) continue;
+          targets.add(targetIp);
         }
       }
+
+      // Giới hạn số socket mở CÙNG LÚC để tránh nghẽn router (SYN flood) và tránh
+      // đụng trần file descriptor trên iOS — nhưng KHÔNG chia batch có rào chắn.
+      //
+      // Batch + Future.wait khiến mỗi batch chậm bằng phần tử chậm nhất: 15 IP trả
+      // lời trong 5ms vẫn phải chờ IP thứ 16 timeout đủ 1.5s. 16 batch x 1.5s = ~24s
+      // dù mạng hoàn toàn khoẻ. Ở đây mỗi worker xong 1 IP là bốc IP kế tiếp ngay,
+      // nên tổng thời gian ~ (số IP / số worker) x RTT thực, không x timeout.
+      final bool isIOS = Platform.isIOS;
+      final int concurrency = isIOS ? 24 : 48;
+      // IP không tồn tại thường bị firewall drop (không có RST) -> luôn phải chờ hết
+      // timeout. Giữ ngắn vì máy in trong cùng LAN gần như luôn trả lời dưới 100ms;
+      // các IP chậm bất thường đã được lần quét 2 (auto retry) bọc lót.
+      final connectTimeout = timeout ??
+          (isIOS
+              ? const Duration(milliseconds: 600)
+              : const Duration(milliseconds: 400));
+
+      int next = 0;
+      Future<void> worker() async {
+        while (true) {
+          if (controller.isClosed) return;
+          final index = next++;
+          if (index >= targets.length) return;
+          final targetIp = targets[index];
+          try {
+            final socket = await Socket.connect(
+              targetIp,
+              port,
+              timeout: connectTimeout,
+            );
+            socket.destroy();
+            // Chặn phát trùng: lần quét 2 chạy lại cùng dải, và nhiều interface
+            // có thể sinh cùng subnet.
+            if (!controller.isClosed && emitted.add(targetIp)) {
+              foundCount++;
+              controller.add(targetIp);
+            }
+          } catch (_) {
+            // Ignore connection errors
+          }
+        }
+      }
+
+      await Future.wait(
+        List.generate(
+          concurrency < targets.length ? concurrency : targets.length,
+          (_) => worker(),
+        ),
+      );
       return foundCount;
     }
 
@@ -167,10 +212,17 @@ class PrinterLabel {
 
         // Nếu không tìm thấy máy in nào, có thể do OS đang cache IP cũ hoặc ARP chưa cập nhật
         if (found == 0 && !controller.isClosed) {
-          await Future.delayed(const Duration(milliseconds: 800)); // Chờ OS ổn định
+          await Future.delayed(const Duration(milliseconds: 500)); // Chờ OS ổn định
           List<String> newIps = await getLocalIps();
-          // Quét lại lần 2 (Auto retry)
-          await scanPass(newIps);
+
+          // Chỉ quét lại khi dải mạng thực sự khác lần 1. Nếu OS trả về đúng dải cũ
+          // thì lần 1 đã quét hết dải đó — quét lại chỉ tốn thêm thời gian mà không
+          // thể ra kết quả mới (trừ khi máy in vừa mới bật, hiếm).
+          final before = currentIps.toSet();
+          final changed = newIps.any((ip) => !before.contains(ip));
+          if (changed || currentIps.isEmpty) {
+            await scanPass(newIps);
+          }
         }
       } catch (e) {
         // Ignore network errors
