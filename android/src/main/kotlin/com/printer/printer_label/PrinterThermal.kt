@@ -234,13 +234,19 @@ class PrinterThermal {
                                 val green = (pixel shr 8) and 0xff
                                 val blue = pixel and 0xff
                                 val gray = (0.299 * red + 0.587 * green + 0.114 * blue).toInt()
-                                // Ngưỡng 128 (giữa thang xám) là mức chuẩn cho nhị phân hoá.
+                                // Ngưỡng 200 — KHÔNG hạ về 128 (xem lịch sử: 128 gây in mờ).
                                 //
-                                // Ngưỡng 200 trước đây kéo cả pixel xám nhạt (180-199) của
-                                // viền anti-alias thành đen tuyền, làm nét chữ phình ra lởm
-                                // chởm — font càng lớn viền anti-alias càng dài nên càng lộ
-                                // (dễ thấy ở cỡ 16-22). 128 chỉ giữ phần thân nét thật.
-                                if (gray < 128) {
+                                // Đầu in nhiệt chỉ có 1 bit: cháy hoặc trắng, không có mức xám.
+                                // Chữ do Flutter render là anti-alias nên mỗi nét gồm lõi đậm
+                                // bọc bởi dải xám. Ngưỡng 200 cho cháy tới xám 199 -> nét đủ dày.
+                                // Ngưỡng 128 loại sạch dải 129-199; với cỡ chữ nhỏ dải này chiếm
+                                // phần lớn nét nên chỉ còn bộ xương mảnh -> bản in RẤT MỜ (đã
+                                // ghi nhận trên máy BLE ở cả iOS và Android).
+                                //
+                                // Đường raster thủ công này CHỈ dùng cho BLE và máy in tích hợp
+                                // (LAN/USB đã return sớm ở trên để SDK printBitmap tự xử lý),
+                                // nên đổi ngưỡng ở đây ảnh hưởng trực tiếp tới bản in BLE.
+                                if (gray < 200) {
                                     byteVal = byteVal or (1 shl (7 - bit))
                                 }
                             }
