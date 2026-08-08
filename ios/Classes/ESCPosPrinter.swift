@@ -62,6 +62,9 @@ final class ESCPosPrinter {
         return false
     }
 
+    /// [isBluetooth] hiện KHÔNG còn ảnh hưởng cách dựng lệnh raster: mọi kết nối đều chia
+    /// dải 128 dòng (xem lý do ở phần dựng `bandHeight` bên dưới). Giữ tham số để không
+    /// phải đổi các lời gọi sẵn có và để dành khi cần phân biệt kết nối trở lại.
     func buildAndSendESC(
         imageData: FlutterStandardTypedData,
         paperSize: Int?,
@@ -99,25 +102,24 @@ final class ESCPosPrinter {
 
         // Dựng lệnh raster THỦ CÔNG, giống hệt Android (PrinterThermal.getEscPosRasterBytes).
         //
-        // Số dòng ảnh trên MỖI lệnh `GS v 0` phải chọn theo loại kết nối — hai kết nối
-        // hỏng theo hai kiểu ngược nhau:
+        // MỌI kết nối đều CHIA DẢI 128 dòng, mỗi dải là một lệnh `GS v 0` độc lập.
         //
-        // • BLE: gửi MỘT lệnh duy nhất cho cả ảnh. KHÔNG dùng nhiều dải (và cũng không
-        //   dùng PTCommandESC.appendRasterImage(..., package: true), vì nhánh package của
-        //   SDK chia ảnh thành nhiều lệnh liên tiếp). Máy in phải xử lý xong dải này mới
-        //   nhận dải kế; khi in 2 máy BLE cùng lúc, băng thông mỗi máy giảm và các dải tới
-        //   chậm hơn khả năng đồng bộ của firmware, làm nó rớt khỏi trạng thái nhận raster
-        //   rồi diễn giải byte ảnh còn lại thành LỆNH/TEXT — giấy in ra chuỗi chẩn đoán
-        //   của firmware (`NVLogo PIC`, `psxMax ...`) xen giữa ảnh.
+        // Máy in ESC/POS giới hạn chiều cao MỖI lệnh raster (nhiều model chỉ nhận vài trăm
+        // dòng/lệnh). Nhồi cả bill vào MỘT lệnh thì đơn ngắn vừa đủ nên chạy tốt, nhưng đơn
+        // dài sinh ảnh cao hàng nghìn dòng, vượt giới hạn -> máy in HỦY chế độ raster và
+        // diễn giải các byte ảnh còn lại thành VĂN BẢN. Giấy ra đầy ký tự rác lặp lại
+        // (`0p0380aa0p8sç80`...), không cắt giấy. Đã quan sát trực tiếp trên máy RICHTA qua
+        // BLE ở iOS với đơn dài.
         //
-        // • LAN: phải CHIA DẢI. Máy in ESC/POS giới hạn chiều cao mỗi lệnh raster (Epson
-        //   chỉ nhận vài trăm dòng/lệnh). Đơn ngắn thì vừa, nhưng đơn dài sinh ảnh cao
-        //   hàng nghìn dòng, vượt giới hạn -> máy in hủy chế độ raster và in ra ký tự rác,
-        //   không cắt giấy, treo luôn các job sau. LAN không gặp lỗi kiểu BLE ở trên vì
-        //   TCP băng thông cao và NWConnection gửi tuần tự đúng thứ tự.
-        //
-        // Đây cũng là cách Android đang làm (bên đó LAN/USB để SDK `printBitmap` tự chia).
-        let bandHeight = isBluetooth ? cgImage.height : 128
+        // LỊCH SỬ — vì sao trước đây BLE dùng một lệnh duy nhất: để chữa lỗi firmware in ra
+        // chuỗi chẩn đoán (`NVLogo PIC`, `psxMax ...`) xen giữa ảnh khi các dải tới chậm hơn
+        // khả năng đồng bộ của firmware. Nhưng cách đó đổi một lỗi lấy một lỗi NẶNG HƠN:
+        // đơn ngắn hết rác, còn đơn dài thì rác toàn bộ. Nguyên nhân dải tới chậm là NHỊP
+        // GỬI quá nhanh so với tốc độ in, và việc đó đã được sửa đúng chỗ trong
+        // BLEManager.writeData (ngân sách nghỉ ~86µs/byte theo BYTE, khớp Android). Android
+        // vẫn chia dải 128 cho BLE và không gặp cả hai lỗi — đó là bằng chứng chia dải là
+        // đúng, miễn nhịp gửi đủ chậm.
+        let bandHeight = 128
         guard let rasterBytes = escPosRasterBytes(from: cgImage, bandHeight: bandHeight) else {
             completion(nil)
             return
@@ -165,9 +167,21 @@ final class ESCPosPrinter {
         let widthBytes = (width + 7) / 8
 
         // Đọc pixel về RGBA8 để tính grayscale giống công thức bên Android.
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        //
+        // Bộ đệm phải do TA tự cấp phát, KHÔNG được truyền `&pixels` của mảng Swift vào
+        // `CGContext(data:)`. Con trỏ lấy qua `&` chỉ được bảo đảm hợp lệ TRONG lời gọi
+        // đó; sau khi CGContext khởi tạo xong, Swift được phép di chuyển/huỷ bộ đệm của
+        // mảng. `ctx.draw` và vòng đọc `pixels` bên dưới khi ấy ghi/đọc qua con trỏ đã
+        // chết -> EXC_BAD_ACCESS (code=50). Lỗi này là hành vi KHÔNG XÁC ĐỊNH: trước đây
+        // tình cờ chạy được vì vòng lặp nhỏ, nhưng khi chia dải 128 dòng thì vòng lặp dài
+        // hơn làm cách cấp phát thay đổi và crash lộ ra.
+        let byteCount = width * height * 4
+        let pixels = UnsafeMutablePointer<UInt8>.allocate(capacity: byteCount)
+        pixels.initialize(repeating: 0, count: byteCount)
+        defer { pixels.deallocate() }
+
         guard let ctx = CGContext(
-            data: &pixels,
+            data: pixels,
             width: width,
             height: height,
             bitsPerComponent: 8,

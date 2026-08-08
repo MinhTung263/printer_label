@@ -9,6 +9,15 @@ public final class LANPrinterManager {
     // map IP -> connection
     private var connections: [String: LANPrinterConnection] = [:]
 
+    // MARK: - Máy in đã ghép nối (registered) vs socket đang mở (connected)
+    // Socket được NHẢ sau khi in xong để nhiều thiết bị dùng chung được máy in LAN
+    // (máy in nhiệt thường chỉ nhận 1 kết nối trên port 9100). Vì vậy "không có socket"
+    // KHÔNG còn nghĩa là "máy in offline" — nếu lấy trạng thái socket làm câu trả lời cho
+    // checkConnect thì máy in vừa in xong sẽ hiện offline và Dart sẽ chặn không cho in.
+    // Ta ghi nhớ những IP đã connect thành công và coi chúng là còn ghép nối cho tới khi
+    // người dùng chủ động disconnect.
+    private var registeredPrinters: Set<String> = []
+
     // serial access queue for manager state
     private let queue = DispatchQueue(label: "lan.printer.manager")
 
@@ -20,35 +29,43 @@ public final class LANPrinterManager {
     public func connect(ip: String, port: UInt16 = 9100, completion: ((_ success: Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            let conn: LANPrinterConnection
-            if let existing = self.connections[ip] {
-                conn = existing
-            } else {
-                conn = LANPrinterConnection(ip: ip, port: port)
-                self.connections[ip] = conn
-            }
+            let conn = self.connectionFor(ip: ip, port: port)
             conn.connect { [weak self] success in
-                // Connect thất bại → bỏ connection để lần sau khởi tạo sạch.
-                if !success {
-                    self?.queue.async {
-                        self?.connections[ip]?.disconnect()
-                        self?.connections.removeValue(forKey: ip)
+                guard let self = self else { return }
+                self.queue.async {
+                    if success {
+                        // Ghép nối thành công → ghi nhớ, kể cả khi socket bị nhả sau đó.
+                        self.registeredPrinters.insert(ip)
+                    } else {
+                        // Connect thất bại → bỏ connection để lần sau khởi tạo sạch.
+                        self.connections[ip]?.disconnect()
+                        self.connections.removeValue(forKey: ip)
+                        self.registeredPrinters.remove(ip)
                     }
+                    completion?(success)
                 }
-                completion?(success)
             }
         }
+    }
+
+    /// Lấy connection sẵn có hoặc tạo mới. Phải gọi từ trong queue.
+    private func connectionFor(ip: String, port: UInt16 = 9100) -> LANPrinterConnection {
+        if let existing = connections[ip] { return existing }
+        let conn = LANPrinterConnection(ip: ip, port: port)
+        connections[ip] = conn
+        return conn
     }
 
     public func disconnect(ip: String, completion: ((_ success: Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
+            let wasRegistered = self.registeredPrinters.remove(ip) != nil
             if let conn = self.connections[ip] {
                 conn.disconnect()
                 self.connections.removeValue(forKey: ip)
                 DispatchQueue.main.async { completion?(true) }
             } else {
-                DispatchQueue.main.async { completion?(false) }
+                DispatchQueue.main.async { completion?(wasRegistered) }
             }
         }
     }
@@ -60,6 +77,7 @@ public final class LANPrinterManager {
                 conn.disconnect()
             }
             self.connections.removeAll()
+            self.registeredPrinters.removeAll()
         }
     }
 
@@ -67,56 +85,49 @@ public final class LANPrinterManager {
         queue.async { [weak self] in
             guard let self = self else { return }
             print("[LANPrinterManager] 📤 send() called for IP: \(ip), data size: \(data.count)")
-            if let conn = self.connections[ip] {
-                print("[LANPrinterManager] Found connection to \(ip), state: \(conn.state)")
-                if conn.state != .connected {
-                    // try to connect first, then enqueue
-                    print("[LANPrinterManager] Connection not ready, attempting connect...")
-                    conn.connect()
-                    conn.send(data: data)
-                    DispatchQueue.main.async { completion?(false, NSError(domain: "LANPrinterManager", code: -2, userInfo: [NSLocalizedDescriptionKey: "Connection not ready; enqueued"])) }
-                } else {
-                    print("[LANPrinterManager] Connection ready, sending now...")
-                    conn.send(data: data) { success, error in
-                        DispatchQueue.main.async { completion?(success, error) }
-                    }
+            // Socket có thể đã được nhả sau lần in trước — send() của connection tự mở lại
+            // khi cần, đồng thời tự retry theo backoff nếu máy in đang bận vì thiết bị khác.
+            // Nhờ vậy ở đây chỉ cần xếp job và chờ kết quả THẬT.
+            let conn = self.connectionFor(ip: ip)
+            self.registeredPrinters.insert(ip)
+            conn.send(data: data) { success, error in
+                if !success {
+                    print("[LANPrinterManager] ❌ send tới \(ip) thất bại: \(error?.localizedDescription ?? "unknown")")
                 }
-            } else {
-                print("[LANPrinterManager] No existing connection to \(ip), creating new...")
-                // create connection and connect+enqueue
-                let conn = LANPrinterConnection(ip: ip)
-                conn.onConnected = { [weak conn] in
-                    print("[LANPrinterManager] New connection to \(ip) connected, sending data...")
-                    conn?.send(data: data)
-                }
-                conn.onDisconnected = { error in
-                    print("[LANPrinterManager] Connection to \(ip) disconnected: \(error?.localizedDescription ?? "no error")")
-                    DispatchQueue.main.async { completion?(false, error) }
-                }
-                self.connections[ip] = conn
-                conn.connect()
-                conn.send(data: data)
-                DispatchQueue.main.async { completion?(false, NSError(domain: "LANPrinterManager", code: -3, userInfo: [NSLocalizedDescriptionKey: "Connection created and data enqueued"])) }
+                DispatchQueue.main.async { completion?(success, error) }
             }
         }
     }
 
+    /// true khi máy in [ip] đang được ghép nối (dù socket có thể đã nhả để nhường thiết
+    /// bị khác). Dùng cho checkConnect: phản ánh "có in được không", không phải "socket
+    /// có đang mở không".
     public func isConnected(ip: String) -> Bool {
         var connected = false
         queue.sync {
-            if let conn = connections[ip] {
-                connected = conn.state == .connected
-            }
+            connected = registeredPrinters.contains(ip) || connections[ip]?.state == .connected
         }
         return connected
+    }
+
+    /// true khi socket tới [ip] đang thực sự mở. Dùng để chẩn đoán, không dùng cho
+    /// checkConnect (xem `isConnected`).
+    public func hasLiveSocket(ip: String) -> Bool {
+        var live = false
+        queue.sync { live = connections[ip]?.state == .connected }
+        return live
     }
 
     public func getConnectedPrinters() -> [String] {
         var list: [String] = []
         queue.sync {
+            // Gồm cả máy in đã ghép nối nhưng đang nhả socket, để việc in không deviceId
+            // vẫn tìm được máy in sau khi socket tự đóng.
+            var set = registeredPrinters
             for (ip, conn) in connections where conn.state == .connected {
-                list.append(ip)
+                set.insert(ip)
             }
+            list = Array(set)
         }
         return list
     }

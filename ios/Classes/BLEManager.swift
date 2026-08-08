@@ -341,10 +341,21 @@ final class BLEManager: NSObject {
             // Android) làm máy in trôi một đoạn rồi KHỰNG hẳn 80ms, lặp lại — chính là
             // cảm giác "giật giật". Chia cùng lượng thời gian đó đều cho từng gói thì
             // firmware vẫn được nghỉ tương đương nhưng dòng giấy chạy liên tục, êm hơn.
-            // (~1500 byte ≈ 8 gói MTU → 80ms/8 ≈ 10ms mỗi gói.)
+            //
+            // Ngân sách nghỉ phải tính THEO BYTE, không theo số gói. `canSendWriteWithoutResponse`
+            // chỉ báo bộ đệm CỦA IOS còn chỗ, KHÔNG biết bộ đệm MÁY IN đã đầy chưa; ESC/POS
+            // trên BLE không có đường phản hồi nào để máy in xin dừng. Giới hạn thật là tốc
+            // độ kéo giấy (~50–80mm/s), nên nhịp nghỉ chính là thứ duy nhất giữ ta không gửi
+            // vượt khả năng in. Đơn NGẮN nằm gọn trong bộ đệm máy in nên gửi nhanh vẫn đúng;
+            // đơn DÀI làm bộ đệm đầy, máy in ÂM THẦM loại byte giữa stream → lệch escape
+            // sequence → in ra ký tự rác. Vì vậy phải giữ đúng ngân sách của Android.
+            //
+            // Android: 4ms mỗi 120 byte + 80ms mỗi 1500 byte ≈ 86µs/byte. Chia theo số gói
+            // (1500/chunkSize) vừa bị PHÉP CHIA NGUYÊN CẮT BỚT (MTU 512 → 2 thay vì 2.93,
+            // mất ~32% ngân sách), vừa làm MTU càng lớn thì gửi càng nhanh vượt máy in.
             chunkSize = max(1, maxWriteLen)
-            let chunksPerBlock = max(1, 1500 / chunkSize)
-            perChunkPause = 0.080 / Double(chunksPerBlock)
+            let pausePerByte = 0.004 / 120.0 + 0.080 / 1500.0 // ≈ 86µs/byte, khớp Android
+            perChunkPause = pausePerByte * Double(chunkSize)
             blockPause = 0
             blockSize = .max
         }

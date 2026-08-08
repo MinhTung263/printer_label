@@ -85,18 +85,21 @@ class PrinterThermal {
                 }
                 val isBluetooth = curConnect.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH
 
-                // LAN/USB: để SDK tự dựng + gửi lệnh ảnh, đúng như bản 2.0.9 vẫn chạy tốt.
+                // USB / máy in tích hợp: để SDK tự dựng + gửi lệnh ảnh.
                 //
-                // Bộ encoder raster thủ công bên dưới sinh ra ở commit 83ac36d để chữa lỗi
-                // RIÊNG của Bluetooth (ảnh lệch, QR bị tách), nhưng lại áp cho MỌI kết nối.
-                // Nó nhồi cả bill vào MỘT lệnh `GS v 0` duy nhất; đơn ngắn thì vừa, còn đơn
-                // dài sinh ảnh cao hàng nghìn dòng, vượt giới hạn chiều cao mỗi lệnh raster
-                // của máy in (Epson chỉ nhận vài trăm dòng/lệnh). Khi vượt, máy in hủy chế
-                // độ raster và diễn giải byte ảnh còn lại thành VĂN BẢN -> giấy ra đầy ký tự
-                // rác, không cắt, và treo luôn các job in sau.
+                // LAN KHÔNG còn đi đường này nữa. Lý do cũ là `printBitmap` tự chia dải nên
+                // đơn dài in tốt, còn encoder thủ công bên dưới nhồi cả bill vào MỘT lệnh
+                // `GS v 0` -> đơn dài vượt giới hạn chiều cao mỗi lệnh raster của máy in và
+                // in ra ký tự rác. Nhưng `getEscPosRasterBytes` GIỜ ĐÃ chia dải 128 dòng
+                // (xem hàm đó), nên đường thủ công in đơn dài an toàn.
                 //
-                // `printBitmap` của SDK tự chia dải nội bộ nên đơn dài bao nhiêu cũng in tốt.
-                if (!isBluetooth && !isTargetBuiltIn) {
+                // Đổi sang đường thủ công vì `printBitmap`/`sendData` của SDK là BẤT ĐỒNG BỘ:
+                // chúng chỉ xếp lệnh vào hàng đợi nội bộ rồi return, nên không có thời điểm
+                // nào biết dữ liệu đã ra khỏi máy để NHẢ SOCKET. Giữ socket thường trực làm
+                // thiết bị khác (iOS) kết nối được nhưng job của nó bị máy in xếp hàng, chỉ
+                // in khi app Android tắt. `sendAllSync` bên dưới là đồng bộ và trả về số byte
+                // thật, nên gửi xong là chắc chắn xong -> nhả socket an toàn.
+                if (!isBluetooth && !isTargetBuiltIn && curConnect.getConnectType() != POSConnect.DEVICE_TYPE_ETHERNET) {
                     val printer = POSPrinter(curConnect)
                     val paperWidth: Int? = call.argument<Int>("size")
                     synchronized(lockFor(curConnect)) {

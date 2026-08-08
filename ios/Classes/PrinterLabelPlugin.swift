@@ -306,7 +306,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             print("[PrinterLabelPlugin] → Route: LAN (deviceId: \(id))")
             if let ip = extractLANIp(from: id) {
                 print("[PrinterLabelPlugin] → Extracted IP: \(ip)")
-                LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
+                LANPrinterManager.shared.send(data: data, to: ip, completion: { ok, err in
+                    // sendToPrinter là fire-and-forget nên không trả lỗi về Dart được;
+                    // log lại để chẩn đoán khi máy in bận vì thiết bị khác đang in.
+                    if !ok {
+                        print("[PrinterLabelPlugin] ❌ LAN write failed (\(ip)): \(err?.localizedDescription ?? "unknown")")
+                    }
+                })
                 return true
             } else {
                 print("[PrinterLabelPlugin] ❌ Failed to extract IP from \(id)")
@@ -324,7 +330,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             print("[PrinterLabelPlugin] Found \(ips.count) LAN printers: \(ips)")
             if !ips.isEmpty {
                 for ip in ips {
-                    LANPrinterManager.shared.send(data: data, to: ip, completion: { _, _ in })
+                    LANPrinterManager.shared.send(data: data, to: ip, completion: { ok, err in
+                    // sendToPrinter là fire-and-forget nên không trả lỗi về Dart được;
+                    // log lại để chẩn đoán khi máy in bận vì thiết bị khác đang in.
+                    if !ok {
+                        print("[PrinterLabelPlugin] ❌ LAN write failed (\(ip)): \(err?.localizedDescription ?? "unknown")")
+                    }
+                })
                 }
                 sent = true
             }

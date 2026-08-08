@@ -26,10 +26,10 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 "checkConnect" -> {
                     val deviceId = call.argument<String>("device_id")
                     if (deviceId != null) {
-                        result.success(plugin.isConnectionActive(deviceId))
+                        result.success(plugin.isPrinterAvailable(deviceId))
                     } else {
                         // Trả về toàn bộ danh sách kết nối đang hoạt động dưới dạng map { deviceId: true/false }
-                        val map = plugin.connections.keys.associateWith { plugin.isConnectionActive(it) }
+                        val map = plugin.statusKeys().associateWith { plugin.isPrinterAvailable(it) }
                         result.success(map)
                     }
                 }
@@ -166,7 +166,20 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
     
                 "check_printer_status" -> {
-                    val conn = plugin.getConn(call)
+                    // Hỏi trạng thái thật thì BẮT BUỘC phải có socket. Máy in LAN dùng chung
+                    // đã nhả socket sau lần in trước nên phải mở lại, nếu không sẽ báo
+                    // "offline" cho một máy in vẫn hoạt động bình thường.
+                    var conn = plugin.getConn(call)
+                    if (conn == null || !conn.isConnect) {
+                        val deviceId = call.argument<String>("device_id")
+                        val ip = deviceId?.let { plugin.rawId(it) }
+                        // Chỉ mở lại khi đang bật chế độ nhả socket; nếu không, device sẵn có
+                        // vẫn dùng được và tạo device mới sẽ làm gián đoạn kết nối đang tốt.
+                        if (plugin.releaseLanSocketAfterPrint && ip != null &&
+                            plugin.registeredLanPrinters.contains(ip)) {
+                            conn = plugin.ensureLanConnectedSync(ip)
+                        }
+                    }
                     if (conn == null || !conn.isConnect) {
                         result.success("offline")
                         return
@@ -248,11 +261,22 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
 
             validConns.forEach { conn ->
                 kotlin.concurrent.thread {
+                    // Nhả socket LAN khi job này kết thúc (thành công hay lỗi) để điện thoại
+                    // khác kết nối được. Phải nhả trong callback chứ KHÔNG phải sau khi
+                    // job() trả về: job() tự chạy luồng nền riêng nên trả về trước khi in
+                    // xong — đóng lúc đó sẽ cắt socket giữa lúc đang truyền.
+                    // Chỉ nhả đúng 1 lần dù callback có bị gọi nhiều lần.
+                    val released = java.util.concurrent.atomic.AtomicBoolean(false)
+                    fun releaseOnce() {
+                        if (released.compareAndSet(false, true)) plugin.releaseLanSocket(conn)
+                    }
+
                     val jobResult = object : Result {
                         override fun success(res: Any?) {
                             successCount.incrementAndGet()
                             finishCount.incrementAndGet()
-                            
+                            releaseOnce()
+
                             // Nếu có ít nhất 1 thiết bị in thành công, phản hồi thành công ngay lập tức cho Flutter
                             if (isResultDelivered.compareAndSet(false, true)) {
                                 Handler(Looper.getMainLooper()).post {
@@ -264,7 +288,8 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                         override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
                             lastError.set(Pair(errorCode, errorMessage))
                             val currentFinished = finishCount.incrementAndGet()
-                            
+                            releaseOnce()
+
                             // Chỉ trả về lỗi nếu TẤT CẢ các thiết bị đều thất bại
                             if (currentFinished == total && successCount.get() == 0) {
                                 if (isResultDelivered.compareAndSet(false, true)) {
@@ -278,6 +303,7 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
 
                         override fun notImplemented() {
                             val currentFinished = finishCount.incrementAndGet()
+                            releaseOnce()
                             if (currentFinished == total && successCount.get() == 0) {
                                 if (isResultDelivered.compareAndSet(false, true)) {
                                     Handler(Looper.getMainLooper()).post {

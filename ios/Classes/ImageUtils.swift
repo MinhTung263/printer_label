@@ -20,10 +20,19 @@ extension UIImage {
         let bytesPerRow = bytesPerPixel * width
         let bitsPerComponent = 8
         
-        var rawData = [UInt8](repeating: 0, count: width * height * bytesPerPixel)
-        
+        // Bộ đệm phải do TA tự cấp phát, KHÔNG truyền `&rawData` của mảng Swift vào
+        // `CGContext(data:)`. Con trỏ lấy qua `&` chỉ hợp lệ TRONG lời gọi đó; sau khi
+        // CGContext khởi tạo xong, Swift được phép di chuyển/huỷ bộ đệm của mảng. Khi ấy
+        // `context.draw` ghi qua con trỏ đã chết, vòng lặp bên dưới đọc/ghi `rawData` không
+        // còn liên quan gì tới bộ đệm của context, và `context.makeImage()` trả về ảnh
+        // KHÔNG chứa kết quả nhị phân hoá. Đây là hành vi không xác định -> EXC_BAD_ACCESS.
+        let byteCount = width * height * bytesPerPixel
+        let rawData = UnsafeMutablePointer<UInt8>.allocate(capacity: byteCount)
+        rawData.initialize(repeating: 0, count: byteCount)
+        defer { rawData.deallocate() }
+
         guard let context = CGContext(
-            data: &rawData,
+            data: rawData,
             width: width,
             height: height,
             bitsPerComponent: bitsPerComponent,
@@ -33,9 +42,9 @@ extension UIImage {
         ) else {
             return nil
         }
-        
+
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
+
         for i in 0..<width * height {
             let offset = i * 4
             let r = rawData[offset]

@@ -302,6 +302,23 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         return true
     }
 
+    /// Trạng thái báo về Dart cho checkConnect / check_printer_status.
+    ///
+    /// KHÁC với [isConnectionActive]: hàm kia hỏi "socket có đang mở không" (dùng để
+    /// quyết định có cần mở lại), còn hàm này hỏi "có in được không". Với máy in LAN dùng
+    /// chung, socket được NHẢ sau khi in xong nên `isConnect` = false là chuyện bình
+    /// thường — nếu lấy nó trả lời checkConnect thì máy in vừa in xong sẽ hiện offline và
+    /// Dart chặn không cho in nữa.
+    internal fun isPrinterAvailable(deviceId: String): Boolean {
+        if (isConnectionActive(deviceId)) return true
+        return registeredLanPrinters.contains(rawId(deviceId))
+    }
+
+    /// Danh sách deviceId để báo trạng thái: kết nối đang mở + máy in LAN đã ghép nối
+    /// nhưng đang nhả socket.
+    internal fun statusKeys(): Set<String> =
+        connections.keys + registeredLanPrinters.map { "LAN:$it" }
+
     internal fun getConn(call: MethodCall): IDeviceConnection? {
         val deviceId = call.argument<String>("device_id")
 
@@ -369,6 +386,19 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                     }
                 }
             }
+            // Máy in LAN đã ghép nối nhưng socket đã nhả sau lần in trước → mở lại.
+            // Không có bước này thì mọi lần in sau lần đầu đều "không tìm thấy máy in".
+            //
+            // CHỈ làm khi đang bật chế độ nhả socket. Khi tắt (mặc định trên Android), SDK
+            // giữ socket sẵn: gọi ensureLanConnectedSync ở đây sẽ tạo device MỚI đè lên
+            // device đang dùng tốt -> SDK báo CONNECT_INTERRUPT ("kết nối gián đoạn") và
+            // job in mất kết nối giữa đường.
+            if (releaseLanSocketAfterPrint && (specificConn == null || !specificConn.isConnect)) {
+                val ip = deviceId.substringAfter("LAN:", deviceId.substringAfter(':', deviceId))
+                if (registeredLanPrinters.contains(ip)) {
+                    specificConn = ensureLanConnectedSync(ip)
+                }
+            }
             // Chỉ thêm nếu specificConn khác null, đang hoạt động, và không bị trùng với builtInConn đã thêm trước đó
             if (specificConn != null && specificConn.isConnect) {
                 if (!targets.contains(specificConn)) {
@@ -381,6 +411,16 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 if (isConnectionActive(key) && (!isBuiltInPrinter() || !bluetoothManager.isConnectionToBuiltInPrinter(conn))) {
                     if (!targets.contains(conn)) {
                         targets.add(conn)
+                    }
+                }
+            }
+            // Máy in LAN đã ghép nối nhưng đang nhả socket cũng phải được in, nếu không
+            // lệnh in không deviceId sẽ bỏ qua chúng sau lần in đầu. Chỉ khi bật chế độ nhả
+            // socket — xem lý do ở nhánh có deviceId bên trên.
+            if (releaseLanSocketAfterPrint) {
+                registeredLanPrinters.forEach { ip ->
+                    if (!isConnectionActive("LAN:$ip")) {
+                        ensureLanConnectedSync(ip)?.let { if (!targets.contains(it)) targets.add(it) }
                     }
                 }
             }
@@ -399,6 +439,11 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                     // remove() nguyên tử ngay từ đầu: đọc rồi remove ở cuối là hai bước
                     // rời nhau, timeout handler có thể xen vào giữa và đóng kết nối này.
                     val pending = pendingConnects.remove(deviceId)
+                    // Ghi nhớ máy in LAN CHỈ khi đã kết nối được thật, để lần in sau tự mở
+                    // lại socket đã nhả (xem ensureLanConnectedSync).
+                    if (connectionTypes[deviceId] == ConnectionType.LAN) {
+                        registeredLanPrinters.add(rawId(deviceId))
+                    }
                     pending?.complete(true)
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thành công!")
@@ -471,6 +516,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             connections.remove(deviceId)
             connectionTypes.remove(deviceId)
             builtInDeviceIds.remove(deviceId)
+            // Người dùng chủ động ngắt → thôi ghi nhớ, không tự mở lại ở lần in sau.
+            registeredLanPrinters.remove(rawId(deviceId))
             result.success(true)
         } catch (e: Exception) {
             result.error("DISCONNECT_ERROR", e.message, null)
@@ -483,6 +530,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             connections.clear()
             connectionTypes.clear()
             builtInDeviceIds.clear()
+            registeredLanPrinters.clear()
             result.success(true)
         } catch (e: Exception) {
             result.error("DISCONNECT_ERROR", e.message, null)
@@ -526,13 +574,118 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         }, CONNECT_TIMEOUT_MS)
     }
 
+    // ─── Máy in LAN dùng chung nhiều thiết bị ────────────────────────────────
+    // Máy in nhiệt LAN hầu hết chỉ nhận 1 kết nối TCP trên port 9100. Giữ socket thường
+    // trực làm điện thoại thứ 2 không kết nối được. Ta ghi nhớ IP đã ghép nối rồi NHẢ
+    // socket sau khi in, và mở lại ngay trước mỗi lần in (xem `ensureLanConnected`).
+    internal val registeredLanPrinters = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /// Nhả socket LAN sau khi in xong để nhiều thiết bị dùng chung được một máy in.
+    ///
+    /// Máy in chỉ cho MỘT socket in tại một thời điểm (đã kiểm chứng: nó accept nhiều socket
+    /// nhưng đóng ngay các socket phụ khi có byte tới). Giữ socket thường trực làm thiết bị
+    /// khác gửi được lệnh nhưng job bị máy in XẾP HÀNG, chỉ in khi app này tắt.
+    ///
+    /// Việc này CHỈ an toàn vì đường in LAN đã chuyển sang `sendAllSync` (đồng bộ, trả về số
+    /// byte thật) — xem PrinterThermal.printImageESC. Trước đây LAN dùng
+    /// `POSPrinter.printBitmap` BẤT ĐỒNG BỘ: nó chỉ xếp lệnh vào hàng đợi nội bộ rồi return,
+    /// nên nhả socket lúc đó là đóng kết nối khi SDK chưa gửi được gì -> KHÔNG IN RA.
+    internal var releaseLanSocketAfterPrint = true
+
+    private val lanRetryBaseDelayMs = 400L
+    private val lanMaxAttempts = 4
+
+    /// Mở lại kết nối LAN tới [ipAddress] và CHỜ kết quả (đang ở luồng nền khi in).
+    /// Thử lại có giãn nhịp: máy in đang in cho thiết bị khác sẽ từ chối kết nối, chờ
+    /// một nhịp rồi thử lại thay vì báo lỗi ngay như thể máy in offline.
+    internal fun ensureLanConnectedSync(ipAddress: String): IDeviceConnection? {
+        val deviceId = "LAN:$ipAddress"
+        if (isConnectionActive(deviceId)) return connections[deviceId]
+
+        // Đang có lệnh connect() của người dùng chờ trên CÙNG deviceId (vừa bấm nút
+        // Connect): KHÔNG được tự mở kết nối mới ở đây. Hai đường cùng ghi vào
+        // connections[deviceId] sẽ đạp nhau — ta close()/remove() mất device mà connectNet
+        // đang đợi, IConnectListener của nó không bao giờ được gọi -> báo "connect time
+        // out"; rồi scheduleConnectTimeout đóng luôn socket giữa lúc đang in -> KHÔNG IN RA.
+        // Chờ lệnh của người dùng xong rồi dùng kết quả đó.
+        val pendingDeadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
+        while (pendingConnects.containsKey(deviceId) && System.currentTimeMillis() < pendingDeadline) {
+            runCatching { Thread.sleep(50) }
+            if (isConnectionActive(deviceId)) return connections[deviceId]
+        }
+
+        for (attempt in 1..lanMaxAttempts) {
+            // Người dùng bấm Connect xen vào giữa các lần thử → nhường cho lệnh đó.
+            if (pendingConnects.containsKey(deviceId)) return null
+
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val ok = java.util.concurrent.atomic.AtomicBoolean(false)
+
+            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
+            if (device == null) {
+                Log.w("PRINTER_LOG", "Không tạo được device LAN cho $ipAddress")
+                return null
+            }
+            // Chỉ đóng device CŨ sau khi đã tạo được device mới, và chỉ đóng đúng cái ta
+            // đang thay thế — tránh đóng kết nối mà luồng khác vừa mở xong.
+            val previous = connections.put(deviceId, device)
+            if (previous != null && previous !== device) runCatching { previous.close() }
+            connectionTypes[deviceId] = ConnectionType.LAN
+            runCatching {
+                device.connect(ipAddress, IConnectListener { code, _, _ ->
+                    if (code == POSConnect.CONNECT_SUCCESS) ok.set(true)
+                    latch.countDown()
+                })
+            }.onFailure { latch.countDown() }
+
+            latch.await(CONNECT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (ok.get() && device.isConnect) return device
+
+            runCatching { device.close() }
+            // remove() có điều kiện: nếu luồng khác đã thay device khác vào thì giữ nguyên.
+            connections.remove(deviceId, device)
+            if (attempt < lanMaxAttempts) {
+                // Giãn dần 0.4s, 0.8s, 1.6s — nhường socket cho thiết bị đang in xong.
+                val delay = lanRetryBaseDelayMs shl (attempt - 1)
+                Log.i("PRINTER_LOG", "Máy in $ipAddress đang bận, thử lại sau ${delay}ms (lần ${attempt + 1}/$lanMaxAttempts)")
+                runCatching { Thread.sleep(delay) }
+            }
+        }
+        Log.w("PRINTER_LOG", "Không kết nối được máy in LAN $ipAddress sau $lanMaxAttempts lần thử")
+        return null
+    }
+
+    /// Nhả socket LAN sau khi in xong. Giữ IP trong [registeredLanPrinters] để
+    /// checkConnect vẫn báo còn ghép nối và lần in sau tự mở lại.
+    internal fun releaseLanSocket(conn: IDeviceConnection) {
+        if (!releaseLanSocketAfterPrint) return
+        val entry = connections.entries.firstOrNull { it.value === conn } ?: return
+        if (connectionTypes[entry.key] != ConnectionType.LAN) return
+        runCatching { conn.close() }
+        connections.remove(entry.key)
+        Log.i("PRINTER_LOG", "Đã nhả socket ${entry.key} để thiết bị khác dùng")
+    }
+
     internal fun connectNet(ipAddress: String, result: Result) {
         val deviceId = "LAN:$ipAddress"
+        // CHỈ ghi nhớ SAU khi kết nối thành công (trong makeConnectListener). Ghi nhớ ngay
+        // ở đây sẽ làm guard "đã ghép nối" bên dưới trả về true cho lần bấm Connect ĐẦU
+        // TIÊN tới một IP chưa từng kết nối được — báo thành công giả cho máy in không tồn tại.
         try {
             // Đã kết nối sẵn thì trả về ngay. Nếu không, đoạn close() bên dưới sẽ đóng
             // kết nối đang dùng được — khi nhiều máy connect song song, máy này có thể
             // bị ngắt giữa lúc máy khác vừa kết nối xong.
             if (isConnectionActive(deviceId)) {
+                result.success(true)
+                return
+            }
+
+            // Máy in LAN dùng chung: socket đã được NHẢ sau lần in trước nhưng máy in vẫn
+            // đang ghép nối. Bấm Connect lúc này KHÔNG cần mở socket mới — mở ra rồi để
+            // đó sẽ chiếm socket của thiết bị khác, và nếu người dùng in ngay sau đó thì
+            // scheduleConnectTimeout có thể đóng socket giữa lúc đang in (-> không in ra).
+            // Lần in tới ensureLanConnectedSync sẽ tự mở đúng lúc cần.
+            if (releaseLanSocketAfterPrint && registeredLanPrinters.contains(ipAddress)) {
                 result.success(true)
                 return
             }
@@ -549,13 +702,17 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 return
             }
 
-            runCatching { connections[deviceId]?.close() }
             val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET) ?: run {
                 pendingConnects.remove(deviceId)
                 result.error("CREATE_DEVICE_FAIL", "Cannot create device", null)
                 return
             }
-            connections[deviceId] = device
+            // Đóng device CŨ chỉ sau khi đã có device mới, và chỉ đúng cái đang bị thay —
+            // close() trước khi tạo sẽ đóng cả kết nối mà luồng in khác vừa mở xong.
+            val previousDevice = connections.put(deviceId, device)
+            if (previousDevice != null && previousDevice !== device) {
+                runCatching { previousDevice.close() }
+            }
             connectionTypes[deviceId] = ConnectionType.LAN
             device.connect(ipAddress, makeConnectListener(deviceId))
             scheduleConnectTimeout(deviceId)
