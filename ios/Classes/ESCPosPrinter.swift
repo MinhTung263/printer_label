@@ -19,15 +19,26 @@ final class ESCPosPrinter {
         let deviceId = args["device_id"] as? String
         let connectionType = args["connection_type"] as? String
         let paperSize = args["size"] as? Int
+        // Số bản in. Nhân dữ liệu ngay tại đây thay vì để tầng Dart gọi print nhiều lần:
+        // mỗi lời gọi là một job riêng trong hàng đợi của máy in, nên giữa hai bản có
+        // khoảng trống không job nào giữ socket — với máy in LAN dùng chung, socket bị nhả
+        // ngay ở đó và bản kế phải mở lại, đụng socket chưa giải phóng hẳn -> in chậm và có
+        // bản không ra. Gộp ở đây thì cả lượt in đi trong MỘT job liên tục.
+        let quantity = max(1, (args["quantity"] as? Int) ?? 1)
 
         buildAndSendESC(
             imageData: imageData,
             paperSize: paperSize,
             isBluetooth: Self.isBluetoothTarget(args: args)
         ) { [weak self] printData in
-            guard let self = self, let data = printData else {
+            guard let self = self, let oneCopy = printData else {
                 result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC command", details: nil))
                 return
+            }
+            var data = oneCopy
+            if quantity > 1 {
+                data.reserveCapacity(oneCopy.count * quantity)
+                for _ in 1..<quantity { data.append(oneCopy) }
             }
             self.plugin?.sendToPrinter(data, deviceId: deviceId, connectionType: connectionType)
             result(true)
@@ -36,6 +47,9 @@ final class ESCPosPrinter {
 
     // Build ESC/POS command bytes từ image data.
     // Dùng cho cả printImageESC và printAll để tránh duplicate code.
+    //
+    // Tôn trọng "quantity" trong [args]: trả về dữ liệu đã nhân đủ số bản, để cả lượt in
+    // đi trong MỘT job (xem lý do ở printImageESC).
     func buildAndSendESC(
         imageData: FlutterStandardTypedData,
         args: [String: Any],
@@ -43,12 +57,25 @@ final class ESCPosPrinter {
     ) {
         let paperSize = args["size"] as? Int
         let isBluetooth = Self.isBluetoothTarget(args: args)
+        let quantity = max(1, (args["quantity"] as? Int) ?? 1)
         buildAndSendESC(
             imageData: imageData,
             paperSize: paperSize,
-            isBluetooth: isBluetooth,
-            completion: completion
-        )
+            isBluetooth: isBluetooth
+        ) { oneCopy in
+            guard let oneCopy = oneCopy else {
+                completion(nil)
+                return
+            }
+            guard quantity > 1 else {
+                completion(oneCopy)
+                return
+            }
+            var data = oneCopy
+            data.reserveCapacity(oneCopy.count * quantity)
+            for _ in 1..<quantity { data.append(oneCopy) }
+            completion(data)
+        }
     }
 
     /// Kết nối đích có phải Bluetooth/BLE hay không — quyết định cách chia lệnh raster.

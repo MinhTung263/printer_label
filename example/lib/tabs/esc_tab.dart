@@ -96,6 +96,9 @@ class _EscTabState extends State<EscTab> {
               isLongReceipt: _isLongReceipt,
             ),
             size: _selectedSize,
+            // Mở két như khi thanh toán tiền mặt. Chỉ ở BẢN IN ĐẦU: in nhiều liên
+            // thì két đã mở sẵn rồi, không cần kích lại mỗi bản.
+            openDrawer: i == 0,
           );
         } catch (e) {
           debugPrint('Lỗi in hóa đơn: $e');

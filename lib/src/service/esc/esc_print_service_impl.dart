@@ -14,6 +14,7 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
     String? deviceId,
     PrinterConnectionType? connectionType,
     double? pixelRatio,
+    bool openDrawer = false,
   }) async {
     final imageBytes = await WidgetCaptureHelper.captureFromLongWidget(
       widget,
@@ -23,6 +24,7 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
       deviceId: deviceId,
       connectionType: connectionType,
       model: PrintThermalModel(image: imageBytes, size: size),
+      openDrawer: openDrawer,
     );
   }
 
@@ -32,8 +34,29 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
     required TicketSize size,
     required List<String?> deviceIds,
     double? pixelRatio,
+    bool openDrawer = false,
   }) async {
     if (deviceIds.isEmpty) return;
+
+    // Mở két TRƯỚC khi gửi bill, và CHỈ trên các máy ĐANG IN lượt này.
+    //
+    // Không cần biết máy nào gắn két: máy đang in mà có két thì mở, máy đang in mà không
+    // có két thì ESC p vô hại. Máy có két nhưng KHÔNG nằm trong [deviceIds] sẽ không bị
+    // đụng tới — nhờ vậy in bếp/bar hay in ở quầy khác không làm bật két thu ngân.
+    // Lỗi mở két không chặn in. Xem PrinterLabel.printESC.
+    if (openDrawer) {
+      await Future.wait(
+        deviceIds.whereType<String>().map(
+          (id) async {
+            try {
+              await PrinterLabel.openDrawer(deviceId: id);
+            } catch (_) {
+              // Nuốt lỗi có chủ đích.
+            }
+          },
+        ),
+      );
+    }
 
     // Chụp ảnh widget MỘT lần duy nhất rồi tối ưu kích thước, tránh render lại cho từng máy.
     final imageBytes = await WidgetCaptureHelper.captureFromLongWidget(
@@ -87,6 +110,7 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
     String? deviceId,
     PrinterConnectionType? connectionType,
     required PrintThermalModel model,
+    bool openDrawer = false,
   }) async {
     // Tự động tối ưu hóa kích thước ảnh cho máy in receipt để tăng tốc độ truyền qua Bluetooth
     final resizedImage = await resizeThermalImage(
@@ -103,6 +127,7 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
       deviceId: deviceId,
       connectionType: connectionType,
       printThermalModel: optimizedModel,
+      openDrawer: openDrawer,
     );
   }
 

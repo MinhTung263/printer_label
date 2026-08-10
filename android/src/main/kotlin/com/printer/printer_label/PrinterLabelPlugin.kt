@@ -326,14 +326,28 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             val conn = connections[deviceId]
             if (conn != null && isConnectionActive(deviceId)) return conn
             
-            // Thử khớp khóa phụ (không có tiền tố hoặc tự thêm tiền tố LAN/BT)
+            // Thử khớp khóa phụ (không có tiền tố hoặc tự thêm tiền tố LAN/BT).
+            //
+            // LUÔN kiểm tra ĐÚNG khóa vừa khớp. Trước đây `conn2` lấy từ một trong ba khóa
+            // nhưng chỉ hỏi `isConnectionActive(altKey)` — SAI KHÓA: với deviceId="BT:AA:BB"
+            // thì altKey="AA:BB" (không tồn tại) nên trả false, bỏ qua đúng máy app yêu cầu
+            // rồi rơi xuống fallback bên dưới và gửi sang MÁY KHÁC.
             val altKey = if (deviceId.contains(":")) deviceId.substringAfter(":") else deviceId
-            val conn2 = connections[altKey] ?: connections["LAN:$deviceId"] ?: connections["BT:$deviceId"]
-            if (conn2 != null && isConnectionActive(altKey)) return conn2
-            val keyLan = "LAN:$deviceId"
-            if (connections.containsKey(keyLan) && isConnectionActive(keyLan)) return connections[keyLan]
-            val keyBt = "BT:$deviceId"
-            if (connections.containsKey(keyBt) && isConnectionActive(keyBt)) return connections[keyBt]
+            for (key in listOf(altKey, "LAN:$deviceId", "BT:$deviceId")) {
+                if (connections.containsKey(key) && isConnectionActive(key)) return connections[key]
+            }
+
+            // App ĐÃ chỉ định máy in cụ thể mà không khớp -> trả null, KHÔNG rơi xuống
+            // fallback "máy đang kết nối đầu tiên".
+            //
+            // Fallback đó gửi lệnh sang máy KHÁC với máy app yêu cầu. Với mở két hậu quả rất
+            // khó thấy: `connections` là ConcurrentHashMap (thứ tự theo hash, không theo thứ
+            // tự kết nối) nên lệnh ESC p có thể bay sang máy không có két -> KÉT KHÔNG MỞ,
+            // mà app vẫn nhận success. Đổi thứ tự kết nối lại thành mở được — đúng hiện
+            // tượng "phải kết nối máy có két trước mới mở được".
+            Log.w("PRINTER_LOG", "getConn: khong khop deviceId='$deviceId' " +
+                "(dang co: ${connections.keys}) -> tra ve null")
+            return null
         }
 
         val activeKey = connections.keys.firstOrNull { isConnectionActive(it) }
@@ -370,19 +384,13 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         if (!deviceId.isNullOrEmpty()) {
             var specificConn = connections[deviceId]
             if (specificConn == null || !isConnectionActive(deviceId)) {
+                // LUÔN kiểm tra ĐÚNG khóa vừa khớp — xem getConn để biết vì sao việc hỏi
+                // nhầm `isConnectionActive(altKey)` làm lệnh (nhất là MỞ KÉT) bay sang máy khác.
                 val altKey = if (deviceId.contains(":")) deviceId.substringAfter(":") else deviceId
-                val conn2 = connections[altKey] ?: connections["LAN:$deviceId"] ?: connections["BT:$deviceId"]
-                if (conn2 != null && isConnectionActive(altKey)) {
-                    specificConn = conn2
-                } else {
-                    val keyLan = "LAN:$deviceId"
-                    if (connections.containsKey(keyLan) && isConnectionActive(keyLan)) {
-                        specificConn = connections[keyLan]
-                    } else {
-                        val keyBt = "BT:$deviceId"
-                        if (connections.containsKey(keyBt) && isConnectionActive(keyBt)) {
-                            specificConn = connections[keyBt]
-                        }
+                for (key in listOf(altKey, "LAN:$deviceId", "BT:$deviceId")) {
+                    if (connections.containsKey(key) && isConnectionActive(key)) {
+                        specificConn = connections[key]
+                        break
                     }
                 }
             }
@@ -655,16 +663,56 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         return null
     }
 
+    /// Số job đang dùng socket của mỗi máy in LAN (theo deviceId).
+    ///
+    /// In nhiều bản/nhiều máy CÙNG LÚC thì nhiều job cùng nhắm một IP. Nếu job nào xong
+    /// cũng đóng socket ngay thì các job còn lại đang gửi dở bị cắt kết nối, phải mở lại
+    /// và đụng đúng socket vừa bị chiếm -> "Máy in đang bận, thử lại sau ..." rồi hai dòng
+    /// "Đã nhả socket" cho cùng một IP. Chỉ nhả khi job CUỐI CÙNG trên IP đó kết thúc.
+    private val lanJobCount = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
+
+    /// Đánh dấu bắt đầu một job LAN trên [conn] (nếu đó là kết nối LAN).
+    internal fun retainLanSocket(conn: IDeviceConnection) {
+        if (!releaseLanSocketAfterPrint) return
+        val entry = connections.entries.firstOrNull { it.value === conn } ?: return
+        if (connectionTypes[entry.key] != ConnectionType.LAN) return
+        lanJobCount.getOrPut(entry.key) { java.util.concurrent.atomic.AtomicInteger(0) }
+            .incrementAndGet()
+    }
+
     /// Nhả socket LAN sau khi in xong. Giữ IP trong [registeredLanPrinters] để
     /// checkConnect vẫn báo còn ghép nối và lần in sau tự mở lại.
     internal fun releaseLanSocket(conn: IDeviceConnection) {
         if (!releaseLanSocketAfterPrint) return
         val entry = connections.entries.firstOrNull { it.value === conn } ?: return
         if (connectionTypes[entry.key] != ConnectionType.LAN) return
-        runCatching { conn.close() }
-        connections.remove(entry.key)
-        Log.i("PRINTER_LOG", "Đã nhả socket ${entry.key} để thiết bị khác dùng")
+
+        // Còn job khác đang dùng socket này -> chưa được đóng.
+        val counter = lanJobCount[entry.key]
+        if (counter != null && counter.decrementAndGet() > 0) {
+            Log.i("PRINTER_LOG", "Giu socket ${entry.key}: con ${counter.get()} job dang in")
+            return
+        }
+
+        // Hoãn một nhịp ngắn rồi mới đóng. In nhiều bản (quantity > 1) là NHIỀU lời gọi
+        // runPrintJob liên tiếp, nên bộ đếm về 0 ở khoảng trống GIỮA các bản; đóng ngay tại
+        // đó buộc bản kế tiếp mở lại socket và có thể đụng socket chưa kịp giải phóng hẳn
+        // -> "Máy in đang bận, thử lại sau ...". Nếu trong nhịp chờ có job mới (bộ đếm > 0)
+        // thì giữ nguyên socket.
+        val key = entry.key
+        Handler(Looper.getMainLooper()).postDelayed({
+            val c = lanJobCount[key]
+            if (c != null && c.get() > 0) return@postDelayed
+            lanJobCount.remove(key)
+            val current = connections[key] ?: return@postDelayed
+            runCatching { current.close() }
+            connections.remove(key)
+            Log.i("PRINTER_LOG", "Đã nhả socket $key để thiết bị khác dùng")
+        }, LAN_IDLE_CLOSE_DELAY_MS)
     }
+
+    /// Chờ trước khi đóng socket LAN rảnh — đủ để bản in kế tiếp tái dùng socket đang mở.
+    private val LAN_IDLE_CLOSE_DELAY_MS = 800L
 
     internal fun connectNet(ipAddress: String, result: Result) {
         val deviceId = "LAN:$ipAddress"

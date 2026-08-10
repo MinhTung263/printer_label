@@ -25,6 +25,7 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
     String? deviceId,
     PrinterConnectionType? connectionType,
     double? pixelRatio,
+    bool openDrawer,
   });
 
   /// Chụp [widget] một lần rồi in song song ra tất cả [deviceIds].
@@ -32,17 +33,23 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
   /// Dùng khi cần in cùng một hóa đơn ra nhiều máy (máy ngoài + máy tích hợp).
   /// Ảnh chỉ được render một lần và các lệnh gửi chạy song song để không phải
   /// đợi từng máy in xong tuần tự.
+  /// [openDrawer] = true thì mở két TRƯỚC khi in, trên CÁC MÁY ĐANG IN lượt này
+  /// ([deviceIds]). Máy có két nhưng không in lượt này sẽ không bị đụng tới.
   Future<void> printWidgetToDevices({
     required Widget widget,
     required TicketSize size,
     required List<String?> deviceIds,
     double? pixelRatio,
+    bool openDrawer,
   });
 
+  /// In hóa đơn. [openDrawer] = true thì mở két TRƯỚC khi gửi bill (thanh toán tiền mặt).
+  /// Xem [PrinterLabel.printESC] để biết lý do mở trước thay vì sau.
   Future<void> print({
     String? deviceId,
     PrinterConnectionType? connectionType,
     required PrintThermalModel model,
+    bool openDrawer,
   });
 
   /// Opens the connected cash drawer via ESC/POS command (ESC p) or native cash drawer port.

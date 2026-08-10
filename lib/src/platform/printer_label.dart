@@ -6,8 +6,10 @@ import '../src.dart';
 enum BuiltInPrinterType {
   /// Không tìm thấy máy in tích hợp
   none(0),
+
   /// Máy in nhiệt khổ 58mm (K57)
   mm58(58),
+
   /// Máy in nhiệt khổ 80mm (K80)
   mm80(80);
 
@@ -212,7 +214,8 @@ class PrinterLabel {
 
         // Nếu không tìm thấy máy in nào, có thể do OS đang cache IP cũ hoặc ARP chưa cập nhật
         if (found == 0 && !controller.isClosed) {
-          await Future.delayed(const Duration(milliseconds: 500)); // Chờ OS ổn định
+          await Future.delayed(
+              const Duration(milliseconds: 500)); // Chờ OS ổn định
           List<String> newIps = await getLocalIps();
 
           // Chỉ quét lại khi dải mạng thực sự khác lần 1. Nếu OS trả về đúng dải cũ
@@ -268,15 +271,56 @@ class PrinterLabel {
   }
 
   /// Prints a thermal receipt using ESC/POS commands from [printThermalModel].
+  /// In hóa đơn nhiệt bằng lệnh ESC/POS.
+  ///
+  /// Đặt [openDrawer] = true khi thanh toán TIỀN MẶT để mở két cùng lúc. Két được mở
+  /// TRƯỚC khi gửi bill nên bật gần như tức thì: lệnh mở két chỉ vài byte, còn bill có
+  /// thể 70–85KB và cả hai đi chung một hàng đợi tuần tự tới máy in — nếu mở sau thì thu
+  /// ngân phải đợi hết cuộn giấy (qua Bluetooth là vài chục giây).
+  ///
+  /// Chỉ bật cho tiền mặt. Thẻ/QR/chuyển khoản, in tạm tính, in lại hóa đơn cũ, in
+  /// bếp/bar đều để mặc định false — mở két thừa là rủi ro kiểm soát tiền.
+  ///
+  /// Lỗi mở két KHÔNG chặn việc in (khách cần hóa đơn hơn cần két), nên hàm này không
+  /// cho biết két có mở được không. Cần biết kết quả thì gọi [openDrawer] riêng trước.
+  /// [quantity] số bản in. Truyền vào đây thay vì tự lặp `printESC` nhiều lần: native sẽ
+  /// in hết các bản trong MỘT lời gọi, giữ socket liên tục từ bản đầu tới bản cuối.
+  ///
+  /// Lặp ở tầng Dart tạo khoảng trống giữa hai bản mà không job nào giữ socket — với máy
+  /// in LAN dùng chung, socket bị nhả ngay ở đó và bản kế phải mở lại, đụng socket chưa
+  /// giải phóng hẳn ("Máy in đang bận, thử lại sau 400ms...") -> in chậm, có bản không ra.
   static Future<void> printESC({
     String? deviceId,
     PrinterConnectionType? connectionType,
     required PrintThermalModel printThermalModel,
+    bool openDrawer = false,
+    int quantity = 1,
   }) async {
+    if (openDrawer) {
+      try {
+        // Gửi ESC p tới ĐÚNG MÁY ĐANG IN lượt này (deviceId ở trên), không phát tràn.
+        //
+        // Không có trường nào cho biết máy in nào gắn két, nhưng KHÔNG cần biết: chỉ cần
+        // giới hạn vào tập máy đang in. Máy có két và đang in -> mở; máy đang in mà không
+        // có két -> ESC p vô hại, bỏ qua; máy có két nhưng KHÔNG in lượt này -> không đụng
+        // tới, nên in bếp/bar hay in ở quầy khác không làm bật két thu ngân.
+        //
+        // Phát tới MỌI máy đang kết nối thì két luôn mở được, nhưng mở cả khi in ở máy
+        // khác — sai nghiệp vụ. Còn để native tự chọn "máy đầu danh sách" thì kết quả phụ
+        // thuộc THỨ TỰ KẾT NỐI (nối máy không két trước là hỏng).
+        await PrinterLabel.openDrawer(
+          deviceId: deviceId,
+          connectionType: connectionType,
+        );
+      } catch (_) {
+        // Nuốt lỗi có chủ đích — xem doc ở trên.
+      }
+    }
     return await _platform.printESC(
       deviceId: deviceId,
       connectionType: connectionType,
       printThermalModel: printThermalModel,
+      quantity: quantity,
     );
   }
 
@@ -350,15 +394,18 @@ class PrinterLabel {
 
   /// Retrieves a list of previously paired (bonded) Bluetooth devices.
   /// If [filterPrinterOnly] is true (default), only devices recognized as printers are returned.
-  static Future<List<BluetoothDeviceModel>> getBluetoothDevices({bool filterPrinterOnly = true}) async {
-    return await _platform.getBluetoothDevices(filterPrinterOnly: filterPrinterOnly);
+  static Future<List<BluetoothDeviceModel>> getBluetoothDevices(
+      {bool filterPrinterOnly = true}) async {
+    return await _platform.getBluetoothDevices(
+        filterPrinterOnly: filterPrinterOnly);
   }
 
   /// Stream emitting discover.                       ed Bluetooth devices during active scans.
   ///
   /// If [filterPrinterOnly] is true (default), only devices recognized as printers are emitted.
   /// Call [startBluetoothScan] before listening to this stream on iOS.
-  static Stream<BluetoothDeviceModel> bluetoothScanStream({bool filterPrinterOnly = true}) =>
+  static Stream<BluetoothDeviceModel> bluetoothScanStream(
+          {bool filterPrinterOnly = true}) =>
       _platform.bluetoothScanStream(filterPrinterOnly: filterPrinterOnly);
 
   /// Stream emitting USB connection events (attach/detach) for USB printers (Android only).

@@ -102,11 +102,14 @@ class PrinterThermal {
                 if (!isBluetooth && !isTargetBuiltIn && curConnect.getConnectType() != POSConnect.DEVICE_TYPE_ETHERNET) {
                     val printer = POSPrinter(curConnect)
                     val paperWidth: Int? = call.argument<Int>("size")
+                    val copies = (call.argument<Int>("quantity") ?: 1).coerceAtLeast(1)
                     synchronized(lockFor(curConnect)) {
-                        printer.initializePrinter()
-                            .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, paperWidth ?: 576)
-                            .feedLine()
-                            .cutHalfAndFeed(1)
+                        repeat(copies) {
+                            printer.initializePrinter()
+                                .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, paperWidth ?: 576)
+                                .feedLine()
+                                .cutHalfAndFeed(1)
+                        }
                     }
                     bitmap.recycle()
                     Handler(Looper.getMainLooper()).post {
@@ -136,7 +139,25 @@ class PrinterThermal {
                 // 5. Cut paper (GS V 66 1)
                 stream.write(byteArrayOf(0x1D, 0x56, 0x42, 0x01))
                 
-                val allBytes = stream.toByteArray()
+                val oneCopy = stream.toByteArray()
+
+                // In [quantity] bản trong MỘT lời gọi: nối dữ liệu các bản lại rồi gửi
+                // trong CÙNG một khối synchronized.
+                //
+                // Trước đây tầng Dart lặp `for (quantity)` và gọi print nhiều lần, nên giữa
+                // hai bản có khoảng trống không job nào giữ socket -> với máy in LAN đang bật
+                // chế độ nhả socket, socket bị đóng ngay giữa các bản và bản kế phải mở lại,
+                // đụng đúng socket chưa giải phóng hẳn ("Máy in đang bận, thử lại sau
+                // 400ms..."), làm in chậm và có bản không ra. Gộp ở đây thì socket được giữ
+                // liên tục từ bản đầu tới bản cuối.
+                val copies = (call.argument<Int>("quantity") ?: 1).coerceAtLeast(1)
+                val allBytes = if (copies == 1) {
+                    oneCopy
+                } else {
+                    val buf = java.io.ByteArrayOutputStream(oneCopy.size * copies)
+                    repeat(copies) { buf.write(oneCopy) }
+                    buf.toByteArray()
+                }
 
                 // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection).
                 // Các máy khác dùng khóa khác nên vẫn in song song, không đợi nhau.

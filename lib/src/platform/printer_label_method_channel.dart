@@ -130,11 +130,13 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     String? deviceId,
     PrinterConnectionType? connectionType,
     required PrintThermalModel printThermalModel,
+    int quantity = 1,
   }) async {
     final data = {
       ...printThermalModel.toJson(),
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
+      if (quantity > 1) "quantity": quantity,
     };
     try {
       await _channel.invokeMethod<void>(
