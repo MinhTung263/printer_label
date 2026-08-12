@@ -17,6 +17,7 @@ class ESCPrintService {
     String? deviceId,
     PrinterConnectionType? connectionType,
     double? pixelRatio,
+    bool openDrawer = false,
   }) {
     return ESCPrintServicePlatform.instance.printWidget(
       widget: widget,
@@ -24,6 +25,7 @@ class ESCPrintService {
       deviceId: deviceId,
       connectionType: connectionType,
       pixelRatio: pixelRatio ?? (size == TicketSize.mm58 ? 1.6 : 1.8),
+      openDrawer: openDrawer,
     );
   }
 
@@ -31,17 +33,21 @@ class ESCPrintService {
   ///
   /// Phù hợp khi in cùng một hóa đơn ra nhiều máy cùng lúc (ví dụ nhiều máy
   /// ngoài kèm máy in tích hợp) mà không phải render lại ảnh hay in tuần tự.
+  /// Đặt [openDrawer] = true khi thanh toán TIỀN MẶT — két mở trước khi in, chỉ trên
+  /// các máy ĐANG IN lượt này ([deviceIds]).
   Future<void> printWidgetToDevices({
     required Widget widget,
     required TicketSize size,
     required List<String?> deviceIds,
     double? pixelRatio,
+    bool openDrawer = false,
   }) {
     return ESCPrintServicePlatform.instance.printWidgetToDevices(
       widget: widget,
       size: size,
       deviceIds: deviceIds,
       pixelRatio: pixelRatio,
+      openDrawer: openDrawer,
     );
   }
 
@@ -66,15 +72,20 @@ class ESCPrintService {
   }
 
   /// Prints a thermal receipt from the specified [model].
+  ///
+  /// Đặt [openDrawer] = true khi thanh toán TIỀN MẶT — két mở trước khi gửi bill nên
+  /// không phải đợi hết cuộn giấy. Xem [PrinterLabel.printESC] để biết chi tiết.
   Future<void> print({
     String? deviceId,
     PrinterConnectionType? connectionType,
     required PrintThermalModel model,
+    bool openDrawer = false,
   }) {
     return ESCPrintServicePlatform.instance.print(
       deviceId: deviceId,
       connectionType: connectionType,
       model: model,
+      openDrawer: openDrawer,
     );
   }
 

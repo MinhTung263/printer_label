@@ -84,10 +84,13 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
 
   /// Prints a thermal receipt using ESC/POS commands from [printThermalModel].
+  /// [quantity] số bản in — được gửi xuống native để in HẾT trong một lời gọi.
+  /// Xem [PrinterLabel.printESC] để biết vì sao không lặp ở tầng Dart.
   Future<void> printESC({
     String? deviceId,
     PrinterConnectionType? connectionType,
     required PrintThermalModel printThermalModel,
+    int quantity,
   });
 
   /// Opens the connected cash drawer via ESC/POS command (ESC p) or native cash drawer port.

@@ -149,16 +149,26 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
 
                 "open_drawer" -> {
-                    try {
-                        if (CashBoxManager.isSupportedDevice()) {
-                            val success = CashBoxManager.openCashBox(plugin.mContext)
-                            if (success) {
-                                result.success(true)
-                                return
+                    // App chỉ định MÁY IN cụ thể -> két nằm ở máy in đó, KHÔNG phải cổng
+                    // RJ11 của máy POS. Bỏ qua đường máy POS.
+                    //
+                    // `CashBoxManager.openCashBox()` trả true ngay sau khi gọi được API của
+                    // hãng, KHÔNG kiểm tra có két cắm vào cổng hay không. Trên máy POS mà két
+                    // cắm ở MÁY IN, nhánh này kích một cổng trống rồi trả true -> `return`
+                    // luôn -> lệnh ESC p KHÔNG BAO GIỜ tới máy in, mà app vẫn nhận success.
+                    val drawerDeviceId = call.argument<String>("device_id")
+                    if (drawerDeviceId.isNullOrEmpty() || drawerDeviceId == "BUILT_IN") {
+                        try {
+                            if (CashBoxManager.isSupportedDevice()) {
+                                val success = CashBoxManager.openCashBox(plugin.mContext)
+                                if (success) {
+                                    result.success(true)
+                                    return
+                                }
                             }
+                        } catch (t: Throwable) {
+                            // Đảm bảo không bao giờ văng app nếu gặp lỗi thiết bị không hỗ trợ
                         }
-                    } catch (t: Throwable) {
-                        // Đảm bảo không bao giờ văng app nếu gặp lỗi thiết bị không hỗ trợ
                     }
                     runPrintJob(call, result) { conn, targetResult ->
                         plugin.printThermal.openDrawer(call, conn, targetResult)
@@ -378,6 +388,12 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
             val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
             val isResultDelivered = java.util.concurrent.atomic.AtomicBoolean(false)
             val lastError = java.util.concurrent.atomic.AtomicReference<Pair<String, String?>>(Pair("PRINT_ERROR", "Printing failed"))
+
+            // Đăng ký TẤT CẢ job trước khi chạy bất kỳ job nào. Nếu đăng ký bên trong
+            // thread thì job đầu có thể in xong và nhả socket TRƯỚC khi job sau kịp tăng
+            // bộ đếm -> socket bị đóng giữa chừng, job sau phải mở lại và đụng đúng socket
+            // vừa bị chiếm ("Máy in đang bận, thử lại sau ...").
+            validConns.forEach { conn -> plugin.retainLanSocket(conn) }
 
             validConns.forEach { conn ->
                 kotlin.concurrent.thread {
