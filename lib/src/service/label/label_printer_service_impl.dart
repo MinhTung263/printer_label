@@ -25,7 +25,7 @@ class LabelPrintServiceImpl extends LabelPrintServicePlatform {
       labelPerRow: labelPerRow,
       itemBuilder: itemBuilder,
       quantity: quantity,
-      onBatch: (batch) async {
+      onBatch: (batch, isLast) async {
         if (batch.isEmpty) return;
         await PrinterLabel.printLabel(
           deviceId: deviceId,
@@ -33,6 +33,7 @@ class LabelPrintServiceImpl extends LabelPrintServicePlatform {
           labelModel: LabelModel(
             images: batch,
             labelPerRow: labelPerRow,
+            isLastBatch: isLast,
           ),
         );
       },

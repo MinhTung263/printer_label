@@ -682,7 +682,11 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
     /// Nhả socket LAN sau khi in xong. Giữ IP trong [registeredLanPrinters] để
     /// checkConnect vẫn báo còn ghép nối và lần in sau tự mở lại.
-    internal fun releaseLanSocket(conn: IDeviceConnection) {
+    ///
+    /// [closeWhenIdle] = false khi đây mới là một lô GIỮA của lượt in dài: vẫn trả bộ
+    /// đếm job (không trả sẽ rò, socket không bao giờ đóng được nữa) nhưng giữ socket
+    /// cho lô kế tiếp dùng lại. Xem chú thích ở runPrintJob.
+    internal fun releaseLanSocket(conn: IDeviceConnection, closeWhenIdle: Boolean = true) {
         if (!releaseLanSocketAfterPrint) return
         val entry = connections.entries.firstOrNull { it.value === conn } ?: return
         if (connectionTypes[entry.key] != ConnectionType.LAN) return
@@ -694,12 +698,23 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             return
         }
 
+        // Lượt in còn lô tiếp theo -> giữ socket, đừng để lô sau phải mở lại.
+        // Vẫn hẹn một mốc DỰ PHÒNG dài: nếu lô cuối không bao giờ tới (Dart lỗi giữa
+        // chừng, app bị kill, người dùng thoát màn hình) thì socket phải tự nhả, nếu
+        // không máy khác sẽ vĩnh viễn không kết nối được.
+        if (!closeWhenIdle) {
+            Log.i("PRINTER_LOG", "Giu socket ${entry.key}: con lo tem tiep theo")
+            scheduleLanWatchdog(entry.key)
+            return
+        }
+
         // Hoãn một nhịp ngắn rồi mới đóng. In nhiều bản (quantity > 1) là NHIỀU lời gọi
         // runPrintJob liên tiếp, nên bộ đếm về 0 ở khoảng trống GIỮA các bản; đóng ngay tại
         // đó buộc bản kế tiếp mở lại socket và có thể đụng socket chưa kịp giải phóng hẳn
         // -> "Máy in đang bận, thử lại sau ...". Nếu trong nhịp chờ có job mới (bộ đếm > 0)
         // thì giữ nguyên socket.
         val key = entry.key
+        cancelLanWatchdog(key)
         Handler(Looper.getMainLooper()).postDelayed({
             val c = lanJobCount[key]
             if (c != null && c.get() > 0) return@postDelayed
@@ -713,6 +728,36 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
     /// Chờ trước khi đóng socket LAN rảnh — đủ để bản in kế tiếp tái dùng socket đang mở.
     private val LAN_IDLE_CLOSE_DELAY_MS = 800L
+
+    /// Mốc dự phòng đóng socket khi lô tem CUỐI không bao giờ tới. Phải đủ dài để render
+    /// lô kế tiếp (lô 10 ảnh, máy yếu) không bị cắt ngang.
+    private val LAN_WATCHDOG_CLOSE_DELAY_MS = 15_000L
+
+    private val lanWatchdogs = java.util.concurrent.ConcurrentHashMap<String, Runnable>()
+
+    /// Hẹn giờ đóng socket phòng khi lượt in đứt giữa chừng. Mỗi lô mới gọi lại sẽ dời
+    /// mốc ra xa, nên lượt in đang chạy bình thường không bao giờ chạm tới.
+    private fun scheduleLanWatchdog(key: String) {
+        cancelLanWatchdog(key)
+        val handler = Handler(Looper.getMainLooper())
+        val task = Runnable {
+            lanWatchdogs.remove(key)
+            if (isDetached) return@Runnable
+            val c = lanJobCount[key]
+            if (c != null && c.get() > 0) return@Runnable
+            lanJobCount.remove(key)
+            val current = connections[key] ?: return@Runnable
+            runCatching { current.close() }
+            connections.remove(key)
+            Log.i("PRINTER_LOG", "Đã nhả socket $key (quá hạn chờ lô tem cuối)")
+        }
+        lanWatchdogs[key] = task
+        handler.postDelayed(task, LAN_WATCHDOG_CLOSE_DELAY_MS)
+    }
+
+    private fun cancelLanWatchdog(key: String) {
+        lanWatchdogs.remove(key)?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
+    }
 
     internal fun connectNet(ipAddress: String, result: Result) {
         val deviceId = "LAN:$ipAddress"
@@ -990,6 +1035,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
                 shifted.recycle()
             }
+            // Chờ SDK đẩy xong hàng đợi trước khi báo thành công — xem awaitFlush.
+            PrinterThermal.awaitFlush(conn)
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
@@ -1127,6 +1174,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 .text(x, y, fontStr, rotationStr, sizeX, sizeY, text)
                 .print(1)
 
+            PrinterThermal.awaitFlush(conn)
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
@@ -1156,6 +1204,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 .barcode(x, y, barcodeType, height, TSPLConst.READABLE_LEFT, TSPLConst.ROTATION_0, 2, 2, code)
                 .print(1)
 
+            PrinterThermal.awaitFlush(conn)
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)
@@ -1177,6 +1226,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 .qrcode(x, y, TSPLConst.EC_LEVEL_L, size, TSPLConst.QRCODE_MODE_MANUAL, TSPLConst.ROTATION_0, code)
                 .print(1)
 
+            PrinterThermal.awaitFlush(conn)
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)

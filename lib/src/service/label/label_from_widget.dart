@@ -32,16 +32,22 @@ class LabelFromWidget {
     required int Function(T item) quantity,
     LabelPerRow labelPerRow = LabelPerRow.doubleLabels,
     double? spacer,
-    Future<void> Function(List<Uint8List> batch)? onBatch,
+    Future<void> Function(List<Uint8List> batch, bool isLast)? onBatch,
   }) async {
     final int itemsPerRow = labelPerRow.count;
     final List<Uint8List> images = [];
     final List<T> expandedItems = [];
 
-    // Standard symmetric padding and spacer for all label rows
+    // Standard symmetric padding and spacer for all label rows.
+    //
+    // Khổ single (1 tem/ảnh) KHÔNG cộng lề ngoài: ảnh được scale để khớp đúng
+    // bề rộng tem thật, nên 8px mỗi bên làm ảnh rộng 52.44mm rồi bị bóp về
+    // 50mm -> nội dung co ~4.7% và lệch sang một bên. Lề an toàn của khổ single
+    // đã nằm trong widget tem (xem PreviewStamp), không cần chừa thêm ở đây.
+    // Double/triple vẫn giữ số cũ vì đã canh khớp gap vật lý giữa các tem.
     final double leftPadding = labelPerRow.name.startsWith('double')
         ? 10.0
-        : (labelPerRow.name.startsWith('triple') ? 8.0 : 8.0);
+        : (labelPerRow.name.startsWith('triple') ? 8.0 : 0.0);
     final double rightPadding = leftPadding;
     final double effectiveSpacer = spacer ??
         (labelPerRow.name.startsWith('double')
@@ -143,7 +149,10 @@ class LabelFromWidget {
       // Gửi ngay lô vừa render xong: máy in chạy song song với việc render lô sau,
       // và đường truyền không bị im lặng đủ lâu để máy in ngắt kết nối.
       if (onBatch != null) {
-        await onBatch(captured);
+        // Báo lô cuối để native biết lúc nào được nhả socket LAN. Render lô sau
+        // thường lâu hơn nhịp chờ đóng socket, nên nếu nhả giữa chừng thì lô kế
+        // phải mở lại socket và đụng socket chưa giải phóng hẳn -> tem lệch/lỗi.
+        await onBatch(captured, end >= groupedItems.length);
       } else {
         images.addAll(captured);
       }

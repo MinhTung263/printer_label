@@ -35,6 +35,28 @@ class PrinterThermal {
          * job in kế tiếp. Ở đây gửi tiếp đúng phần còn lại, và ném lỗi nếu không gửi
          * nổi để lớp trên báo thất bại thay vì báo thành công giả.
          */
+        /**
+         * Chờ tới khi SDK đã đẩy xong hàng đợi gửi nội bộ của [conn].
+         *
+         * `POSPrinter`/`TSPLPrinter` (đều kế thừa `net.posprinter.a`) gửi qua
+         * `IDeviceConnection.sendData(byte[])` — hàm trả về `void` và BẤT ĐỒNG BỘ: nó chỉ
+         * XẾP lệnh vào hàng đợi nội bộ rồi return ngay. Nên `result.success(true)` chạy khi
+         * byte CHƯA ra khỏi máy. Hậu quả đã quan sát được:
+         *  - In 5 tem chỉ ra 1–2 tem: lệnh in xong ở tầng Dart, socket LAN bị nhả (hoặc job
+         *    kế tiếp chen vào) trong khi hàng đợi còn dữ liệu -> phần còn lại bị bỏ.
+         *  - In tem mẫu KHÁC lại ra tem của lần in TRƯỚC: dữ liệu cũ còn tồn trong hàng đợi
+         *    và được đẩy ra ở lần gửi sau.
+         *
+         * SDK không có API "đã gửi xong hết", nên ta gửi một byte NUL bằng `sendSync` (đồng
+         * bộ) làm HÀNG RÀO: nó phải xếp sau toàn bộ dữ liệu đã queue trước đó, nên khi nó
+         * trả về thì phần trước đã ra khỏi máy. NUL bị máy in bỏ qua ở cả TSPL và ESC/POS
+         * nên không in thêm gì.
+         */
+        @JvmStatic
+        fun awaitFlush(conn: IDeviceConnection) {
+            runCatching { conn.sendSync(byteArrayOf(0x00)) }
+        }
+
         @JvmStatic
         fun sendAllSync(conn: IDeviceConnection, data: ByteArray, chunkSize: Int) {
             var offset = 0
@@ -110,6 +132,9 @@ class PrinterThermal {
                                 .feedLine()
                                 .cutHalfAndFeed(1)
                         }
+                        // `printBitmap` chỉ xếp lệnh vào hàng đợi SDK — chờ đẩy xong trước
+                        // khi báo thành công, nếu không job sau có thể chen vào giữa.
+                        awaitFlush(curConnect)
                     }
                     bitmap.recycle()
                     Handler(Looper.getMainLooper()).post {

@@ -395,6 +395,16 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
             // vừa bị chiếm ("Máy in đang bận, thử lại sau ...").
             validConns.forEach { conn -> plugin.retainLanSocket(conn) }
 
+            // Một lượt in dài được Dart chia thành nhiều lô, mỗi lô là một lời gọi native
+            // RIÊNG và NỐI TIẾP nhau. Bộ đếm job vì thế thật sự về 0 ở khoảng trống giữa
+            // các lô, nên refcount (vốn chỉ chặn được các job CHỒNG nhau) không giữ nổi
+            // socket: render lô sau lâu hơn LAN_IDLE_CLOSE_DELAY_MS -> socket đóng thật ->
+            // lô kế mở lại và đụng socket chưa giải phóng hẳn ("đang bận, thử lại sau...")
+            // -> lệnh TSPL bị cắt dở, tem in ra lệch hoặc hỏng.
+            // Vì vậy chỉ nhả khi Dart báo đây là lô CUỐI. Thiếu cờ (lời gọi lẻ, hoặc client
+            // cũ) coi như lô cuối để giữ nguyên hành vi trước đây.
+            val isLastBatch = call.argument<Boolean>("is_last_batch") ?: true
+
             validConns.forEach { conn ->
                 kotlin.concurrent.thread {
                     // Nhả socket LAN khi job này kết thúc (thành công hay lỗi) để điện thoại
@@ -404,7 +414,11 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     // Chỉ nhả đúng 1 lần dù callback có bị gọi nhiều lần.
                     val released = java.util.concurrent.atomic.AtomicBoolean(false)
                     fun releaseOnce() {
-                        if (released.compareAndSet(false, true)) plugin.releaseLanSocket(conn)
+                        // Lô giữa vẫn phải TRẢ bộ đếm (nếu không sẽ rò, socket không bao giờ
+                        // đóng nữa), chỉ là không được đóng socket.
+                        if (released.compareAndSet(false, true)) {
+                            plugin.releaseLanSocket(conn, closeWhenIdle = isLastBatch)
+                        }
                     }
 
                     val jobResult = object : Result {
