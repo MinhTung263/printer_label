@@ -107,15 +107,15 @@ class _MyHomePageState extends State<MyHomePage>
   final Set<String> _connectingBtMacs = {};
 
   // Trạng thái quét mạng LAN
-  final List<String> _lanDevices = [];
+  final List<LanDeviceModel> _lanDevices = [];
   bool _isScanningLan = false;
   bool _hasScannedLan = false;
-  StreamSubscription<String>? _lanScanSub;
+  StreamSubscription<LanDeviceModel>? _lanScanSub;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 2, initialIndex: 0, vsync: this);
     _checkConnectionState(ipAddress: textEditingController.text);
     _listenUsb();
     _checkBuiltInPrinter();
@@ -193,12 +193,15 @@ class _MyHomePageState extends State<MyHomePage>
     });
 
     _lanScanSub?.cancel();
-    _lanScanSub = PrinterLabel.discoverLanPrinters().listen(
-      (ip) {
+    _lanScanSub = PrinterLabel.discoverLanDevices().listen(
+      (device) {
         if (!mounted) return;
         setState(() {
-          if (!_lanDevices.contains(ip)) {
-            _lanDevices.add(ip);
+          final index = _lanDevices.indexWhere((e) => e.ip == device.ip);
+          if (index >= 0) {
+            _lanDevices[index] = device;
+          } else {
+            _lanDevices.add(device);
           }
         });
       },
@@ -440,9 +443,12 @@ class _MyHomePageState extends State<MyHomePage>
     }
   }
 
-  Future<void> _connectLanPrinter() async {
-    final input = textEditingController.text.replaceAll(',', '.').trim();
+  Future<void> _connectLanPrinter([LanDeviceModel? lanDevice]) async {
+    final input =
+        lanDevice?.ip ?? textEditingController.text.replaceAll(',', '.').trim();
     if (input.isEmpty) return;
+
+    final displayName = lanDevice?.name ?? 'LAN: $input';
 
     setState(() => isConnecting = true);
     try {
@@ -451,8 +457,16 @@ class _MyHomePageState extends State<MyHomePage>
       );
       if (!mounted) return;
       if (alreadyConnected) {
-        context.showSnackBar('Thiết bị LAN $input đã kết nối từ trước',
-            backgroundColor: Colors.amber[800]!);
+        setState(() {
+          isConnected = true;
+          _addConnectedDevice(ConnectedDevice(
+            id: DeviceId.lan(input),
+            label: '$displayName ($input)',
+            type: 'LAN',
+          ));
+        });
+        context.showSnackBar('Thiết bị LAN $displayName đã kết nối',
+            backgroundColor: const Color(0xFF10B981));
         return;
       }
 
@@ -463,18 +477,65 @@ class _MyHomePageState extends State<MyHomePage>
         if (ok) {
           _addConnectedDevice(ConnectedDevice(
             id: DeviceId.lan(input),
-            label: 'LAN: $input',
+            label: '$displayName ($input)',
             type: 'LAN',
           ));
         }
       });
       focusNode.unfocus();
       context.showSnackBar(
-        ok ? 'Kết nối LAN thành công: $input' : 'Kết nối LAN thất bại',
+        ok ? 'Kết nối LAN thành công: $displayName' : 'Kết nối LAN thất bại',
         backgroundColor: ok ? const Color(0xFF10B981) : const Color(0xFFF43F5E),
       );
     } finally {
       if (mounted) setState(() => isConnecting = false);
+    }
+  }
+
+  Future<void> _identifyLanDevice(LanDeviceModel device) async {
+    context.showSnackBar('Đang gửi tín hiệu tìm máy tới ${device.name}...',
+        backgroundColor: Colors.blueGrey);
+    final ok = await PrinterLabel.identifyLanPrinter(
+      ipAddress: device.ip,
+      port: device.port,
+      beep: true,
+      feed: true,
+    );
+    if (!mounted) return;
+    if (ok) {
+      context.showSnackBar(
+        'Đã gửi tín hiệu tới máy in ${device.name} (${device.ip}) 🔔',
+        backgroundColor: const Color(0xFF10B981),
+      );
+    } else {
+      context.showSnackBar(
+        'Không thể gửi tín hiệu tới ${device.ip}',
+        backgroundColor: const Color(0xFFF43F5E),
+      );
+    }
+  }
+
+  Future<void> _printTestSlip(LanDeviceModel device) async {
+    context.showSnackBar('Đang in phiếu test xác nhận IP ${device.ip}...',
+        backgroundColor: Colors.blueGrey);
+    final ok = await PrinterLabel.identifyLanPrinter(
+      ipAddress: device.ip,
+      port: device.port,
+      beep: true,
+      feed: true,
+      printSlip: true,
+    );
+    if (!mounted) return;
+    if (ok) {
+      context.showSnackBar(
+        'Đã in phiếu test thành công tại máy ${device.name} (${device.ip}) 📄',
+        backgroundColor: const Color(0xFF10B981),
+      );
+    } else {
+      context.showSnackBar(
+        'Không thể in phiếu test tới ${device.ip}',
+        backgroundColor: const Color(0xFFF43F5E),
+      );
     }
   }
 
@@ -497,7 +558,7 @@ class _MyHomePageState extends State<MyHomePage>
                 children: [
                   Icon(Icons.devices, size: 20),
                   SizedBox(width: 8),
-                  Text("Thiết bị"),
+                  Text("Thiết bị", style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -507,16 +568,19 @@ class _MyHomePageState extends State<MyHomePage>
                 children: [
                   Icon(Icons.print, size: 20),
                   SizedBox(width: 8),
-                  Text("Chức năng"),
+                  Text("Chức năng", style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
           ],
         ),
-        elevation: 0,
+        elevation: 0.5,
+        shadowColor: Colors.black.withValues(alpha: 0.05),
         backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
       ),
       body: SafeArea(
+        bottom: false,
         child: TabBarView(
           controller: _tabController,
           children: [
@@ -535,10 +599,12 @@ class _MyHomePageState extends State<MyHomePage>
               isScanningLan: _isScanningLan,
               hasScannedLan: _hasScannedLan,
               onRefreshLanScan: _startLanScan,
-              onConnectLanDevice: (ip) {
-                textEditingController.text = ip;
-                _connectLanPrinter();
+              onConnectLanDevice: (device) {
+                textEditingController.text = device.ip;
+                _connectLanPrinter(device);
               },
+              onIdentifyLanDevice: _identifyLanDevice,
+              onPrintTestSlip: _printTestSlip,
               onConnectBuiltIn: () async {
                 setState(() => isConnecting = true);
                 try {

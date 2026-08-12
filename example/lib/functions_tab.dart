@@ -3,6 +3,8 @@ import 'package:example/tabs/cup_sticker_tab.dart';
 import 'package:example/tabs/drawer_tab.dart';
 import 'package:example/tabs/esc_tab.dart';
 import 'package:example/tabs/label_tab.dart';
+import 'package:example/tabs/raw_tab.dart';
+import 'package:example/widgets/custom_tab_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:printer_label/printer_label.dart';
 
@@ -35,10 +37,31 @@ class _FunctionsTabState extends State<FunctionsTab>
   late TabController _tabController;
 
   static const _tabs = [
-    Tab(icon: Icon(Icons.receipt_long, size: 20), text: 'Hoá đơn'),
-    Tab(icon: Icon(Icons.label_outline, size: 20), text: 'Nhãn'),
-    Tab(icon: Icon(Icons.local_drink_outlined, size: 20), text: 'Tem trà sữa'),
-    Tab(icon: Icon(Icons.lock_open_rounded, size: 20), text: 'Mở két'),
+    CustomTab(
+      icon: Icons.receipt_long,
+      label: 'Hoá đơn',
+      direction: Axis.vertical,
+    ),
+    CustomTab(
+      icon: Icons.label_outline,
+      label: 'Nhãn',
+      direction: Axis.vertical,
+    ),
+    CustomTab(
+      icon: Icons.local_drink_outlined,
+      label: 'Trà sữa',
+      direction: Axis.vertical,
+    ),
+    CustomTab(
+      icon: Icons.lock_open_rounded,
+      label: 'Mở két',
+      direction: Axis.vertical,
+    ),
+    CustomTab(
+      icon: Icons.science_outlined,
+      label: 'Kiểm thử',
+      direction: Axis.vertical,
+    ),
   ];
 
   @override
@@ -56,20 +79,13 @@ class _FunctionsTabState extends State<FunctionsTab>
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          color: Colors.white,
-          child: TabBar(
-            controller: _tabController,
-            labelColor: const Color(0xFF4F46E5),
-            unselectedLabelColor: Colors.grey.shade500,
-            indicatorColor: const Color(0xFF4F46E5),
-            indicatorWeight: 2.5,
-            labelStyle:
-                const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-            unselectedLabelStyle: const TextStyle(fontSize: 11),
-            tabs: _tabs,
-          ),
+        CustomTabBar(
+          controller: _tabController,
+          tabs: _tabs,
+          isScrollable: false,
+          margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
         ),
         Expanded(
           child: TabBarView(
@@ -94,6 +110,11 @@ class _FunctionsTabState extends State<FunctionsTab>
               CashDrawerTab(
                   ipAddress: widget.ipAddress,
                   connectedDevices: widget.connectedDevices),
+              RawPrintTab(
+                ipAddress: widget.ipAddress,
+                connectedDevices: widget.connectedDevices,
+                isBuiltInPrinterConnected: widget.isBuiltInPrinterConnected,
+              ),
             ],
           ),
         ),

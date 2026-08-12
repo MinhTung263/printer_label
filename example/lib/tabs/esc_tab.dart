@@ -112,66 +112,37 @@ class _EscTabState extends State<EscTab> {
     }
   }
 
-  Future<void> _printRawText() async {
-    for (final deviceId in _targetDeviceIds) {
-      try {
-        await ESCPrintService.instance.printText(
-          deviceId: deviceId,
-          text:
-              'Printer Label - Test Raw Text Printing ESC/POS\nLine 2 - Hello World!\n\n',
-        );
-        if (mounted) {
-          showTopNotification(context, 'Đã gửi lệnh in Text ESC tới $deviceId',
-              isError: false);
-        }
-      } catch (e) {
-        if (mounted) {
-          showTopNotification(context, 'Lỗi in Text trên $deviceId: $e');
-        }
-      }
-    }
-  }
-
-  Future<void> _printRawBarcode() async {
-    for (final deviceId in _targetDeviceIds) {
-      try {
-        await ESCPrintService.instance.printBarcode(
-          deviceId: deviceId,
-          code: '123456789012',
-          type: '128',
-        );
-        if (mounted) {
-          showTopNotification(
-              context, 'Đã gửi lệnh in Barcode ESC tới $deviceId',
-              isError: false);
-        }
-      } catch (e) {
-        if (mounted) {
-          showTopNotification(context, 'Lỗi in Barcode trên $deviceId: $e');
-        }
-      }
-    }
-  }
-
-  Future<void> _printRawQRCode() async {
-    for (final deviceId in _targetDeviceIds) {
-      try {
-        await ESCPrintService.instance.printQRCode(
-          deviceId: deviceId,
-          code: 'https://github.com/MinhTung263/printer_label',
-          size: 8,
-        );
-        if (mounted) {
-          showTopNotification(
-              context, 'Đã gửi lệnh in QR Code ESC tới $deviceId',
-              isError: false);
-        }
-      } catch (e) {
-        if (mounted) {
-          showTopNotification(context, 'Lỗi in QR trên $deviceId: $e');
-        }
-      }
-    }
+  Widget _buildPaperSizeOption(TicketSize size, String label) {
+    final isSelected = _selectedSize == size;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedSize = size),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  )
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? const Color(0xFF6366F1) : Colors.black54,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -180,146 +151,119 @@ class _EscTabState extends State<EscTab> {
       children: [
         // ─── Preview area ──────────────────────────────────────────────────
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const PrintSectionHeader(
-                  icon: Icons.receipt_long,
-                  color: Color(0xFF6366F1),
-                  title: 'In hoá đơn ESC/POS',
-                  subtitle:
-                      'Sử dụng giao thức in hoá đơn nhiệt ESC/POS thông thường.',
-                ),
-
-                // Chọn số lượng in
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Chọn khổ giấy
-                      Row(
-                        children: [
-                          const Text('Khổ giấy: ',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black54)),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey.shade300),
+                      // ─── Thanh Cài Đặt Siêu Gọn ───────────────────────────────────
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.04),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
                             ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<TicketSize>(
-                                value: _selectedSize,
-                                isDense: true,
-                                icon: const Icon(Icons.arrow_drop_down,
-                                    color: Color(0xFF6366F1)),
-                                style: const TextStyle(
-                                  color: Colors.black87,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                                onChanged: (TicketSize? newSize) {
-                                  if (newSize != null) {
-                                    setState(() {
-                                      _selectedSize = newSize;
-                                    });
-                                  }
-                                },
-                                items: const [
-                                  DropdownMenuItem(
-                                      value: TicketSize.mm80,
-                                      child: Text('K80')),
-                                  DropdownMenuItem(
-                                      value: TicketSize.mm58,
-                                      child: Text('K57')),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            // Khổ giấy
+                            Container(
+                              height: 36,
+                              padding: const EdgeInsets.all(3),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildPaperSizeOption(TicketSize.mm80, 'K80'),
+                                  _buildPaperSizeOption(TicketSize.mm58, 'K57'),
                                 ],
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      // Chọn số lượng in
-                      Row(
-                        children: [
-                          const Text('Số lượng: ',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black54)),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey.shade300),
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<int>(
-                                value: _printQuantity,
-                                isDense: true,
-                                icon: const Icon(Icons.arrow_drop_down,
-                                    color: Color(0xFF6366F1)),
-                                style: const TextStyle(
-                                  color: Colors.black87,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                                onChanged: (int? newQty) {
-                                  if (newQty != null) {
-                                    setState(() {
-                                      _printQuantity = newQty;
-                                    });
-                                  }
-                                },
-                                items: [1, 2, 3, 5, 10].map((int value) {
-                                  return DropdownMenuItem<int>(
-                                    value: value,
-                                    child: Text('$value'),
-                                  );
-                                }).toList(),
+                            const SizedBox(width: 8),
+                            // Số lượng (Stepper)
+                            Container(
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                    icon: const Icon(Icons.remove, size: 16, color: Colors.black54),
+                                    onPressed: () {
+                                      if (_printQuantity > 1) setState(() => _printQuantity--);
+                                    },
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                                    child: Text(
+                                      '$_printQuantity tờ',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                    icon: const Icon(Icons.add, size: 16, color: Colors.black54),
+                                    onPressed: () {
+                                      if (_printQuantity < 20) setState(() => _printQuantity++);
+                                    },
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Chọn Hóa đơn dài (~70cm)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Hóa đơn dài (~70cm):',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black54,
+                            const Spacer(),
+                            // Hóa đơn dài
+                            GestureDetector(
+                              onTap: () => setState(() => _isLongReceipt = !_isLongReceipt),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                height: 36,
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                decoration: BoxDecoration(
+                                  color: _isLongReceipt ? const Color(0xFF6366F1) : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(18),
+                                  boxShadow: _isLongReceipt
+                                      ? [
+                                          BoxShadow(
+                                            color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 4),
+                                          )
+                                        ]
+                                      : null,
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  'In Dài',
+                                  style: TextStyle(
+                                    color: _isLongReceipt ? Colors.white : Colors.black54,
+                                    fontWeight: _isLongReceipt ? FontWeight.bold : FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      Switch(
-                        value: _isLongReceipt,
-                        activeThumbColor: const Color(0xFF6366F1),
-                        onChanged: (bool value) {
-                          setState(() {
-                            _isLongReceipt = value;
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                ),
 
                 // Khu vực hiển thị hóa đơn giả lập giống hệt ticket.png
                 Center(
@@ -333,92 +277,84 @@ class _EscTabState extends State<EscTab> {
             ),
           ),
         ),
-        // ─── Print Action Button ───────────────────────────────────────────
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(
-              top: BorderSide(color: Colors.grey.shade200, width: 1),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                offset: const Offset(0, -4),
-                blurRadius: 8,
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: SizedBox(
-            height: 44,
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isPrintingEsc
-                  ? null
-                  : () {
-                      if (widget.connectedDevices.isEmpty &&
-                          !_isBuiltInPrinterActive) {
-                        _showNoConnectionMsg();
-                        return;
-                      }
-                      _printExample();
-                    },
-              icon: _isPrintingEsc
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.print, size: 18),
-              label: Text(
-                _isPrintingEsc ? 'ĐANG IN...' : 'IN HÓA ĐƠN',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
+        // ─── Futuristic Print Button (Floating) ─────────────────────────
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 24,
+          child: Center(
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                gradient: _isPrintingEsc ? null : const LinearGradient(
+                  colors: [Color(0xFF00F2FE), Color(0xFF4FACFE)], // Neon Cyan
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
                 ),
+                color: _isPrintingEsc ? Colors.grey.shade400 : null,
+                boxShadow: _isPrintingEsc
+                    ? []
+                    : [
+                        BoxShadow(
+                          color: const Color(0xFF4FACFE).withValues(alpha: 0.5),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                          offset: const Offset(0, 6),
+                        )
+                      ],
               ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(24),
+                  onTap: _isPrintingEsc
+                      ? null
+                      : () {
+                          if (widget.connectedDevices.isEmpty &&
+                              !_isBuiltInPrinterActive) {
+                            _showNoConnectionMsg();
+                            return;
+                          }
+                          _printExample();
+                        },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_isPrintingEsc)
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        else
+                          const Icon(Icons.auto_awesome, size: 18, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isPrintingEsc ? 'ĐANG XỬ LÝ...' : 'IN HÓA ĐƠN',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
         ),
-        // ─── Raw print (dev) ───────────────────────────────────────────────
-        buildRawPrintBar(
-          color: Colors.indigo.shade600,
-          title: 'In thô ESC/POS (dev)',
-          buttons: [
-            (
-              label: 'In Text',
-              onPressed: () =>
-                  (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive)
-                      ? _showNoConnectionMsg()
-                      : _printRawText()
-            ),
-            (
-              label: 'In Barcode',
-              onPressed: () =>
-                  (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive)
-                      ? _showNoConnectionMsg()
-                      : _printRawBarcode()
-            ),
-            (
-              label: 'In QR',
-              onPressed: () =>
-                  (widget.connectedDevices.isEmpty && !_isBuiltInPrinterActive)
-                      ? _showNoConnectionMsg()
-                      : _printRawQRCode()
-            ),
-          ],
-        ),
+      ],
+    ),
+  ),
       ],
     );
   }

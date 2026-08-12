@@ -1,6 +1,7 @@
 export 'barcode_model.dart';
 export 'device_id.dart';
 export 'bluetooth_device_model.dart';
+export 'lan_device_model.dart';
 export 'label_model.dart';
 export 'product_barcode_model.dart';
 export 'print_thermal.dart';

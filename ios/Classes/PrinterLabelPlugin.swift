@@ -2,6 +2,7 @@ import Flutter
 import PrinterSDK
 import UIKit
 import CoreBluetooth
+import Network
 
 // MARK: - EmptyStreamHandler
 // Stub cho các EventChannel không có sự kiện trên iOS (vd: USB events)
@@ -43,6 +44,12 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     private let escPrinter: ESCPosPrinter
     private let bleScanHandler = BLEScanStreamHandler()
+
+    // Cache MAC -> IP từ lần scan_net_printers gần nhất. SDK máy in trên iOS
+    // (PTDispatcher) không có API cấu hình IP theo MAC như SDK Android, nên khi
+    // set_net_ip chỉ nhận được mac (không có current_ip), ta tra IP tương ứng ở đây
+    // rồi vẫn gửi cấu hình qua route ESC/POS TCP hiện có.
+    private var lastScannedMacToIp: [String: String] = [:]
 
     override init() {
         self.escPrinter = ESCPosPrinter()
@@ -215,6 +222,41 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             escPrinter.openDrawer(call: call, result: result)
 
 
+        // MARK: Identify LAN Printer (Beep / Feed / Slip)
+        case "identify_lan_printer":
+            guard let args = call.arguments as? [String: Any],
+                  let ip = args["ip_address"] as? String, !ip.isEmpty
+            else {
+                result(false)
+                return
+            }
+
+            var data: Data?
+            if let typedData = args["bytes"] as? FlutterStandardTypedData {
+                data = typedData.data
+            } else if let byteList = args["bytes"] as? [UInt8] {
+                data = Data(byteList)
+            } else if let intList = args["bytes"] as? [Int] {
+                data = Data(intList.map { UInt8($0 & 0xFF) })
+            } else if let nsNumbers = args["bytes"] as? [NSNumber] {
+                data = Data(nsNumbers.map { UInt8(truncating: $0) })
+            }
+
+            guard let payload = data, !payload.isEmpty else {
+                print("[PrinterLabelPlugin] ❌ identify_lan_printer: bytes is empty or invalid format")
+                result(false)
+                return
+            }
+
+            LANPrinterManager.shared.send(data: payload, to: ip) { ok, err in
+                if !ok {
+                    print("[PrinterLabelPlugin] ❌ identify_lan_printer failed for \(ip): \(err?.localizedDescription ?? "unknown")")
+                } else {
+                    print("[PrinterLabelPlugin] 🔔 identify_lan_printer succeeded for \(ip)")
+                }
+                result(ok)
+            }
+
         // MARK: Check Connection
         case "checkConnect":
             let args = call.arguments as? [String: Any]
@@ -260,12 +302,205 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         case "getPlatformVersion":
             result("iOS " + UIDevice.current.systemVersion)
 
+        case "scan_net_printers":
+            let scanTimeout: Double = 1.5
+            let queue = DispatchQueue(label: "com.printerlabel.scan.\(UUID().uuidString)")
+            var devices: [[String: Any]] = []
+            var seenKeys = Set<String>()
+
+            // 1. Quét qua PTDispatcher (PT SDK)
+            PTDispatcher.share()?.findAllPeripheralBlock = { (printerArray: NSMutableArray?) in
+                guard let array = printerArray as? [PTPrinter], !array.isEmpty else { return }
+                queue.async {
+                    for printer in array {
+                        let ip = printer.ip ?? ""
+                        let mac = printer.mac ?? ""
+                        guard !ip.isEmpty else { continue }
+                        let key = "\(ip)|\(mac)"
+                        if seenKeys.insert(key).inserted {
+                            devices.append(["mac": mac, "ip": ip])
+                            print("[iOS scan PT] Found: ip=\(ip) mac=\(mac)")
+                        }
+                    }
+                }
+            }
+
+            PTDispatcher.share()?.sendBroadcastMessages()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                PTDispatcher.share()?.scanDevice(atLAN: scanTimeout - 0.3)
+            }
+
+            // 2. Quét qua POS UDP Broadcast (XP0001FIND) cho Xprinter / POS Network Printers
+            POSNetConfigHelper.scanUdpPrinters(timeout: scanTimeout - 0.2) { udpDevices in
+                queue.async {
+                    for d in udpDevices {
+                        let ip = d["ip"] as? String ?? ""
+                        let mac = d["mac"] as? String ?? ""
+                        guard !ip.isEmpty else { continue }
+                        let key = "\(ip)|\(mac)"
+                        if seenKeys.insert(key).inserted {
+                            devices.append(d)
+                            print("[iOS scan UDP] Found: ip=\(ip) mac=\(mac)")
+                        }
+                    }
+                }
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + scanTimeout) {
+                queue.sync {
+                    for device in devices {
+                        if let mac = device["mac"] as? String, !mac.isEmpty,
+                           let ip = device["ip"] as? String, !ip.isEmpty {
+                            self.lastScannedMacToIp[mac.uppercased()] = ip
+                        }
+                    }
+                    result(devices)
+                }
+            }
+
+        case "set_net_ip":
+            let args = call.arguments as? [String: Any]
+            let newIp = args?["ip"] as? String ?? ""
+            let mask = args?["mask"] as? String ?? "255.255.255.0"
+            let gateway = args?["gateway"] as? String ?? ""
+            let dhcp = args?["dhcp"] as? Bool ?? false
+            let mac = args?["mac"] as? String ?? ""
+            var currentIp = args?["current_ip"] as? String ?? ""
+
+            // Nếu Flutter không truyền current_ip nhưng có mac, tra IP tương ứng từ lần scan gần nhất
+            if currentIp.isEmpty && !mac.isEmpty {
+                currentIp = lastScannedMacToIp[mac.uppercased()] ?? ""
+            }
+
+            guard !newIp.isEmpty else {
+                result(FlutterError(code: "INVALID_ARGS", message: "ip is required", details: nil))
+                return
+            }
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                // --- Tuyến 1 (Ưu tiên): Đổi IP theo MAC qua UDP Broadcast (Xprinter/POS) ---
+                // Gửi trực tiếp tới cổng UDP 9000, KHÔNG gửi dữ liệu tới cổng in 9100
+                // để tránh việc máy in hiểu nhầm là lệnh in và in ra 1 tờ giấy trắng / rác.
+                if !mac.isEmpty {
+                    let udpOk = POSNetConfigHelper.sendUdpNetConfig(
+                        mac: mac,
+                        ip: newIp,
+                        mask: mask,
+                        gateway: gateway,
+                        dhcp: dhcp,
+                        currentIp: currentIp.isEmpty ? nil : currentIp
+                    )
+                    DispatchQueue.main.async {
+                        result(udpOk)
+                    }
+                    return
+                }
+
+                // --- Tuyến 2: Chỉ khi KHÔNG CÓ MAC mới gửi lệnh cấu hình qua TCP cổng in 9100 (Epson, Brother, PT SDK) ---
+                let targetIp = !currentIp.isEmpty ? currentIp : (LANPrinterManager.shared.getConnectedPrinters().first ?? "")
+
+                if !targetIp.isEmpty {
+                    let esc = PTCommandESC()
+                    esc.setPrinterWiFiDhcpStatus(dhcp ? 1 : 0)
+                    if !dhcp {
+                        esc.setPrinterWiFiIPAddress(newIp)
+                        esc.setPrinterWiFiSubnetMask(mask)
+                        if !gateway.isEmpty {
+                            esc.setPrinterWiFiGateway(gateway)
+                        }
+                    }
+                    esc.saveWiFiParametersSetting()
+                    if let data = esc.getCommandData() as Data? {
+                        self.sendEscNetworkCommand(to: targetIp, data: data) { resultCode, sendOk in
+                            DispatchQueue.main.async {
+                                result(sendOk && (resultCode == nil || resultCode == 0 || resultCode == 4))
+                            }
+                        }
+                        return
+                    }
+                }
+
+                DispatchQueue.main.async {
+                    result(false)
+                }
+            }
+
+
         default:
             result(FlutterMethodNotImplemented)
         }
     }
 
     // MARK: - LAN Helpers
+
+    /// Gửi lệnh ESC cấu hình mạng (WiFi IP/mask/gateway/dhcp) tới `ip:9100` qua một
+    /// socket TCP tạm thời riêng (KHÔNG dùng LANPrinterManager — connection đó được
+    /// tinh chỉnh riêng cho in ấn với retry/idle-close, không phù hợp cho lệnh cấu hình
+    /// cần đọc phản hồi).
+    ///
+    /// Theo tài liệu SDK, sau khi nhận lệnh set, máy in trả về 1 byte mã kết quả:
+    /// 0 = thành công, 1 = thất bại, 2 = không có quyền, 3 = sai tham số,
+    /// 4 = thành công nhưng cần khởi động lại. `resultCode` sẽ là nil nếu máy in
+    /// không phản hồi trong thời gian chờ (một số firmware không trả lời lệnh này).
+    private func sendEscNetworkCommand(
+        to ip: String,
+        port: UInt16 = 9100,
+        data: Data,
+        timeout: TimeInterval = 2.5,
+        completion: @escaping (_ resultCode: Int?, _ sendOk: Bool) -> Void
+    ) {
+        let queue = DispatchQueue(label: "com.printerlabel.netconfig.\(ip)")
+        let host = NWEndpoint.Host(ip)
+        let nwPort = NWEndpoint.Port(rawValue: port) ?? 9100
+        let connection = NWConnection(host: host, port: nwPort, using: .tcp)
+
+        var finished = false
+        func finish(_ resultCode: Int?, _ sendOk: Bool) {
+            queue.async {
+                guard !finished else { return }
+                finished = true
+                connection.cancel()
+                DispatchQueue.main.async { completion(resultCode, sendOk) }
+            }
+        }
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                connection.send(content: data, completion: .contentProcessed({ error in
+                    guard error == nil else {
+                        print("[set_net_ip] ❌ Gửi lệnh tới \(ip) lỗi: \(error!)")
+                        finish(nil, false)
+                        return
+                    }
+                    print("[set_net_ip] 📤 Đã gửi \(data.count) byte cấu hình mạng tới \(ip), chờ phản hồi...")
+                    connection.receive(minimumIncompleteLength: 1, maximumLength: 64) { recvData, _, _, _ in
+                        if let recvData = recvData, !recvData.isEmpty {
+                            let code = Int(recvData[recvData.startIndex])
+                            print("[set_net_ip] 📥 Máy in \(ip) phản hồi: \([UInt8](recvData)) → mã \(code)")
+                            finish(code, true)
+                        } else {
+                            print("[set_net_ip] ⚠️ Máy in \(ip) không phản hồi trong \(timeout)s sau khi gửi lệnh")
+                            finish(nil, true)
+                        }
+                    }
+                }))
+            case .failed(let error):
+                print("[set_net_ip] ❌ Không kết nối được \(ip): \(error)")
+                finish(nil, false)
+            case .cancelled:
+                finish(nil, false)
+            default:
+                break
+            }
+        }
+
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + timeout) {
+            finish(nil, true)
+        }
+    }
 
     private func connectLAN(ip: String, result: @escaping FlutterResult) {
         // Use LANPrinterManager to create/maintain a connection per IP

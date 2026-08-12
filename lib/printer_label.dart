@@ -5,6 +5,7 @@ export 'src/platform/printer_label.dart';
 // Export models
 export 'src/models/barcode_model.dart';
 export 'src/models/bluetooth_device_model.dart';
+export 'src/models/lan_device_model.dart';
 export 'src/models/device_id.dart';
 export 'src/models/image_model.dart';
 export 'src/models/label_model.dart';

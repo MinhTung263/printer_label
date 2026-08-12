@@ -199,4 +199,36 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required String code,
     int size = 8,
   });
+
+  /// Scans the local network for printers returning their MAC and IP.
+  Future<List<Map<String, String>>> scanNetPrinters() {
+    throw UnimplementedError('scanNetPrinters() has not been implemented.');
+  }
+
+  /// Sets the IP address of a printer on the network.
+  Future<bool> setNetIp({
+    required String mac,
+    required String ip,
+    String mask = "255.255.255.0",
+    String gateway = "",
+    bool dhcp = false,
+    String? currentIp,
+  });
+
+  /// Queries a LAN printer via native platform (ARP table, OUI, socket) to retrieve hardware info.
+  Future<Map<String, dynamic>?> getLanPrinterInfo({
+    required String ip,
+    int port = 9100,
+  }) {
+    throw UnimplementedError('getLanPrinterInfo() has not been implemented.');
+  }
+
+  /// Sends raw identify / buzzer commands to a LAN printer via native socket (NWConnection on iOS).
+  Future<bool> identifyLanPrinter({
+    required String ipAddress,
+    required List<int> bytes,
+    int port = 9100,
+  }) {
+    throw UnimplementedError('identifyLanPrinter() has not been implemented.');
+  }
 }

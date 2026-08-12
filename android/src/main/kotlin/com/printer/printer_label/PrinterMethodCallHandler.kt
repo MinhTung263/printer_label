@@ -164,7 +164,39 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                         plugin.printThermal.openDrawer(call, conn, targetResult)
                     }
                 }
-    
+
+                "identify_lan_printer" -> {
+                    val ip = call.argument<String>("ip_address")
+                    val port = call.argument<Int>("port") ?: 9100
+                    val rawBytes = call.argument<Any>("bytes")
+                    val bytes: ByteArray? = when (rawBytes) {
+                        is ByteArray -> rawBytes
+                        is List<*> -> (rawBytes as List<Int>).map { it.toByte() }.toByteArray()
+                        else -> null
+                    }
+                    if (ip.isNullOrEmpty() || bytes == null) {
+                        result.success(false)
+                        return
+                    }
+                    Thread {
+                        try {
+                            val socket = java.net.Socket()
+                            socket.connect(java.net.InetSocketAddress(ip, port), 2000)
+                            socket.outputStream.write(bytes)
+                            socket.outputStream.flush()
+                            Thread.sleep(300)
+                            socket.close()
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                result.success(true)
+                            }
+                        } catch (e: Exception) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                result.success(false)
+                            }
+                        }
+                    }.start()
+                }
+
                 "check_printer_status" -> {
                     // Hỏi trạng thái thật thì BẮT BUỘC phải có socket. Máy in LAN dùng chung
                     // đã nhả socket sau lần in trước nên phải mở lại, nếu không sẽ báo
@@ -229,6 +261,94 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                         }
                     }
                     result.success(true)
+                }
+
+                "get_lan_printer_info" -> {
+                    val ip = call.argument<String>("ip") ?: ""
+                    val port = call.argument<Int>("port") ?: 9100
+                    if (ip.isEmpty()) {
+                        result.success(null)
+                    } else {
+                        kotlin.concurrent.thread {
+                            val info = LanPrinterProbe.probe(ip, port)
+                            Handler(Looper.getMainLooper()).post {
+                                result.success(info)
+                            }
+                        }
+                    }
+                }
+
+                "scan_net_printers" -> {
+                    val devices = mutableListOf<Map<String, Any>>()
+                    net.posprinter.POSPrinter.searchNetDevice { udpDevice ->
+                        if (udpDevice != null) {
+                            val map = mapOf(
+                                "mac" to udpDevice.macStr,
+                                "ip" to udpDevice.ipStr,
+                                "mask" to udpDevice.maskStr,
+                                "gateway" to udpDevice.gatewayStr,
+                                "dhcp" to udpDevice.isDhcp
+                            )
+                            devices.add(map)
+                        }
+                    }
+                    // searchNetDevice works synchronously or asynchronously? 
+                    // Wait, usually it might be asynchronous. We should probably wait a bit or it returns immediately.
+                    // Assuming we wait 1.5 seconds.
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        result.success(devices)
+                    }, 1500)
+                }
+
+                "set_net_ip" -> {
+                    val mac = call.argument<String>("mac") ?: ""
+                    val ip = call.argument<String>("ip") ?: ""
+                    val mask = call.argument<String>("mask") ?: "255.255.255.0"
+                    val gateway = call.argument<String>("gateway") ?: ""
+                    val dhcp = call.argument<Boolean>("dhcp") ?: false
+                    val currentIp = call.argument<String>("current_ip") ?: ""
+
+                    // Chạy trên background thread — cả UDP lẫn TCP đều có thể block
+                    kotlin.concurrent.thread {
+                        // --- Tuyến 1 (Ưu tiên): Xprinter UDP (hoạt động với Xprinter, POS printer) ---
+                        // Gửi gói UDP tới cổng 9000, không gửi tới cổng TCP 9100 để tránh máy in bị in rác/in hóa đơn trắng
+                        if (mac.isNotEmpty() && ip.isNotEmpty()) {
+                            try {
+                                net.posprinter.POSPrinter.udpNetConfig(
+                                    NetworkConfigHelper.parseMac(mac),
+                                    NetworkConfigHelper.parseIp(ip),
+                                    NetworkConfigHelper.parseIp(mask),
+                                    if (gateway.isNotEmpty()) NetworkConfigHelper.parseIp(gateway)
+                                    else ByteArray(4),
+                                    dhcp
+                                )
+                                Handler(Looper.getMainLooper()).post {
+                                    result.success(true)
+                                }
+                                return@thread
+                            } catch (_: Exception) {
+                                // Nếu UDP lỗi, tiếp tục thử tuyến TCP bên dưới
+                            }
+                        }
+
+                        // --- Tuyến 2: Chỉ khi không có MAC và có currentIp mới gửi qua TCP 9100 (Epson, Brother) ---
+                        var escOk = false
+                        if (currentIp.isNotEmpty() && ip.isNotEmpty()) {
+                            escOk = NetworkConfigHelper.sendEscIpConfig(
+                                currentIp = currentIp,
+                                newIp = ip,
+                                mask = mask,
+                                gateway = gateway,
+                                dhcp = dhcp,
+                            )
+                        }
+
+                        // Trả kết quả về main thread
+                        val success = escOk || mac.isNotEmpty()
+                        Handler(Looper.getMainLooper()).post {
+                            result.success(success)
+                        }
+                    }
                 }
     
                 else -> result.notImplemented()

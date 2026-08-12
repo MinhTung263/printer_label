@@ -374,4 +374,81 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     };
     await _channel.invokeMethod<void>(PrinterMethod.print_qrcode_esc.name, data);
   }
+
+  @override
+  Future<List<Map<String, String>>> scanNetPrinters() async {
+    final result = await _channel.invokeMethod<List>('scan_net_printers');
+    if (result == null) return [];
+    return result.map((e) {
+      final map = Map<Object?, Object?>.from(e as Map);
+      return {
+        'mac': map['mac']?.toString() ?? '',
+        'ip': map['ip']?.toString() ?? '',
+        'mask': map['mask']?.toString() ?? '',
+        'gateway': map['gateway']?.toString() ?? '',
+        'name': map['name']?.toString() ?? '',
+        'dhcp': map['dhcp']?.toString() ?? 'false',
+      };
+    }).toList();
+  }
+
+  @override
+  Future<bool> setNetIp({
+    required String mac,
+    required String ip,
+    String mask = "255.255.255.0",
+    String gateway = "",
+    bool dhcp = false,
+    String? currentIp,
+  }) async {
+    final data = {
+      'mac': mac,
+      'ip': ip,
+      'mask': mask,
+      'gateway': gateway,
+      'dhcp': dhcp,
+      if (currentIp != null) 'current_ip': currentIp,
+    };
+    return await _channel.invokeMethod<bool>('set_net_ip', data) ?? false;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getLanPrinterInfo({
+    required String ip,
+    int port = 9100,
+  }) async {
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'get_lan_printer_info',
+        {
+          'ip': ip,
+          'port': port,
+        },
+      );
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<bool> identifyLanPrinter({
+    required String ipAddress,
+    required List<int> bytes,
+    int port = 9100,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'identify_lan_printer',
+        {
+          'ip_address': ipAddress,
+          'port': port,
+          'bytes': Uint8List.fromList(bytes),
+        },
+      );
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }
