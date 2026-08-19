@@ -1,3 +1,19 @@
+## [2.2.0] - 2026-08-19
+
+### 🚀 New Features & Enhancements
+
+- **USB Printing Improvements**: Enhanced native USB printer connectivity and high-speed image printing on Android.
+- **LAN Printer Network Configuration**: Added support for discovering LAN printers and configuring printer IP address, subnet mask, and gateway directly from the app (supporting POS/Xprinter network configuration protocols on both Android and iOS).
+- **Multiple Copies Printing**: Added support for printing multiple copies (`copies` parameter) in ESC/POS thermal printing service and native platforms.
+- **Multi-Device & Cash Drawer Enhancements**:
+  - Enhanced `openDrawer()` API to return execution status (`Future<bool>`).
+  - Added target `deviceId` parameter and support for broadcasting drawer open commands across all connected LAN and Bluetooth printers.
+  - Added `openDrawerMultiDevices` in `ESCPrintService`.
+- **LAN & Bluetooth Stability**:
+  - Enhanced LAN printing with socket connection pooling and batch image data transmission.
+  - Improved Bluetooth BLE streaming and long-ticket print flow pacing.
+  - Refined image binarization threshold for crisp print output across both iOS and Android.
+
 ## [2.1.1] - 2026-07-03
 
 ### 🚀 Core Architecture & Package Restructuring
