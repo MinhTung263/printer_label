@@ -54,6 +54,14 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Connects to a network LAN printer using the specified [ipAddress].
   Future<bool> connectLan({required String ipAddress});
 
+  /// Re-connects to a previously seen USB printer using its stable [deviceId]
+  /// (Android only). Scans currently attached USB devices for a match and
+  /// (re)opens the connection — useful after the app process was killed and
+  /// restarted while the printer stayed physically plugged in, since no new
+  /// ATTACHED broadcast fires in that case. Returns `false` if no attached
+  /// device matches [deviceId].
+  Future<bool> connectUsb({required String deviceId});
+
   /// iOS: Starts scanning for Bluetooth Low Energy (BLE) devices.
   ///
   /// Discovered devices are emitted through [bluetoothScanStream].

@@ -38,7 +38,7 @@ class LanDeviceModel {
     final cleanName = name?.trim();
     final displayName = (cleanName != null && cleanName.isNotEmpty)
         ? cleanName
-        : 'Máy in LAN';
+        : 'Máy in LAN ${ip.split('.').last}';
 
     return LanDeviceModel(
       ip: ip,

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -74,6 +76,17 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     if (targetIp.isEmpty) return false;
     return await _channel.invokeMethod<bool>(PrinterMethod.connect_lan.name, {
           "ip_address": targetIp,
+        }) ??
+        false;
+  }
+
+  @override
+  Future<bool> connectUsb({required String deviceId}) async {
+    if (!Platform.isAndroid) return false;
+    final targetId = deviceId.trim();
+    if (targetId.isEmpty) return false;
+    return await _channel.invokeMethod<bool>(PrinterMethod.connect_usb.name, {
+          "device_id": targetId,
         }) ??
         false;
   }

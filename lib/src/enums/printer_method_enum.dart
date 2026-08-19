@@ -6,6 +6,7 @@ enum PrinterMethod {
   disconnect,
   connect_lan,
   connect_bt,
+  connect_usb,
   scan_bt,
   stop_scan_bt,
   get_bluetooth_devices,

@@ -60,6 +60,15 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                     plugin.bluetoothManager.connectBt(macAddress, result)
                 }
+
+                "connect_usb" -> {
+                    val deviceId = call.argument<String>("device_id")
+                    if (deviceId.isNullOrEmpty()) {
+                        result.success(false)
+                        return
+                    }
+                    plugin.connectUsb(deviceId, result)
+                }
     
                 "auto_connect_built_in" -> {
                     plugin.isBuiltInPrinterDisabled = false

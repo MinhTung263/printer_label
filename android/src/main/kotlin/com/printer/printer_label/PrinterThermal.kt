@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import net.posprinter.IDeviceConnection
@@ -57,13 +58,112 @@ class PrinterThermal {
             runCatching { conn.sendSync(byteArrayOf(0x00)) }
         }
 
+        /**
+         * Chờ tới khi dữ liệu đã XẾP HÀNG của [conn] thực sự được ghi ra socket/OutputStream.
+         *
+         * KHÁC [awaitFlush]: `sendSync` ghi THẲNG ra stream, KHÔNG đi qua hàng đợi, nên byte
+         * NUL của nó có thể VƯỢT MẶT phần dữ liệu còn nằm chờ trong queue — vừa không chứng
+         * minh được hàng đợi đã cạn, vừa chen một byte lạ vào giữa luồng lệnh TSPL đang gửi
+         * dở. Với ảnh bitmap (vài chục KB) thì đó đúng là lúc dễ hỏng nhất.
+         *
+         * Cách đúng theo SDK (net.posprinter.a.c): luồng consumer lấy từng gói khỏi hàng đợi,
+         * ghi ra stream, RỒI mới gọi `IStatusCallback.receive(soByteDaGhi)`. Vậy callback là
+         * tín hiệu "gói này đã ra khỏi máy". Ta đăng ký callback, chờ nó kêu, rồi gỡ ra.
+         *
+         * Có timeout để không treo vĩnh viễn nếu máy in rút dây/mất điện giữa chừng: quá hạn
+         * thì trả về và để lớp trên xử lý như lỗi gửi bình thường.
+         *
+         * timeoutMs = 500: SDK (net.posprinter.a.c$a, đã decompile bytecode để xác nhận)
+         * TỰ GIỚI HẠN tần suất gọi callback — nếu lần gọi trước cách chưa quá 2000ms thì gói
+         * kế được ghi ra stream thành công NHƯNG SDK ÂM THẦM BỎ QUA việc gọi
+         * `IStatusCallback.receive()` cho gói đó (không có API public nào khác để biết hàng
+         * đợi đã cạn). Với in liên tiếp nhiều tem (mỗi tem ghi nhanh hơn 2s), khoảng phân nửa
+         * số tem sẽ KHÔNG BAO GIỜ nhận được callback dù đã gửi xong -> timeout sẽ bị "ăn đủ"
+         * ở đúng các tem đó. Vì vậy timeout càng ngắn càng đỡ lãng phí, miễn còn đủ cho
+         * callback HỢP LỆ (tem không bị throttle) kịp về: bitmap tem (vài chục KB) ghi ra
+         * socket LAN bình thường mất dưới 100ms, 500ms đã dư dả cho cả mạng chậm. Từng thử
+         * 15000ms (in 5 tem mất cả phút) rồi 3000ms (vẫn còn ~6s lãng phí cho 2-3 tem bị
+         * throttle) trước khi chốt 500ms.
+         */
+        @JvmStatic
+        fun awaitLabelSent(conn: IDeviceConnection, timeoutMs: Long = 300L) {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            // Giữ tham chiếu MẠNH tới callback trong suốt lúc chờ. SDK chỉ giữ nó bằng
+            // WeakReference (xem setSendCallback), nên nếu để lambda làm đối tượng tạm thì
+            // GC có thể thu nó trước khi luồng consumer kịp gọi -> latch không bao giờ đếm
+            // lùi và ta chờ tới hết timeout ở MỌI tem (in cực chậm mà vẫn không an toàn).
+            val callback = net.posprinter.posprinterface.IStatusCallback { latch.countDown() }
+            try {
+                conn.setSendCallback(callback)
+                if (!latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    Log.w("TSPL_FLUSH", "Quá $timeoutMs ms không thấy xác nhận gửi tem")
+                }
+            } catch (e: Exception) {
+                Log.w("TSPL_FLUSH", "Không chờ được xác nhận gửi: ${e.message}")
+            } finally {
+                // Gỡ callback để không giữ tham chiếu sang lần in sau.
+                runCatching { conn.setSendCallback(null) }
+                // Chạm vào `callback` sau khi chờ xong để chắc chắn nó còn sống tới đây,
+                // không bị JIT coi là rác sớm.
+                callback.hashCode()
+            }
+        }
+
+        /**
+         * Số lần thử lại CHỈ cho gói đầu tiên (offset 0) khi `sendSync` trả về <= 0.
+         *
+         * Máy in vừa kết nối xong (đặc biệt USB, ngay khi app mới mở) có thể đã báo
+         * `CONNECT_SUCCESS` trước khi endpoint thực sự sẵn sàng nhận ghi -> gói đầu
+         * tiên gửi thất bại ngay tại byte 0, các lần in sau đó lại bình thường. Đây là
+         * cửa sổ "chưa kịp warm up" của SDK/driver, không phải mất kết nối thật, nên
+         * retry ngắn ở ĐÚNG điểm này là hợp lý. Từ gói thứ 2 trở đi không retry nữa:
+         * lỗi giữa chừng nghĩa là kết nối đã chết thật (rút dây, đầy buffer thật) và
+         * cần ném lỗi ngay để lớp trên biết mà báo thất bại, không âm thầm nuốt lỗi.
+         */
+        // 3 lần/80ms (~240ms) không đủ trên một số thiết bị: cửa sổ "chưa sẵn sàng
+        // ghi" của driver USB sau CONNECT_SUCCESS có thể kéo dài cả giây. Tăng lên
+        // 8 lần, backoff tuyến tính 150ms/lần (150+300+450+...+1200 ≈ 2.4s tối đa)
+        // để đủ chờ những thiết bị chậm nhất mà không giữ UI treo mãi khi kết nối
+        // đã chết thật (rút dây) — trường hợp đó sendSync tiếp tục trả <=0 tới hết
+        // số lần thử rồi mới ném lỗi như cũ.
+        private const val FIRST_CHUNK_MAX_RETRY = 8
+        private const val FIRST_CHUNK_RETRY_BASE_DELAY_MS = 150L
+
+        /**
+         * Gửi lại gói đầu tiên [chunk] khi `sendSync` ban đầu trả về <= 0, với backoff
+         * TUYẾN TÍNH (150, 300, 450, ..., 1200ms — tổng tối đa ~2.4s): lần thử càng
+         * muộn thì đợi càng lâu, để đủ cửa sổ cho driver USB chậm nhất mà không delay
+         * quá lâu ở retry đầu (thường đã đủ trên máy bình thường). Trả về số byte đã
+         * gửi (0 nếu vẫn thất bại sau tất cả các lần thử).
+         */
+        private fun retryFirstChunkSync(
+            sendSync: (ByteArray) -> Int,
+            chunk: ByteArray,
+            logTag: String
+        ): Int {
+            var sent = 0
+            for (attempt in 1 until FIRST_CHUNK_MAX_RETRY) {
+                val delay = FIRST_CHUNK_RETRY_BASE_DELAY_MS * attempt
+                Log.w(logTag, "Gói đầu tiên gửi thất bại (lần $attempt), thử lại sau ${delay}ms...")
+                Thread.sleep(delay)
+                sent = sendSync(chunk)
+                if (sent > 0) break
+            }
+            return sent
+        }
+
         @JvmStatic
         fun sendAllSync(conn: IDeviceConnection, data: ByteArray, chunkSize: Int) {
             var offset = 0
             while (offset < data.size) {
                 val count = Math.min(chunkSize, data.size - offset)
                 val chunk = data.copyOfRange(offset, offset + count)
-                val sent = conn.sendSync(chunk)
+
+                var sent = conn.sendSync(chunk)
+                if (sent <= 0 && offset == 0) {
+                    sent = retryFirstChunkSync(conn::sendSync, chunk, "PRINT_SEND")
+                }
+
                 if (sent <= 0) {
                     throw java.io.IOException(
                         "Gửi dữ liệu tới máy in thất bại tại byte $offset/${data.size} " +
@@ -107,41 +207,20 @@ class PrinterThermal {
                 }
                 val isBluetooth = curConnect.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH
 
-                // USB / máy in tích hợp: để SDK tự dựng + gửi lệnh ảnh.
+                // USB từng đi qua `printBitmap` của SDK (để SDK tự dựng + gửi lệnh ảnh, tự
+                // chia dải nên đơn dài in tốt). Nhưng với `quantity` > 1, lặp
+                // `repeat(copies) { initializePrinter()...; awaitLabelSent() }` KHÔNG an
+                // toàn: `awaitLabelSent` chỉ đợi ĐÚNG MỘT callback (một gói đã ghi ra
+                // stream), trong khi `printBitmap` có thể chia một bitmap thành NHIỀU gói
+                // nội bộ. Bản kế tiếp gọi `initializePrinter()` (ESC @, reset máy in) trong
+                // lúc phần đuôi của bản trước vẫn còn nằm trong hàng đợi SDK -> phần đó bị
+                // hủy, chỉ tờ cuối cùng in ra trọn vẹn (in 3 tờ ra 1 tờ qua USB).
                 //
-                // LAN KHÔNG còn đi đường này nữa. Lý do cũ là `printBitmap` tự chia dải nên
-                // đơn dài in tốt, còn encoder thủ công bên dưới nhồi cả bill vào MỘT lệnh
-                // `GS v 0` -> đơn dài vượt giới hạn chiều cao mỗi lệnh raster của máy in và
-                // in ra ký tự rác. Nhưng `getEscPosRasterBytes` GIỜ ĐÃ chia dải 128 dòng
-                // (xem hàm đó), nên đường thủ công in đơn dài an toàn.
-                //
-                // Đổi sang đường thủ công vì `printBitmap`/`sendData` của SDK là BẤT ĐỒNG BỘ:
-                // chúng chỉ xếp lệnh vào hàng đợi nội bộ rồi return, nên không có thời điểm
-                // nào biết dữ liệu đã ra khỏi máy để NHẢ SOCKET. Giữ socket thường trực làm
-                // thiết bị khác (iOS) kết nối được nhưng job của nó bị máy in xếp hàng, chỉ
-                // in khi app Android tắt. `sendAllSync` bên dưới là đồng bộ và trả về số byte
-                // thật, nên gửi xong là chắc chắn xong -> nhả socket an toàn.
-                if (!isBluetooth && !isTargetBuiltIn && curConnect.getConnectType() != POSConnect.DEVICE_TYPE_ETHERNET) {
-                    val printer = POSPrinter(curConnect)
-                    val paperWidth: Int? = call.argument<Int>("size")
-                    val copies = (call.argument<Int>("quantity") ?: 1).coerceAtLeast(1)
-                    synchronized(lockFor(curConnect)) {
-                        repeat(copies) {
-                            printer.initializePrinter()
-                                .printBitmap(bitmap, POSConst.ALIGNMENT_CENTER, paperWidth ?: 576)
-                                .feedLine()
-                                .cutHalfAndFeed(1)
-                        }
-                        // `printBitmap` chỉ xếp lệnh vào hàng đợi SDK — chờ đẩy xong trước
-                        // khi báo thành công, nếu không job sau có thể chen vào giữa.
-                        awaitFlush(curConnect)
-                    }
-                    bitmap.recycle()
-                    Handler(Looper.getMainLooper()).post {
-                        result.success(true)
-                    }
-                    return@thread
-                }
+                // Giờ USB đi chung đường raster thủ công + `sendAllSync` bên dưới, giống
+                // LAN/BLE: dữ liệu `copies` bản được NỐI SẴN thành một khối rồi gửi ĐỒNG BỘ
+                // thật trong một lần, không còn khoảng hở giữa các bản để lệnh reset chen
+                // vào. `getEscPosRasterBytes` đã tự chia dải 128 dòng nên đơn dài vẫn an
+                // toàn qua đường này.
 
                 // Dựng dữ liệu ảnh thô (GS v 0) sử dụng bộ nhị phân hóa chất lượng cao (threshold 200) để giữ nguyên chất lượng ảnh gốc của Flutter
                 val rasterBytes = getEscPosRasterBytes(bitmap)
@@ -195,7 +274,14 @@ class PrinterThermal {
                         while (offset < allBytes.size) {
                             val count = Math.min(chunkSize, allBytes.size - offset)
                             val chunk = allBytes.copyOfRange(offset, offset + count)
-                            val sent = curConnect.sendSync(chunk)
+
+                            var sent = curConnect.sendSync(chunk)
+                            if (sent <= 0 && offset == 0) {
+                                // Xem giải thích ở sendAllSync(): kết nối vừa mở (lần in đầu
+                                // sau khi vào app) có thể báo thành công trước khi sẵn sàng ghi.
+                                sent = retryFirstChunkSync(curConnect::sendSync, chunk, "PRINT_SEND")
+                            }
+
                             if (sent <= 0) {
                                 throw java.io.IOException(
                                     "Gửi dữ liệu tới máy in Bluetooth thất bại tại byte " +
@@ -292,9 +378,9 @@ class PrinterThermal {
                                 // phần lớn nét nên chỉ còn bộ xương mảnh -> bản in RẤT MỜ (đã
                                 // ghi nhận trên máy BLE ở cả iOS và Android).
                                 //
-                                // Đường raster thủ công này CHỈ dùng cho BLE và máy in tích hợp
-                                // (LAN/USB đã return sớm ở trên để SDK printBitmap tự xử lý),
-                                // nên đổi ngưỡng ở đây ảnh hưởng trực tiếp tới bản in BLE.
+                                // Đường raster thủ công này dùng chung cho MỌI loại kết nối
+                                // (BLE, USB, LAN, máy in tích hợp), nên đổi ngưỡng ở đây ảnh
+                                // hưởng tới bản in trên cả 4 loại.
                                 if (gray < 200) {
                                     byteVal = byteVal or (1 shl (7 - bit))
                                 }

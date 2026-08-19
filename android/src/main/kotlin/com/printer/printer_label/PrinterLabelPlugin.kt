@@ -77,6 +77,21 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     // Updated each time the device is attached so rawId() always has the current path.
     private val usbDevicePaths = mutableMapOf<String, String>()
 
+    // deviceId đang có dialog xin quyền USB CHỜ người dùng phản hồi.
+    //
+    // `handleUsbDeviceAttached` (broadcast ATTACHED lúc cắm dây) và `connectUsb`
+    // (Dart gọi khi bấm in) đều có thể tự `requestPermission()` độc lập cho CÙNG
+    // deviceId nếu cả hai chạy gần nhau — đúng kịch bản "cắm USB lần đầu rồi bấm in
+    // ngay". Android xử lý 2 lời gọi `requestPermission()` chồng nhau bằng cách
+    // hiện dialog nhiều lần/che nhau, mỗi lần dialog che màn hình app đều tính là
+    // app mất foreground -> quan sát được "Application backgrounded" 2 lần trong
+    // log, và ngay sau đó driver USB bị hệ điều hành đóng (`UsbDeviceConnectionJNI
+    // close`) — kết nối tạo SAU đó dựng trên một USB session vừa bị xáo trộn, nên
+    // gói đầu tiên gửi luôn thất bại dù đã retry nhiều lần (retry không cứu được vì
+    // đây không phải "chưa kịp sẵn sàng" mà là session vừa bị hệ thống can thiệp).
+    private val pendingPermissionRequests =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     // Pending connect state — keyed by deviceId so parallel connects don't clash
     //
     // [results] là danh sách vì nhiều lệnh connect cùng deviceId có thể chồng nhau
@@ -452,11 +467,39 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                     if (connectionTypes[deviceId] == ConnectionType.LAN) {
                         registeredLanPrinters.add(rawId(deviceId))
                     }
-                    pending?.complete(true)
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thành công!")
                     }
                     if (pending?.type == ConnectionType.USB) emitUsbEvent(deviceId, true)
+
+                    if (pending?.type == ConnectionType.USB) {
+                        // USB: SDK báo CONNECT_SUCCESS đôi khi TRƯỚC KHI driver thực sự
+                        // sẵn sàng nhận ghi (lần in đầu ngay sau connect hay bị "sendSync
+                        // trả -1 tại byte 0" — xem PrinterThermal.sendAllSync). Callback
+                        // này chạy trên MAIN thread (Toast.show() ở trên yêu cầu main
+                        // thread), nên KHÔNG được Thread.sleep ở đây trực tiếp -> chuyển
+                        // việc "chờ rồi xác nhận" sang thread nền, chỉ complete(true) cho
+                        // Dart sau khi đã thấy ghi thử thành công (hoặc hết thời gian chờ,
+                        // để không kẹt mãi nếu máy thật sự có vấn đề khác).
+                        val conn = connections[deviceId]
+                        kotlin.concurrent.thread {
+                            var ready = false
+                            if (conn != null) {
+                                repeat(5) { i ->
+                                    if (ready) return@repeat
+                                    if (i > 0) Thread.sleep(150L * i)
+                                    ready = runCatching { conn.sendSync(byteArrayOf(0x00)) > 0 }
+                                        .getOrDefault(false)
+                                }
+                            }
+                            if (!ready) {
+                                Log.w("USB_CONNECT", "USB chưa xác nhận sẵn sàng ghi sau kết nối, vẫn báo thành công")
+                            }
+                            pending?.complete(true)
+                        }
+                    } else {
+                        pending?.complete(true)
+                    }
                 }
 
                 POSConnect.CONNECT_FAIL, POSConnect.CONNECT_INTERRUPT -> {
@@ -823,11 +866,73 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         mContext!!.getSystemService(Context.USB_SERVICE) as UsbManager
     }
 
+    /// Chủ động kết nối lại USB theo [deviceId] đã lưu (VD sau khi app bị kill/restart:
+    /// `connections` trong bộ nhớ mất hết nhưng thiết bị vẫn cắm vật lý nên hệ điều hành
+    /// KHÔNG bắn lại broadcast ATTACHED — không có gì tự kích hoạt `tryConnectWithDelay`).
+    /// Quét `usbManager.deviceList` tìm thiết bị có `stableUsbId()` khớp [deviceId]; nếu
+    /// thiết bị không còn cắm thì báo thất bại ngay (đúng là phải rút/cắm lại thật).
+    internal fun connectUsb(deviceId: String, result: Result) {
+        if (isConnectionActive(deviceId)) {
+            result.success(true)
+            return
+        }
+        val device = usbManager.deviceList.values.find { stableUsbId(it) == deviceId }
+        if (device == null) {
+            result.success(false)
+            return
+        }
+
+        val existing = pendingConnects.putIfAbsent(
+            deviceId,
+            PendingConnect(result, ConnectionType.USB, deviceId)
+        )
+        if (existing != null) {
+            synchronized(existing.results) { existing.results.add(result) }
+            return
+        }
+
+        if (usbManager.hasPermission(device)) {
+            tryConnectWithDelay(device, 0)
+        } else {
+            requestUsbPermissionOnce(device)
+        }
+    }
+
+    /**
+     * Xin quyền USB cho [device], nhưng CHỈ MỘT dialog cho mỗi deviceId tại một
+     * thời điểm — dùng [pendingPermissionRequests] để chặn lời gọi trùng.
+     *
+     * `handleUsbDeviceAttached` (broadcast lúc cắm dây) và `connectUsb` (Dart gọi
+     * khi bấm in) đều có thể chạy tới đây gần như đồng thời ở lần cắm USB đầu
+     * tiên. Không chặn trùng thì `usbManager.requestPermission()` bị gọi 2 lần,
+     * Android hiện dialog xin quyền lặp/che nhau — mỗi lần dialog che app đều
+     * khiến app mất foreground ("Application backgrounded" trong log) và kéo
+     * theo hệ điều hành đóng USB session đang mở (`UsbDeviceConnectionJNI
+     * close`). Kết nối dựng ngay sau đó thất bại ngay ở gói đầu tiên vì session
+     * USB vừa bị xáo trộn — không phải "chưa kịp sẵn sàng" nên retry gửi lại
+     * không cứu được.
+     */
+    private fun requestUsbPermissionOnce(device: UsbDevice) {
+        val deviceId = stableUsbId(device)
+        if (!pendingPermissionRequests.add(deviceId)) return
+
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        else PendingIntent.FLAG_UPDATE_CURRENT
+        val permIntent = PendingIntent.getBroadcast(
+            mContext!!, 0,
+            Intent(ACTION_USB_PERMISSION).apply { setPackage(mContext!!.packageName) },
+            flags
+        )
+        usbManager.requestPermission(device, permIntent)
+    }
+
     private val permissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != ACTION_USB_PERMISSION) return
             val device: UsbDevice? = getUsbDeviceFromIntent(intent)
             val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+            device?.let { pendingPermissionRequests.remove(stableUsbId(it)) }
             if (granted && device != null) {
                 toast("Đã cấp quyền USB cho thiết bị")
                 tryConnectWithDelay(device, 0)
@@ -861,15 +966,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         if (usbManager.hasPermission(device)) {
             tryConnectWithDelay(device, 0)
         } else {
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            else PendingIntent.FLAG_UPDATE_CURRENT
-            val permIntent = PendingIntent.getBroadcast(
-                mContext!!, 0,
-                Intent(ACTION_USB_PERMISSION).apply { setPackage(mContext!!.packageName) },
-                flags
-            )
-            usbManager.requestPermission(device, permIntent)
+            requestUsbPermissionOnce(device)
             Handler(Looper.getMainLooper()).postDelayed({
                 if (!isDetached && usbManager.hasPermission(device) &&
                     connections[deviceId]?.isConnect != true) {
@@ -899,6 +996,31 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             pendingConnects.remove(deviceId)
             return
         }
+
+        // Đăng ký `pendingConnects` NGAY tại attempt 0, TRƯỚC `postDelayed` (không phải
+        // bên trong closure ở dưới, vốn chỉ chạy sau 1200ms nữa).
+        //
+        // Trước đây `pendingConnects` chỉ được set trong closure, để hở một cửa sổ
+        // ~1200ms giữa lúc auto-scan lúc khởi động app (`scanAndConnectExistingUsbDevices`
+        // -> `handleUsbDeviceAttached` -> đây) BẮT ĐẦU gọi hàm này và lúc nó thực sự
+        // đăng ký pending. Nếu người dùng bấm in trong đúng cửa sổ đó, luồng in gọi
+        // `connectUsb()` (Dart) thấy `pendingConnects[deviceId]` chưa tồn tại -> tự tạo
+        // PendingConnect RIÊNG và tự gọi `tryConnectWithDelay` LẦN 2, độc lập với lần 1.
+        // Cả hai closure sau đó đều `close()` connection của nhau khi tới lượt chạy ->
+        // đúng hiện tượng "sendSync trả -1 tại byte 0" xảy ra lẫn với các dòng
+        // "UsbDeviceConnectionJNI close" — vì đơn in đầu tiên đang gửi dở dang trên
+        // connection mà lần connect còn lại vừa đóng.
+        //
+        // `putIfAbsent` với `NoOpResult`: các lần gọi tự động (auto-scan, re-attach) không
+        // có `Result` thật cần trả lời; nếu đã có pending khác (VD từ `connectUsb` do
+        // người dùng bấm in) thì giữ nguyên cái đó — không ghi đè.
+        if (attempt == 0) {
+            pendingConnects.putIfAbsent(
+                deviceId,
+                PendingConnect(NoOpResult, ConnectionType.USB, deviceId)
+            )
+        }
+
         Handler(Looper.getMainLooper()).postDelayed({
             if (isDetached) return@postDelayed
             try {
@@ -910,10 +1032,6 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 }
                 connections[deviceId] = posDevice
                 connectionTypes[deviceId] = ConnectionType.USB
-                if (pendingConnects[deviceId] == null) {
-                    pendingConnects[deviceId] =
-                        PendingConnect(NoOpResult, ConnectionType.USB, deviceId)
-                }
                 posDevice.connect(rawId(deviceId), makeConnectListener(deviceId))
             } catch (e: Exception) {
                 Log.e("USB_CONNECT", "Attempt $attempt failed", e)
@@ -1031,12 +1149,25 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                             AlgorithmType.Threshold
                         )
                         .print(1)
+
+                    // Chặn tới khi tem NÀY thực sự ra khỏi hàng đợi gửi của SDK, VẪN
+                    // trong khối khóa. Hai lý do, đều đã quan sát được trên tem in ra:
+                    //
+                    // 1. `bitmap()` chỉ XẾP lệnh vào LinkedBlockingQueue rồi return;
+                    //    luồng consumer mới là chỗ đọc pixel của `shifted`. Recycle ngay
+                    //    sau khối khóa (code cũ) giải phóng bitmap trong khi consumer còn
+                    //    đang encode -> đọc trúng vùng nhớ đã thu hồi, ra nhiễu ngẫu
+                    //    nhiên (VD dòng giá "30 đ" biến thành ký tự rác).
+                    // 2. Consumer gặp lỗi ghi socket sẽ CLEAR sạch queue. Nếu đã nhồi cả
+                    //    lô, một tem hỏng cuốn theo `PRINT 1` của các tem còn lại -> máy
+                    //    không nhả giấy và tem kế in chồng lên tem trước.
+                    //
+                    // Giữ hàng đợi luôn chỉ có một tem khiến cả hai không xảy ra được.
+                    PrinterThermal.awaitLabelSent(conn)
                 }
 
                 shifted.recycle()
             }
-            // Chờ SDK đẩy xong hàng đợi trước khi báo thành công — xem awaitFlush.
-            PrinterThermal.awaitFlush(conn)
             result.success(true)
         } catch (e: Exception) {
             result.error("PRINT_ERROR", e.message, null)

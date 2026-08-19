@@ -80,6 +80,17 @@ class PrinterLabel {
     return await _platform.connectLan(ipAddress: ipAddress);
   }
 
+  /// Re-connects to a previously seen USB printer using its stable
+  /// [deviceId] (`DeviceId.usb(...)`, Android only). Call this before
+  /// printing/checking a USB printer that was saved from a previous app
+  /// session — after the process is killed and restarted while the printer
+  /// stayed plugged in, no new USB-attached broadcast fires, so the native
+  /// side never reconnects on its own. Returns `false` if the device isn't
+  /// currently attached.
+  static Future<bool> connectUsb({required String deviceId}) async {
+    return await _platform.connectUsb(deviceId: deviceId);
+  }
+
   /// Discovers LAN printers by scanning the local network for open port 9100.
   ///
   /// Returns a stream of IP addresses (e.g. '192.168.1.10') that have the port open.

@@ -132,11 +132,10 @@ class LabelFromWidget {
     // in memory at the same time (OOM -> lost device connection).
     const int batchSize = 10;
     final screenshotController = ScreenshotController();
-    for (int start = 0; start < groupedItems.length; start += batchSize) {
-      final int end = (start + batchSize).clamp(0, groupedItems.length);
-      final batch = groupedItems.sublist(start, end);
 
-      final captured = await Future.wait(
+    Future<List<Uint8List>> renderBatch(int start, int end) {
+      final batch = groupedItems.sublist(start, end);
+      return Future.wait(
         batch.map(
           (row) => screenshotController.captureFromWidget(
             buildRowWidget(row),
@@ -146,16 +145,39 @@ class LabelFromWidget {
           ),
         ),
       );
-      // Gửi ngay lô vừa render xong: máy in chạy song song với việc render lô sau,
-      // và đường truyền không bị im lặng đủ lâu để máy in ngắt kết nối.
+    }
+
+    // Render lô KẾ TIẾP song song với việc gửi lô HIỆN TẠI đi in, thay vì tuần tự
+    // render-rồi-gửi-rồi-render. Trước đây mỗi lô phải render xong xuôi thì máy in
+    // mới có việc để làm, nên giữa các lô 10 tem có một khoảng dừng bằng đúng thời
+    // gian render (nặng vì `captureFromWidget` chạy trên UI thread) trong khi máy in
+    // đang rảnh chờ. Bắt đầu render lô kế ngay khi lô hiện tại render xong (không đợi
+    // in xong) thì máy in nhận lô hiện tại và in trong lúc UI thread bận render lô
+    // sau — chỉ còn phải đợi lâu hơn ở LƯỢT ĐẦU TIÊN (chưa có gì để in sẵn).
+    int start = 0;
+    int end = (start + batchSize).clamp(0, groupedItems.length);
+    Future<List<Uint8List>>? nextRender = renderBatch(start, end);
+
+    while (start < groupedItems.length) {
+      final captured = await nextRender!;
+      final isLast = end >= groupedItems.length;
+
+      // Khởi chạy render lô sau NGAY, không đợi onBatch (gửi in) xong.
+      final nextStart = end;
+      final nextEnd = (nextStart + batchSize).clamp(0, groupedItems.length);
+      nextRender = nextStart < groupedItems.length
+          ? renderBatch(nextStart, nextEnd)
+          : null;
+
       if (onBatch != null) {
-        // Báo lô cuối để native biết lúc nào được nhả socket LAN. Render lô sau
-        // thường lâu hơn nhịp chờ đóng socket, nên nếu nhả giữa chừng thì lô kế
-        // phải mở lại socket và đụng socket chưa giải phóng hẳn -> tem lệch/lỗi.
-        await onBatch(captured, end >= groupedItems.length);
+        // Báo lô cuối để native biết lúc nào được nhả socket LAN.
+        await onBatch(captured, isLast);
       } else {
         images.addAll(captured);
       }
+
+      start = nextStart;
+      end = nextEnd;
 
       // Yield to the main thread so it can draw a frame between batches.
       await Future.delayed(const Duration(milliseconds: 16));

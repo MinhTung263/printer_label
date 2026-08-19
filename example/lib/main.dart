@@ -91,6 +91,24 @@ class _MyHomePageState extends State<MyHomePage>
       price: 11990000,
       quantity: 3,
     ),
+    ProductBarcodeModel(
+      barcode: '10203040',
+      name: 'MacBook Air M4',
+      price: 32990000,
+      quantity: 5,
+    ),
+    ProductBarcodeModel(
+      barcode: '50607080',
+      name: 'iPad Pro 13',
+      price: 24990000,
+      quantity: 5,
+    ),
+    ProductBarcodeModel(
+      barcode: '11223344',
+      name: 'Magic Mouse',
+      price: 2190000,
+      quantity: 5,
+    ),
   ];
   LabelPerRow _selectedRow = LabelPerRow.single;
 
