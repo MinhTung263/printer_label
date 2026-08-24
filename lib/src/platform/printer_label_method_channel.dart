@@ -24,6 +24,14 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<bool> requestBluetoothEnable() async {
+    if (!Platform.isAndroid) return false;
+    return await _channel
+            .invokeMethod<bool>(PrinterMethod.request_bluetooth_enable.name) ??
+        false;
+  }
+
+  @override
   Future<bool> checkConnect({String? deviceId}) async {
     final targetId = deviceId?.trim();
     if (targetId == null || targetId.isEmpty) return false;

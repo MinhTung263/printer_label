@@ -14,6 +14,7 @@ enum PrinterMethod {
   print_image,
   print_image_esc,
   bluetooth_enabled,
+  request_bluetooth_enable,
   print_text,
   print_text_esc,
   print_barcode,

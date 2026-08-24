@@ -22,6 +22,19 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 "bluetooth_enabled" -> {
                     result.success(plugin.bluetoothManager.getBluetoothAdapter()?.isEnabled == true)
                 }
+
+                "request_bluetooth_enable" -> {
+                    val adapter = plugin.bluetoothManager.getBluetoothAdapter()
+                    if (adapter == null) {
+                        result.success(false)
+                    } else if (adapter.isEnabled) {
+                        result.success(true)
+                    } else {
+                        plugin.bluetoothManager.requestBluetoothEnable { success ->
+                            result.success(success)
+                        }
+                    }
+                }
     
                 "checkConnect" -> {
                     val deviceId = call.argument<String>("device_id")

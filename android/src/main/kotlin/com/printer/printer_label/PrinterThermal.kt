@@ -22,9 +22,27 @@ class PrinterThermal {
         @JvmStatic
         val sendLocks = java.util.concurrent.ConcurrentHashMap<IDeviceConnection, Any>()
 
+        // Khóa TOÀN CỤC riêng cho Bluetooth Classic — dùng chung cho MỌI connection
+        // loại BT, kể cả máy in tích hợp (Sunmi/iMin/Pax connect qua Bluetooth nội bộ,
+        // xem BluetoothPrinterManager.autoConnectBuiltIn). Lý do: built-in và một máy
+        // Bluetooth ngoài tuy là 2 IDeviceConnection khác nhau nhưng CÙNG đi qua một
+        // chip Bluetooth vật lý duy nhất của máy — nếu 2 job in Bluetooth chạy đúng
+        // lúc (ví dụ printWidgetToDevices gọi Future.wait in built-in + máy ngoài cùng
+        // lúc), tranh chấp ở tầng radio khiến dữ liệu của máy này bị đẩy nhầm sang máy
+        // kia: built-in im lặng không ra giấy, còn máy ngoài lại nhận đủ dữ liệu của cả
+        // hai lần in nên in ra 2 bản. Ép mọi lần ghi Bluetooth (dù built-in hay ngoài)
+        // chạy tuần tự loại bỏ hoàn toàn khả năng ghi chồng lấn đó. LAN/USB không dùng
+        // khóa này nên vẫn in song song với nhau và với Bluetooth như cũ.
         @JvmStatic
-        fun lockFor(conn: IDeviceConnection): Any =
-            sendLocks.getOrPut(conn) { Any() }
+        val bluetoothGlobalLock = Any()
+
+        @JvmStatic
+        fun lockFor(conn: IDeviceConnection): Any {
+            if (conn.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH) {
+                return bluetoothGlobalLock
+            }
+            return sendLocks.getOrPut(conn) { Any() }
+        }
 
         /**
          * Gửi hết [data] theo từng gói [chunkSize] và KIỂM TRA số byte thật sự gửi được.

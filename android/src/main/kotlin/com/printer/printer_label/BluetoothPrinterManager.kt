@@ -969,7 +969,24 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         // Chính xác cho mọi hãng, không phụ thuộc tên Bluetooth.
         if (plugin.builtInDeviceIds.contains(deviceId)) return true
 
-        // DỰ PHÒNG: nếu vì lý do nào đó chưa được đánh dấu, thử nhận diện qua tên BT.
+        // DỰ PHÒNG theo tên BT: CHỈ áp dụng khi CHƯA có bất kỳ connection nào được đánh
+        // dấu built-in tường minh. Nếu đã có (trường hợp bình thường — Sunmi/iMin/Pax
+        // luôn được autoConnectBuiltIn() đánh dấu ngay khi mở app), TUYỆT ĐỐI không cho
+        // một connection khác khớp thêm qua tên nữa.
+        //
+        // Lý do: BUILT_IN_NAME_KEYWORDS chứa các từ khóa rất chung ("BluetoothPrinter",
+        // "Inner Printer", "Bluetooth Printer"...) — rất nhiều máy in nhiệt Bluetooth
+        // ngoài giá rẻ dùng đúng tên mặc định này. Nếu không chặn, khi người dùng connect
+        // thêm một máy ngoài như vậy, hàm này trả `true` cho CẢ built-in thật VÀ máy
+        // ngoài "trùng tên". Ở PrinterLabelPlugin.resolveConnectionsForPrint,
+        // `connections.entries.firstOrNull { isConnectionToBuiltInPrinter(...) }` lấy
+        // theo thứ tự lặp của ConcurrentHashMap (KHÔNG đảm bảo built-in được ưu tiên) —
+        // nếu vô tình chọn trúng entry máy ngoài, lệnh in "BUILT_IN" bị gửi sang máy
+        // ngoài: built-in thật im lặng không in, còn máy ngoài nhận thêm lệnh này CỘNG
+        // với lệnh gửi đúng địa chỉ của chính nó nên in ra 2 bản. Đã xảy ra thực tế với
+        // máy Sunmi + một máy Bluetooth ngoài tên generic.
+        if (plugin.builtInDeviceIds.isNotEmpty()) return false
+
         if (plugin.connectionTypes[deviceId] != ConnectionType.BT) return false
         try {
             val btAdapter = (plugin.mContext?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter

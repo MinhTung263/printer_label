@@ -26,6 +26,13 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Checks if Bluetooth is currently enabled on the device.
   Future<bool> bluetoothEnabled();
 
+  /// Android only: shows the system dialog asking the user to turn Bluetooth
+  /// on (`ACTION_REQUEST_ENABLE`), without leaving the app for Settings.
+  /// Returns `true` if Bluetooth ends up enabled (already on, or user
+  /// accepted the prompt), `false` if the user declined or no Activity is
+  /// available. iOS has no equivalent system prompt — always returns `false`.
+  Future<bool> requestBluetoothEnable();
+
   /// Checks the connection status of a specific printer by its [deviceId].
   ///
   /// If [deviceId] is null, checks if any printer connection is active.
