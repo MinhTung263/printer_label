@@ -1,3 +1,11 @@
+## [2.2.1] - 2026-08-20
+
+### 🐛 Bug Fixes & iOS Build Enhancements
+
+- **iOS Build Architecture**: Removed `EXCLUDED_ARCHS` from podspec to fully support modern Xcode (Xcode 26+) builds without architectural warnings.
+- **Apple Silicon Simulator Support**: Added `arm64` slice to `PrinterSDK.xcframework` simulator framework for seamless debugging on Apple Silicon Macs.
+- **Runtime Class Conflict**: Removed unused `PTSettings.o` object file from `PrinterSDK` to resolve class collision with iOS system framework `PrototypeTools`.
+
 ## [2.2.0] - 2026-08-19
 
 ### 🚀 New Features & Enhancements
