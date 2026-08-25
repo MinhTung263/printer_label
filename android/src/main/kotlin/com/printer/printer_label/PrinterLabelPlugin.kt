@@ -983,6 +983,13 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         connections.remove(deviceId)
         connectionTypes.remove(deviceId)
         usbDevicePaths.remove(deviceId)
+        // Nếu rút dây đúng lúc đang chờ dialog xin quyền / đang giữa các lần thử
+        // connect, `permissionReceiver`/`tryConnectWithDelay` có thể không bao
+        // giờ chạy tới bước dọn cờ tương ứng — dọn luôn ở đây để lần ATTACHED kế
+        // tiếp (cắm lại) không bị `requestUsbPermissionOnce` chặn nhầm là "đang
+        // xin quyền rồi" (xem comment tại hàm đó).
+        pendingPermissionRequests.remove(deviceId)
+        pendingConnects.remove(deviceId)?.complete(false)
         emitUsbEvent(deviceId, false)
         toast("USB bị ngắt kết nối [$deviceId]")
     }
