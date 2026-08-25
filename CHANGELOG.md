@@ -1,3 +1,12 @@
+## [2.2.2] - 2026-08-25
+
+### 🚀 New Features & Stability Enhancements
+
+- **In-App Bluetooth Enable Request**: Added `PrinterLabel.requestBluetoothEnable()` for Android to trigger the system dialog requesting users to turn on Bluetooth directly within the app without navigating away to Settings.
+- **Concurrent Bluetooth Print Serialization**: Introduced a global Bluetooth transmission lock on Android to serialize concurrent print requests across physical Bluetooth channels, preventing data collisions when printing to built-in and external Bluetooth printers simultaneously.
+- **Built-in Printer Isolation**: Refined device matching logic so external Bluetooth printers with generic names (e.g., "BluetoothPrinter") do not conflict with or override built-in POS printers (Sunmi, iMin, Pax, etc.).
+- **USB Disconnection Cleanup**: Implemented automatic cleanup of pending USB permission requests and active connection state when a USB printer is disconnected (`ACTION_USB_DEVICE_DETACHED`).
+
 ## [2.2.1] - 2026-08-20
 
 ### 🐛 Bug Fixes & iOS Build Enhancements
