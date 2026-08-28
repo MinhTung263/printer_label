@@ -149,7 +149,7 @@ final class BLEManager: NSObject {
         centralManager = CBCentralManager(
             delegate: self,
             queue: bleQueue,
-            options: [CBCentralManagerOptionShowPowerAlertKey: true]
+            options: [CBCentralManagerOptionShowPowerAlertKey: false]
         )
     }
 
