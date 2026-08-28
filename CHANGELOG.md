@@ -1,3 +1,10 @@
+## [2.2.3] - 2026-08-28
+
+### 🐛 Bug Fixes & Stability Improvements
+
+- **iOS Bluetooth Alert Handling**: Disabled automatic system Bluetooth power alert popup (`CBCentralManagerOptionShowPowerAlertKey: false`) during central manager initialization to prevent unexpected system dialogs.
+- **iOS Build Optimization**: Enhanced example Xcode project settings to reduce build conflicts and improve compilation reliability.
+
 ## [2.2.2] - 2026-08-25
 
 ### 🚀 New Features & Stability Enhancements
