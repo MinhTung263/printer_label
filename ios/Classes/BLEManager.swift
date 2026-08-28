@@ -146,10 +146,19 @@ final class BLEManager: NSObject {
 
     private override init() {
         super.init()
+        // `BLEManager.shared` được chạm ngay lúc plugin đăng ký (app vừa mở,
+        // xem `PrinterLabelPlugin.init()`) để `CBCentralManager` sẵn sàng
+        // trước khi user thao tác gì — nhưng `ShowPowerAlertKey: true` khiến
+        // iOS TỰ hiện popup xin bật Bluetooth ngay lúc đó, dù user chưa hề
+        // định in/dùng máy in Bluetooth. Tắt cờ này: `centralManager.state`
+        // vẫn cập nhật đúng lúc Bluetooth bật/tắt (qua
+        // `centralManagerDidUpdateState`), chỉ không còn tự bật popup hệ
+        // thống — popup thật sự cần thiết (lúc user bấm scan/connect) vẫn do
+        // chính hành động scan/connect kích hoạt như bình thường.
         centralManager = CBCentralManager(
             delegate: self,
             queue: bleQueue,
-            options: [CBCentralManagerOptionShowPowerAlertKey: true]
+            options: [CBCentralManagerOptionShowPowerAlertKey: false]
         )
     }
 
