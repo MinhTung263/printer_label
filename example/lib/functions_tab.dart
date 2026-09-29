@@ -2,6 +2,7 @@ import 'package:example/connected_device.dart';
 import 'package:example/tabs/cup_sticker_tab.dart';
 import 'package:example/tabs/drawer_tab.dart';
 import 'package:example/tabs/esc_tab.dart';
+import 'package:example/tabs/gold_silver_label_tab.dart';
 import 'package:example/tabs/label_tab.dart';
 import 'package:example/tabs/raw_tab.dart';
 import 'package:example/widgets/custom_tab_bar.dart';
@@ -50,6 +51,11 @@ class _FunctionsTabState extends State<FunctionsTab>
     CustomTab(
       icon: Icons.local_drink_outlined,
       label: 'Trà sữa',
+      direction: Axis.vertical,
+    ),
+    CustomTab(
+      icon: Icons.diamond_outlined,
+      label: 'Vàng bạc',
       direction: Axis.vertical,
     ),
     CustomTab(
@@ -105,6 +111,9 @@ class _FunctionsTabState extends State<FunctionsTab>
                 connectedDevices: widget.connectedDevices,
               ),
               CupStickerTab(
+                  ipAddress: widget.ipAddress,
+                  connectedDevices: widget.connectedDevices),
+              GoldSilverLabelTab(
                   ipAddress: widget.ipAddress,
                   connectedDevices: widget.connectedDevices),
               CashDrawerTab(

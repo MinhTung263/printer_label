@@ -23,10 +23,12 @@ export 'src/enums/printer_status.dart';
 // Export components
 export 'src/component/barcode_view.dart';
 export 'src/component/cup_sticker_view.dart';
+export 'src/component/gold_silver_label_view.dart';
 
 // Export services
 export 'src/service/cup_sticker/cup_sticker_printer.dart';
 export 'src/service/cup_sticker/cup_sticker_printer_interface.dart';
+export 'src/service/gold_silver/gold_silver_label_printer.dart';
 export 'src/service/label/label_from_widget.dart';
 export 'src/service/label/label_printer_service.dart';
 export 'src/service/label/label_printer_service_interface.dart';

@@ -576,7 +576,8 @@ class _MyHomePageState extends State<MyHomePage>
                 children: [
                   Icon(Icons.devices, size: 20),
                   SizedBox(width: 8),
-                  Text("Thiết bị", style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Thiết bị",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -586,7 +587,8 @@ class _MyHomePageState extends State<MyHomePage>
                 children: [
                   Icon(Icons.print, size: 20),
                   SizedBox(width: 8),
-                  Text("Chức năng", style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Chức năng",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
