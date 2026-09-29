@@ -301,6 +301,61 @@ class PrinterLabel {
     return true;
   }
 
+  /// Bảng OUI (3 byte đầu của MAC) -> hãng máy in.
+  ///
+  /// Bản Dart của `LanPrinterProbe.getVendorFromMac` (Android). Cần ở tầng Dart vì iOS
+  /// không có `get_lan_printer_info` native (iOS 11+ chặn đọc bảng ARP), nên bảng Kotlin
+  /// không bao giờ chạy trên iPhone dù đã có MAC (lấy qua SNMP/HTTP/NetBIOS/SDK UDP).
+  /// Sửa bảng nào thì PHẢI sửa cả hai. Chỉ thêm mã đã xác nhận (registry IEEE hoặc đo từ
+  /// máy mẫu thật) — xem chú thích bên Kotlin.
+  static const Map<String, String> _ouiVendors = {
+    // Epson (Seiko Epson Corporation)
+    '000048': 'Epson', '0026AB': 'Epson', '381A52': 'Epson', '389D92': 'Epson',
+    '44D244': 'Epson', '50579C': 'Epson', '5805D9': 'Epson', '64C6D2': 'Epson',
+    '64EB8C': 'Epson', '6855D4': 'Epson', '9CAED3': 'Epson', 'A4D73C': 'Epson',
+    'A4EE57': 'Epson', 'AC1826': 'Epson', 'B0E892': 'Epson', 'BCC8CC': 'Epson',
+    'D4808B': 'Epson', 'DC83BF': 'Epson', 'DCCD2F': 'Epson', 'E0BB9E': 'Epson',
+    'F82551': 'Epson', 'F8D027': 'Epson',
+    // HPRT (Xiamen Hanin Electronic Technology)
+    '6CC147': 'HPRT',
+    // Rongta — khối /28 nên 6 hex đầu không phân biệt tuyệt đối 100%
+    '480BB2': 'Rongta',
+    // Zebra Technologies
+    '000512': 'Zebra', '00074D': 'Zebra', '001570': 'Zebra', '002368': 'Zebra',
+    '00A0F8': 'Zebra', '4083DE': 'Zebra', '488EB7': 'Zebra', '609532': 'Zebra',
+    '7493A4': 'Zebra', '78B8D6': 'Zebra', '84248D': 'Zebra', '88BCAC': 'Zebra',
+    '9075DE': 'Zebra', '94FB29': 'Zebra', 'C47DCC': 'Zebra', 'C4BB4C': 'Zebra',
+    'C81CFE': 'Zebra', 'FC597A': 'Zebra',
+    // Bixolon
+    '001594': 'Bixolon',
+    // Star Micronics
+    '001162': 'Star',
+    // Citizen (Citizen Watch Co.)
+    '000CAC': 'Citizen',
+    // Brother Industries
+    '001BA9': 'Brother', '008077': 'Brother', '30055C': 'Brother',
+    '3C2AF4': 'Brother',
+    '94DDF8': 'Brother', 'B07C8E': 'Brother', 'B42200': 'Brother',
+    // SNBC (Shandong New Beiyang)
+    '001341': 'SNBC',
+    // Godex International
+    '001D9A': 'Godex',
+    // Sunmi (Shanghai Sunmi Technology)
+    '1C1A1B': 'Sunmi', '68508C': 'Sunmi', '74F7F6': 'Sunmi', 'B81BCB': 'Sunmi',
+    // PDIT — đo từ MAC máy mẫu thật (00:1A:EF:CB:2C:B0, 2026-09-29). Registry IEEE ghi
+    // 00:1A:EF là "Loopcomm Technology, Inc." (hãng làm MODULE MẠNG, không phải PDIT):
+    // máy in hãng khác dùng module Loopcomm cũng sẽ hiện "PDIT".
+    '001AEF': 'PDIT',
+  };
+
+  /// Tra hãng máy in theo MAC (VD "00:1A:EF:CB:2C:B0" -> "PDIT"). Trả null nếu không biết.
+  static String? vendorFromMac(String? mac) {
+    if (mac == null) return null;
+    final clean = mac.replaceAll(RegExp(r'[:\-.]'), '').toUpperCase();
+    if (clean.length < 6) return null;
+    return _ouiVendors[clean.substring(0, 6)];
+  }
+
   /// Infers the printer manufacturer/brand from a model name, hostname, or raw string.
   static String? detectVendor(String modelOrText) {
     final upper = modelOrText.toUpperCase();
@@ -497,16 +552,26 @@ class PrinterLabel {
   }
 
   /// Builds a single-OID SNMP v1 GET request packet.
-  static List<int> _buildSnmpGetRequest(String oid, {int requestId = 1, String community = 'public'}) {
+  static List<int> _buildSnmpGetRequest(String oid,
+      {int requestId = 1, String community = 'public'}) {
     final oidBytes = _encodeSnmpOid(oid);
-    final oidTlv = [0x06, ..._berLength(oidBytes.length), ...oidBytes]; // OID tag
+    final oidTlv = [
+      0x06,
+      ..._berLength(oidBytes.length),
+      ...oidBytes
+    ]; // OID tag
     final nullTlv = [0x05, 0x00]; // NULL
     final vb = [...oidTlv, ...nullTlv];
     final vbSeq = [0x30, ..._berLength(vb.length), ...vb]; // SEQUENCE (VarBind)
-    final vblSeq = [0x30, ..._berLength(vbSeq.length), ...vbSeq]; // SEQUENCE (VarBindList)
+    final vblSeq = [
+      0x30,
+      ..._berLength(vbSeq.length),
+      ...vbSeq
+    ]; // SEQUENCE (VarBindList)
 
     final reqIdBytes = [
-      0x02, 0x04,
+      0x02,
+      0x04,
       (requestId >> 24) & 0xFF,
       (requestId >> 16) & 0xFF,
       (requestId >> 8) & 0xFF,
@@ -551,11 +616,13 @@ class PrinterLabel {
 
       // Version INTEGER
       if (data[i++] != 0x02) return results;
-      final verLen = readLength(data, i); i += lengthFieldSize(data, i) + verLen;
+      final verLen = readLength(data, i);
+      i += lengthFieldSize(data, i) + verLen;
 
       // Community OCTET STRING
       if (data[i++] != 0x04) return results;
-      final comLen = readLength(data, i); i += lengthFieldSize(data, i) + comLen;
+      final comLen = readLength(data, i);
+      i += lengthFieldSize(data, i) + comLen;
 
       // GetResponse PDU (0xA2)
       if (data[i++] != 0xA2) return results;
@@ -564,7 +631,8 @@ class PrinterLabel {
       // Skip reqId, errorStatus, errorIndex
       for (int skip = 0; skip < 3; skip++) {
         i++;
-        final sLen = readLength(data, i); i += lengthFieldSize(data, i) + sLen;
+        final sLen = readLength(data, i);
+        i += lengthFieldSize(data, i) + sLen;
       }
 
       // VarBindList SEQUENCE
@@ -578,12 +646,14 @@ class PrinterLabel {
 
         // OID
         if (i >= data.length || data[i++] != 0x06) break;
-        final oidLen = readLength(data, i); i += lengthFieldSize(data, i) + oidLen;
+        final oidLen = readLength(data, i);
+        i += lengthFieldSize(data, i) + oidLen;
 
         // Value
         if (i >= data.length) break;
         final valTag = data[i++];
-        final valLen = readLength(data, i); i += lengthFieldSize(data, i);
+        final valLen = readLength(data, i);
+        i += lengthFieldSize(data, i);
         if (i + valLen > data.length) break;
 
         results.add(MapEntry(valTag, data.sublist(i, i + valLen)));
@@ -598,7 +668,9 @@ class PrinterLabel {
     final results = <String>[];
     for (final entry in _parseSnmpVarBinds(data)) {
       if (entry.key != 0x04) continue;
-      final str = String.fromCharCodes(entry.value.where((b) => b >= 0x20 && b < 0x7F)).trim();
+      final str =
+          String.fromCharCodes(entry.value.where((b) => b >= 0x20 && b < 0x7F))
+              .trim();
       if (str.isNotEmpty) results.add(str);
     }
     return results;
@@ -610,8 +682,11 @@ class PrinterLabel {
     for (final entry in _parseSnmpVarBinds(data)) {
       if (entry.key != 0x04 || entry.value.length != 6) continue;
       final bytes = entry.value;
-      if (bytes.every((b) => b == 0x00) || bytes.every((b) => b == 0xFF)) continue;
-      return bytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':');
+      if (bytes.every((b) => b == 0x00) || bytes.every((b) => b == 0xFF))
+        continue;
+      return bytes
+          .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+          .join(':');
     }
     return null;
   }
@@ -650,11 +725,11 @@ class PrinterLabel {
 
       // OIDs chuẩn MIB-2, Printer MIB và Enterprise MIB của HPRT / POS
       final oids = [
-        '1.3.6.1.2.1.1.1.0',          // sysDescr.0
-        '1.3.6.1.2.1.1.5.0',          // sysName.0
-        '1.3.6.1.2.1.25.3.2.1.3.1',  // hrDeviceDescr.1
+        '1.3.6.1.2.1.1.1.0', // sysDescr.0
+        '1.3.6.1.2.1.1.5.0', // sysName.0
+        '1.3.6.1.2.1.25.3.2.1.3.1', // hrDeviceDescr.1
         '1.3.6.1.2.1.43.5.1.1.16.1', // prtGeneralPrinterName.1
-        '1.3.6.1.4.1.39165.1.1.0',    // HPRT / Hanin private enterprise OID
+        '1.3.6.1.4.1.39165.1.1.0', // HPRT / Hanin private enterprise OID
       ];
 
       final communities = ['public', 'admin', 'HPRT'];
@@ -662,7 +737,8 @@ class PrinterLabel {
       int reqId = 0x200;
       for (final comm in communities) {
         for (final oid in oids) {
-          final packet = _buildSnmpGetRequest(oid, requestId: reqId++, community: comm);
+          final packet =
+              _buildSnmpGetRequest(oid, requestId: reqId++, community: comm);
           sock.send(packet, dest, 161);
         }
       }
@@ -709,7 +785,8 @@ class PrinterLabel {
       int reqId = 0x300;
       for (final comm in communities) {
         for (final oid in oids) {
-          final packet = _buildSnmpGetRequest(oid, requestId: reqId++, community: comm);
+          final packet =
+              _buildSnmpGetRequest(oid, requestId: reqId++, community: comm);
           sock.send(packet, dest, 161);
         }
       }
@@ -741,7 +818,8 @@ class PrinterLabel {
           final dg = socket?.receive();
           if (dg == null || completer.isCompleted) return;
 
-          final text = String.fromCharCodes(dg.data.where((b) => b >= 0x20 && b < 0x7F));
+          final text =
+              String.fromCharCodes(dg.data.where((b) => b >= 0x20 && b < 0x7F));
           final vendor = detectVendor(text);
           if (vendor != null) {
             final modelMatch = RegExp(
@@ -799,7 +877,8 @@ class PrinterLabel {
           final dg = socket?.receive();
           if (dg == null || completer.isCompleted) return;
 
-          final text = String.fromCharCodes(dg.data.where((b) => b >= 0x20 && b < 0x7F));
+          final text =
+              String.fromCharCodes(dg.data.where((b) => b >= 0x20 && b < 0x7F));
           final vendor = detectVendor(text);
           if (vendor != null && vendor != 'POS' && vendor != 'Xprinter/POS') {
             final modelMatch = RegExp(
@@ -854,10 +933,13 @@ class PrinterLabel {
           if (dg == null || completer.isCompleted) return;
 
           // Parse raw bytes in mDNS response for printer information
-          final text = String.fromCharCodes(dg.data.where((b) => b >= 0x20 && b < 0x7F));
+          final text =
+              String.fromCharCodes(dg.data.where((b) => b >= 0x20 && b < 0x7F));
 
           // 1. Tìm TXT record `ty=...` hoặc `product=...` hoặc `mdl=...`
-          final match = RegExp(r'(ty|product|mdl|model|mfg)=([^\x00\r\n;]+)', caseSensitive: false).firstMatch(text);
+          final match = RegExp(r'(ty|product|mdl|model|mfg)=([^\x00\r\n;]+)',
+                  caseSensitive: false)
+              .firstMatch(text);
           if (match != null) {
             final modelStr = match.group(2)?.trim();
             if (modelStr != null && modelStr.isNotEmpty) {
@@ -894,11 +976,11 @@ class PrinterLabel {
         0x00, 0x00, // ARCOUNT
         // QNAME: _printer._tcp.local
         0x08, 0x5F, 0x70, 0x72, 0x69, 0x6E, 0x74, 0x65, 0x72, // _printer
-        0x04, 0x5F, 0x74, 0x63, 0x70,                         // _tcp
-        0x05, 0x6C, 0x6F, 0x63, 0x61, 0x6C,                   // local
-        0x00,                                                 // Null terminator
-        0x00, 0x0C,                                           // QTYPE: PTR (12)
-        0x00, 0x01,                                           // QCLASS: IN (1)
+        0x04, 0x5F, 0x74, 0x63, 0x70, // _tcp
+        0x05, 0x6C, 0x6F, 0x63, 0x61, 0x6C, // local
+        0x00, // Null terminator
+        0x00, 0x0C, // QTYPE: PTR (12)
+        0x00, 0x01, // QCLASS: IN (1)
       ];
 
       socket.send(mdnsQuery, InternetAddress(ip), 5353);
@@ -929,13 +1011,20 @@ class PrinterLabel {
       socket.listen((event) {
         if (event == RawSocketEvent.read) {
           final datagram = socket?.receive();
-          if (datagram != null && datagram.data.length > 40 && !completer.isCompleted) {
+          if (datagram != null &&
+              datagram.data.length > 40 &&
+              !completer.isCompleted) {
             final data = datagram.data;
-            final text = String.fromCharCodes(data.where((b) => (b >= 0x20 && b < 0x7F) || b == 0x00));
+            final text = String.fromCharCodes(
+                data.where((b) => (b >= 0x20 && b < 0x7F) || b == 0x00));
             final tokens = text
                 .split(RegExp(r'[\x00\s]+'))
                 .map((s) => s.trim())
-                .where((s) => s.length >= 3 && s.length <= 20 && !s.contains('WORKGROUP') && !s.contains('MSBROWSE'))
+                .where((s) =>
+                    s.length >= 3 &&
+                    s.length <= 20 &&
+                    !s.contains('WORKGROUP') &&
+                    !s.contains('MSBROWSE'))
                 .toList();
 
             for (final token in tokens) {
@@ -944,7 +1033,9 @@ class PrinterLabel {
                 return;
               }
               final vendor = detectVendor(token);
-              if (vendor != null && vendor != 'POS' && vendor != 'Xprinter/POS') {
+              if (vendor != null &&
+                  vendor != 'POS' &&
+                  vendor != 'Xprinter/POS') {
                 completer.complete(token);
                 return;
               }
@@ -1028,8 +1119,14 @@ class PrinterLabel {
       int i = 12;
       while (i < data.length) {
         final len = data[i];
-        if (len == 0) { i += 1; break; }
-        if ((len & 0xC0) == 0xC0) { i += 2; break; }
+        if (len == 0) {
+          i += 1;
+          break;
+        }
+        if ((len & 0xC0) == 0xC0) {
+          i += 2;
+          break;
+        }
         i += 1 + len;
       }
 
@@ -1044,8 +1141,11 @@ class PrinterLabel {
 
       if (i + 6 > data.length) return null;
       final macBytes = data.sublist(i, i + 6);
-      if (macBytes.every((b) => b == 0x00) || macBytes.every((b) => b == 0xFF)) return null;
-      return macBytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':');
+      if (macBytes.every((b) => b == 0x00) || macBytes.every((b) => b == 0xFF))
+        return null;
+      return macBytes
+          .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+          .join(':');
     } catch (_) {
       return null;
     }
@@ -1064,7 +1164,8 @@ class PrinterLabel {
       Socket? socket;
       try {
         socket = await Socket.connect(ip, 80, timeout: timeout);
-        socket.write("GET $path HTTP/1.1\r\nHost: $ip\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n");
+        socket.write(
+            "GET $path HTTP/1.1\r\nHost: $ip\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n");
         await socket.flush();
 
         final completer = Completer<String?>();
@@ -1077,10 +1178,14 @@ class PrinterLabel {
               final text = String.fromCharCodes(buffer);
 
               // 1. Tìm trong <title>...</title> (ví dụ: <title>HT300 Web Server</title> hoặc <title>HPRT Printer</title>)
-              final titleMatch = RegExp(r'<title[^>]*>(.*?)</title>', caseSensitive: false).firstMatch(text);
+              final titleMatch =
+                  RegExp(r'<title[^>]*>(.*?)</title>', caseSensitive: false)
+                      .firstMatch(text);
               if (titleMatch != null) {
                 final titleText = titleMatch.group(1)?.trim();
-                if (titleText != null && titleText.isNotEmpty && isSpecificModel(titleText)) {
+                if (titleText != null &&
+                    titleText.isNotEmpty &&
+                    isSpecificModel(titleText)) {
                   completer.complete(formatPrinterName(titleText));
                   return;
                 }
@@ -1096,7 +1201,9 @@ class PrinterLabel {
               final vendor = detectVendor(text);
 
               if (model != null && isSpecificModel(model)) {
-                if (vendor != null && vendor != 'Xprinter/POS' && vendor != 'POS') {
+                if (vendor != null &&
+                    vendor != 'Xprinter/POS' &&
+                    vendor != 'POS') {
                   completer.complete('${vendor}_$model');
                 } else {
                   completer.complete(formatPrinterName(model));
@@ -1104,7 +1211,9 @@ class PrinterLabel {
                 return;
               }
 
-              if (vendor != null && vendor != 'Xprinter/POS' && vendor != 'POS') {
+              if (vendor != null &&
+                  vendor != 'Xprinter/POS' &&
+                  vendor != 'POS') {
                 completer.complete(vendor);
                 return;
               }
@@ -1145,7 +1254,8 @@ class PrinterLabel {
       Socket? socket;
       try {
         socket = await Socket.connect(ip, 80, timeout: timeout);
-        socket.write("GET $path HTTP/1.1\r\nHost: $ip\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n");
+        socket.write(
+            "GET $path HTTP/1.1\r\nHost: $ip\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n");
         await socket.flush();
 
         final completer = Completer<String?>();
@@ -1156,15 +1266,16 @@ class PrinterLabel {
           onDone: () {
             if (!completer.isCompleted) {
               final text = String.fromCharCodes(buffer);
-              final macMatch =
-                  RegExp(r'([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}').firstMatch(text);
+              final macMatch = RegExp(r'([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}')
+                  .firstMatch(text);
               final raw = macMatch?.group(0);
               if (raw == null) {
                 completer.complete(null);
               } else {
                 final mac = raw.replaceAll('-', ':').toUpperCase();
                 final octets = mac.split(':');
-                final invalid = octets.every((o) => o == '00') || octets.every((o) => o == 'FF');
+                final invalid = octets.every((o) => o == '00') ||
+                    octets.every((o) => o == 'FF');
                 completer.complete(invalid ? null : mac);
               }
             }
@@ -1220,7 +1331,7 @@ class PrinterLabel {
         0x1D, 0x49, 67, // GS I 67 - Model ID
         0x1D, 0x49, 69, // GS I 69 - Manufacturer Name
         0x1D, 0x49, 66, // GS I 66 - Maker Name
-        0x1D, 0x49, 2,  // GS I 2  - Type ID
+        0x1D, 0x49, 2, // GS I 2  - Type ID
       ]);
       await socket.flush();
       await Future.delayed(const Duration(milliseconds: 250));
@@ -1309,26 +1420,32 @@ class PrinterLabel {
   }) async {
     // Chạy song song tất cả các phương thức an toàn (HOÀN TOÀN KHÔNG GỬI DỮ LIỆU TỚI PORT 9100)
     final results = await Future.wait([
-      querySnmpPrinterName(ip, timeout: const Duration(milliseconds: 700)),    // [0] SNMP
-      queryHprtUdpPrinterName(ip, timeout: const Duration(milliseconds: 500)), // [1] HPRT UDP
-      querySsdpPrinterName(ip, timeout: const Duration(milliseconds: 500)),    // [2] SSDP/UPnP
-      queryMdnsPrinterName(ip, timeout: const Duration(milliseconds: 500)),    // [3] mDNS
-      queryNetBiosName(ip, timeout: const Duration(milliseconds: 400)),        // [4] NetBIOS
-      queryHttpPrinterName(ip, timeout: const Duration(milliseconds: 500)),    // [5] HTTP
+      querySnmpPrinterName(ip,
+          timeout: const Duration(milliseconds: 700)), // [0] SNMP
+      queryHprtUdpPrinterName(ip,
+          timeout: const Duration(milliseconds: 500)), // [1] HPRT UDP
+      querySsdpPrinterName(ip,
+          timeout: const Duration(milliseconds: 500)), // [2] SSDP/UPnP
+      queryMdnsPrinterName(ip,
+          timeout: const Duration(milliseconds: 500)), // [3] mDNS
+      queryNetBiosName(ip,
+          timeout: const Duration(milliseconds: 400)), // [4] NetBIOS
+      queryHttpPrinterName(ip,
+          timeout: const Duration(milliseconds: 500)), // [5] HTTP
       InternetAddress(ip)
           .reverse()
           .timeout(const Duration(milliseconds: 300))
           .then((addr) => addr.host != ip ? addr.host : null)
-          .catchError((_) => null),                                             // [6] DNS
+          .catchError((_) => null), // [6] DNS
     ]);
 
-    final snmpName    = results[0];
+    final snmpName = results[0];
     final hprtUdpName = results[1];
-    final ssdpName    = results[2];
-    final mdnsName    = results[3];
+    final ssdpName = results[2];
+    final mdnsName = results[3];
     final netBiosName = results[4];
-    final httpName    = results[5];
-    final dnsName     = results[6];
+    final httpName = results[5];
+    final dnsName = results[6];
 
     // Ưu tiên 1: SNMP — trả về đúng tên model ghi trên nhãn máy
     if (snmpName != null && snmpName.isNotEmpty) {
@@ -1436,8 +1553,14 @@ class PrinterLabel {
           ]);
           mac ??= sdkMacByIp[ip];
 
-          final vendor = modelName != null ? detectVendor(modelName!) : null;
-          final displayName = (vendor != null && vendor.isNotEmpty) ? vendor : modelName;
+          // Không đoán được hãng từ tên model (hoặc không có tên) -> tra theo MAC.
+          // Trên iOS đây là đường DUY NHẤT nhận ra các máy không trả tên qua
+          // SNMP/mDNS/HTTP (VD PDIT), vì iOS không có bảng OUI native như Android.
+          final vendor =
+              (modelName != null ? detectVendor(modelName!) : null) ??
+                  vendorFromMac(mac);
+          final displayName =
+              (vendor != null && vendor.isNotEmpty) ? vendor : modelName;
           if (!controller.isClosed && (displayName != null || mac != null)) {
             controller.add(LanDeviceModel.fromIp(
               ip,
@@ -1523,7 +1646,7 @@ class PrinterLabel {
     if (feed) {
       // Nhích nhẹ 1 nhịp giấy (~3mm) để vừa nghe tiếng motor vừa thấy giấy nhích
       payload.addAll(utf8.encode("\r\nFEED 24\r\n")); // TSPL: feed 24 dots
-      payload.addAll([0x1B, 0x4A, 0x18]);            // ESC/POS: ESC J 24 dots
+      payload.addAll([0x1B, 0x4A, 0x18]); // ESC/POS: ESC J 24 dots
     }
 
     if (printSlip) {
@@ -1909,7 +2032,9 @@ class PrinterLabel {
     }
 
     // 2. Zebra / ZPL (máy in Zebra ZD, ZT series)
-    if (lowerVendor.contains('zebra') && currentIp != null && currentIp.isNotEmpty) {
+    if (lowerVendor.contains('zebra') &&
+        currentIp != null &&
+        currentIp.isNotEmpty) {
       try {
         final socket = await Socket.connect(
           currentIp,
@@ -1917,7 +2042,8 @@ class PrinterLabel {
           timeout: const Duration(seconds: 2),
         );
         final gw = gateway.isNotEmpty ? gateway : '192.168.1.1';
-        final cmd = dhcp ? '^XA^ND2,D^NRE^XZ' : '^XA^ND2,Z,$ip,$mask,$gw^NRE^XZ';
+        final cmd =
+            dhcp ? '^XA^ND2,D^NRE^XZ' : '^XA^ND2,Z,$ip,$mask,$gw^NRE^XZ';
         socket.add(utf8.encode(cmd));
         await socket.flush();
         socket.destroy();

@@ -142,6 +142,11 @@ object LanPrinterProbe {
             prefix6.startsWith("74F7F6") ||
             prefix6.startsWith("B81BCB") -> "Sunmi"
 
+            // PDIT — đo từ MAC máy mẫu thật (00:1A:EF:CB:2C:B0, 2026-09-29). Registry
+            // IEEE ghi 00:1A:EF là "Loopcomm Technology, Inc." — hãng làm MODULE MẠNG,
+            // không phải PDIT. Máy in hãng khác dùng module Loopcomm cũng sẽ hiện "PDIT".
+            prefix6.startsWith("001AEF") -> "PDIT"
+
             else -> null
         }
     }
