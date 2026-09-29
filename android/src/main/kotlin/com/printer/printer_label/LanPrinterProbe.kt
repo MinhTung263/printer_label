@@ -46,6 +46,14 @@ object LanPrinterProbe {
         return null
     }
 
+    /// Bảng OUI dưới đây được đối chiếu trực tiếp với database IEEE/Wireshark
+    /// (wireshark.org/download/automated/data/manuf, tra cứu 2026-09-03) — CHỈ
+    /// giữ mã đã xác nhận đúng thật. Bảng cũ trước đây tự chế/nhớ nhầm gần 90% mã
+    /// (ví dụ nhóm "HPRT"/"Xprinter" cũ thực ra trỏ sang Xiaomi, Espressif,
+    /// Nokia...), gây nhận diện sai hàng loạt thiết bị không phải máy in. Xprinter
+    /// và TSC không có trong danh sách vì KHÔNG đăng ký OUI riêng dưới tên hãng
+    /// (dùng module Wi-Fi/Ethernet của bên thứ ba) — để trống thay vì suy đoán;
+    /// muốn thêm phải đo MAC thật từ máy mẫu, không tra ngược từ trí nhớ.
     fun getVendorFromMac(mac: String?): String? {
         if (mac == null) return null
         val clean = mac.replace(":", "").replace("-", "").uppercase()
@@ -53,76 +61,86 @@ object LanPrinterProbe {
         val prefix6 = clean.substring(0, 6)
 
         return when {
-            // HPRT (Hanin)
-            prefix6.startsWith("50EC50") ||
-            prefix6.startsWith("3C9180") ||
-            prefix6.startsWith("84F3EB") ||
-            prefix6.startsWith("E04F43") ||
-            prefix6.startsWith("C89346") ||
-            prefix6.startsWith("AC67B2") ||
-            prefix6.startsWith("4887B2") ||
-            prefix6.startsWith("D8B04C") ||
-            prefix6.startsWith("F835DD") -> "HPRT"
-
-            // Xprinter & POS
-            prefix6.startsWith("001BEE") ||
-            prefix6.startsWith("000C43") ||
-            prefix6.startsWith("08EA44") ||
-            prefix6.startsWith("A09208") ||
-            prefix6.startsWith("0008DC") ||
-            prefix6.startsWith("001AB6") ||
-            prefix6.startsWith("18FE34") ||
-            prefix6.startsWith("B4E62D") ||
-            prefix6.startsWith("ECFABC") ||
-            prefix6.startsWith("240AC4") ||
-            prefix6.startsWith("807D3A") ||
-            prefix6.startsWith("68C63A") -> "Xprinter"
-
-            // Epson
-            prefix6.startsWith("0026AB") ||
+            // Epson (Seiko Epson Corporation)
             prefix6.startsWith("000048") ||
-            prefix6.startsWith("0021B7") ||
-            prefix6.startsWith("ACD1B8") ||
-            prefix6.startsWith("64EB8C") -> "Epson"
+            prefix6.startsWith("0026AB") ||
+            prefix6.startsWith("381A52") ||
+            prefix6.startsWith("389D92") ||
+            prefix6.startsWith("44D244") ||
+            prefix6.startsWith("50579C") ||
+            prefix6.startsWith("5805D9") ||
+            prefix6.startsWith("64C6D2") ||
+            prefix6.startsWith("64EB8C") ||
+            prefix6.startsWith("6855D4") ||
+            prefix6.startsWith("9CAED3") ||
+            prefix6.startsWith("A4D73C") ||
+            prefix6.startsWith("A4EE57") ||
+            prefix6.startsWith("AC1826") ||
+            prefix6.startsWith("B0E892") ||
+            prefix6.startsWith("BCC8CC") ||
+            prefix6.startsWith("D4808B") ||
+            prefix6.startsWith("DC83BF") ||
+            prefix6.startsWith("DCCD2F") ||
+            prefix6.startsWith("E0BB9E") ||
+            prefix6.startsWith("F82551") ||
+            prefix6.startsWith("F8D027") -> "Epson"
 
-            // TSC & Gaincha
-            prefix6.startsWith("001B67") ||
-            prefix6.startsWith("002655") -> "TSC"
+            // HPRT (Xiamen Hanin Electronic Technology)
+            prefix6.startsWith("6CC147") -> "HPRT"
 
-            // Rongta
-            prefix6.startsWith("00115B") ||
-            prefix6.startsWith("2C2617") -> "Rongta"
+            // Rongta (Xiamen Rongta Technology) — mã duy nhất hãng này có trong
+            // registry; là khối /28 nên 6 hex đầu không phân biệt tuyệt đối 100%
+            prefix6.startsWith("480BB2") -> "Rongta"
 
-            // Zebra
+            // Zebra Technologies
+            prefix6.startsWith("000512") ||
             prefix6.startsWith("00074D") ||
-            prefix6.startsWith("001D92") ||
-            prefix6.startsWith("00059A") ||
-            prefix6.startsWith("AC3FA4") -> "Zebra"
+            prefix6.startsWith("001570") ||
+            prefix6.startsWith("002368") ||
+            prefix6.startsWith("00A0F8") ||
+            prefix6.startsWith("4083DE") ||
+            prefix6.startsWith("488EB7") ||
+            prefix6.startsWith("609532") ||
+            prefix6.startsWith("7493A4") ||
+            prefix6.startsWith("78B8D6") ||
+            prefix6.startsWith("84248D") ||
+            prefix6.startsWith("88BCAC") ||
+            prefix6.startsWith("9075DE") ||
+            prefix6.startsWith("94FB29") ||
+            prefix6.startsWith("C47DCC") ||
+            prefix6.startsWith("C4BB4C") ||
+            prefix6.startsWith("C81CFE") ||
+            prefix6.startsWith("FC597A") -> "Zebra"
 
             // Bixolon
-            prefix6.startsWith("001599") -> "Bixolon"
+            prefix6.startsWith("001594") -> "Bixolon"
 
             // Star Micronics
             prefix6.startsWith("001162") -> "Star"
 
-            // Citizen
-            prefix6.startsWith("0012F0") || prefix6.startsWith("001E8C") -> "Citizen"
+            // Citizen (Citizen Watch Co. — công ty mẹ, dùng chung khối OUI)
+            prefix6.startsWith("000CAC") -> "Citizen"
 
-            // Brother
-            prefix6.startsWith("008077") -> "Brother"
+            // Brother Industries
+            prefix6.startsWith("001BA9") ||
+            prefix6.startsWith("008077") ||
+            prefix6.startsWith("30055C") ||
+            prefix6.startsWith("3C2AF4") ||
+            prefix6.startsWith("94DDF8") ||
+            prefix6.startsWith("B07C8E") ||
+            prefix6.startsWith("B42200") -> "Brother"
 
-            // SNBC & Beiyang
-            prefix6.startsWith("001EAC") -> "SNBC"
+            // SNBC (Shandong New Beiyang Information Technology)
+            prefix6.startsWith("001341") -> "SNBC"
 
-            // Godex
-            prefix6.startsWith("001882") -> "Godex"
+            // Godex International
+            prefix6.startsWith("001D9A") -> "Godex"
 
-            // Sunmi
-            prefix6.startsWith("38A28C") ||
-            prefix6.startsWith("D4619D") ||
-            prefix6.startsWith("B0D59D") ||
-            prefix6.startsWith("04E2B9") ||
-            prefix6.startsWith("58B035") -> "Sunmi"
+            // Sunmi (Shanghai Sunmi Technology)
+            prefix6.startsWith("1C1A1B") ||
+            prefix6.startsWith("68508C") ||
+            prefix6.startsWith("74F7F6") ||
+            prefix6.startsWith("B81BCB") -> "Sunmi"
 
             else -> null
         }

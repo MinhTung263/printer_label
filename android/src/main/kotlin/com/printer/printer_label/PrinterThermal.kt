@@ -12,6 +12,8 @@ import net.posprinter.POSConnect
 import net.posprinter.POSConst
 import net.posprinter.POSPrinter
 
+/// Lớp tiện ích in nhiệt (ESC/POS) cho Flutter plugin.
+/// build và gửi lệnh ESC/POS
 class PrinterThermal {
     companion object {
         // Khóa gửi RIÊNG cho TỪNG máy in (theo đối tượng IDeviceConnection).
@@ -286,6 +288,10 @@ class PrinterThermal {
                 synchronized(lockFor(curConnect)) {
                     if (isBluetooth && !isTargetBuiltIn) {
                         // Cấu hình vừa tầm cân bằng cho máy in Bluetooth ngoài: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
+                        // chunkSize, Thread.sleep và khoảng nghỉ giữa các gói quyết định: tốc độ in, độ ổn định (lỗi hay không - mất byte), 
+                        // độ mượt (có bị giật hay không). 
+                        //Thử nhiều lần với các máy in khác nhau, 120/4/1500/80 là cấu hình vừa đủ nhanh vừa ổn định. 
+                        //- các máy có bộ đệm cao có thể chậm - đánh đổi độ ổn định cho máy in có bộ đệm thấp
                         val chunkSize = 120
                         var offset = 0
                         var bytesSentInBlock = 0

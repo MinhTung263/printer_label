@@ -41,6 +41,8 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         }
     }
 
+    // Lấy các thiết bị ble đã từng ghép nối 
+    // kết hớp với blueetoothScanStream (quét sóng usb thật sự) để hiển thị danh sách máy in cho người dùng chọn
     internal fun getBluetoothAdapter(): BluetoothAdapter? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
             (plugin.mContext?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -73,6 +75,8 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         }
     }
 
+    // Kiểm tra xem thiết bị Bluetooth có phải là máy in hay không dựa trên tên thiết bị
+    // kiểm tra theo danh sách từ khóa dài và tiền tố ngắn, cũng như các từ khóa "InnerPrinter" và "Printer"
     internal fun isPrinter(device: BluetoothDevice): Boolean {
         try {
             val name = device.name ?: ""

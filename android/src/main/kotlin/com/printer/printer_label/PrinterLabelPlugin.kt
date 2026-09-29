@@ -93,11 +93,9 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     // Pending connect state — keyed by deviceId so parallel connects don't clash
-    //
-    // [results] là danh sách vì nhiều lệnh connect cùng deviceId có thể chồng nhau
-    // (VD Future.wait kiểm tra nhiều máy in song song). Tất cả phải nhận cùng một kết
-    // quả; nếu chỉ giữ một result thì lệnh bị ghi đè sẽ treo tới timeout, và timeout
-    // handler đóng luôn kết nối vừa thành công.
+    // xử lý trường hợp người dùng connect từ 2 máy in ble cùng lúc
+    // thay vì chỉ chờ 1 result, ta chờ nhiều result trong cùng 1 tiến trình kết nối
+    // để không phá vỡ tiến trình connect đang chạy
     internal data class PendingConnect(
         val results: MutableList<Result>,
         val type: ConnectionType,
@@ -905,8 +903,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
      * `handleUsbDeviceAttached` (broadcast lúc cắm dây) và `connectUsb` (Dart gọi
      * khi bấm in) đều có thể chạy tới đây gần như đồng thời ở lần cắm USB đầu
      * tiên. Không chặn trùng thì `usbManager.requestPermission()` bị gọi 2 lần,
-     * Android hiện dialog xin quyền lặp/che nhau — mỗi lần dialog che app đều
-     * khiến app mất foreground ("Application backgrounded" trong log) và kéo
+     * Android hiện dialog xin quyền lặp/che nhau — mlication backgrounded" trong log) và ỗi lần dialog che app đều
+     * khiến app mất foreground ("Appkéo
      * theo hệ điều hành đóng USB session đang mở (`UsbDeviceConnectionJNI
      * close`). Kết nối dựng ngay sau đó thất bại ngay ở gói đầu tiên vì session
      * USB vừa bị xáo trộn — không phải "chưa kịp sẵn sàng" nên retry gửi lại
@@ -1489,7 +1487,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     companion object {
         internal const val REQUEST_PERMISSIONS_CODE = 1002
         private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"
-        private const val CONNECT_TIMEOUT_MS = 5_000L
+        private const val CONNECT_TIMEOUT_MS = 3_000L
 
         /** A no-op Result used for fire-and-forget connects (e.g. USB auto-attach). */
         private val NoOpResult = object : Result {
