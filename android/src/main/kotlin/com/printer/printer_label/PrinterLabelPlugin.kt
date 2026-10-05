@@ -77,7 +77,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     // Updated each time the device is attached so rawId() always has the current path.
     private val usbDevicePaths = mutableMapOf<String, String>()
 
-    // deviceId đang có dialog xin quyền USB CHỜ người dùng phản hồi.
+    // deviceName (đường dẫn /dev/bus/usb/...) của các máy đang xếp hàng / đang có
+    // dialog xin quyền USB CHỜ người dùng phản hồi.
     //
     // `handleUsbDeviceAttached` (broadcast ATTACHED lúc cắm dây) và `connectUsb`
     // (Dart gọi khi bấm in) đều có thể tự `requestPermission()` độc lập cho CÙNG
@@ -140,6 +141,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         flutterPluginBinding.applicationContext.registerReceiver(usbReceiver, filter)
         registerUsbPermissionReceiver()
+        synchronized(Companion) { if (usbOwner == null) usbOwner = this }
     }
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
@@ -154,6 +156,45 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         pendingConnects.clear()
         runCatching { binding.applicationContext.unregisterReceiver(usbReceiver) }
         runCatching { binding.applicationContext.unregisterReceiver(permissionReceiver) }
+        synchronized(Companion) { if (usbOwner === this) usbOwner = null }
+    }
+
+    /**
+     * Plugin có thể bị tạo NHIỀU instance trong cùng process: mỗi `FlutterEngine` tự
+     * đăng ký lại mọi plugin, VD `dual_screen_view` dựng engine riêng cho màn hình phụ.
+     * Nếu instance nào cũng tự kết nối khi cắm USB / khởi động, thì mỗi máy in bị xin
+     * quyền nhiều lần (popup lặp lại) và 2 instance cùng mở rồi đóng kết nối của nhau
+     * trên cùng một máy in (in chập chờn). Chỉ MỘT instance ("owner") được tự kết nối;
+     * instance khác chỉ kết nối khi chính Dart của nó gọi `connectUsb`.
+     *
+     * Owner = instance có Dart nghe `usbDeviceStream` GẦN NHẤT (xem [takeUsbOwnership]),
+     * KHÔNG phải instance đăng ký đầu tiên: khi app được tích "Luôn mở ... khi kết nối",
+     * cắm máy in vào là Android mở `MainActivity` bằng intent USB_DEVICE_ATTACHED — nếu
+     * việc đó dựng MainActivity + FlutterEngine MỚI thì UI đang hiện thuộc engine mới.
+     * Giữ owner là engine cũ thì sự kiện "USB connected" bắn vào stream của engine cũ,
+     * engine mới không nhận được -> không hiện màn tạo máy in.
+     */
+    private val isUsbOwner: Boolean get() = usbOwner === this
+
+    private fun takeUsbOwnership() {
+        val previous = synchronized(Companion) {
+            usbOwner.also { usbOwner = this }
+        }
+        if (previous != null && previous !== this) previous.releaseUsbConnections()
+    }
+
+    /** Nhả kết nối USB khi instance khác thành owner, tránh 2 instance cùng giữ 1 máy in. */
+    private fun releaseUsbConnections() {
+        connectionTypes.filterValues { it == ConnectionType.USB }.keys.forEach { id ->
+            runCatching { connections[id]?.close() }
+            connections.remove(id)
+            connectionTypes.remove(id)
+            pendingConnects.remove(id)?.complete(false)
+        }
+        permissionQueue.clear()
+        pendingPermissionRequests.clear()
+        permissionWaiters.clear()
+        permissionInFlight = null
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -451,9 +492,27 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     }
 
     /** Build a per-device IConnectListener so parallel connects don't race. */
-    internal fun makeConnectListener(deviceId: String): IConnectListener =
+    /**
+     * [owner]: kết nối mà listener này thuộc về. Khi truyền vào, các sự kiện của một
+     * kết nối CŨ (đã bị thay bằng kết nối mới cùng deviceId) bị bỏ qua.
+     *
+     * Lúc kết nối lại USB, `tryConnectWithDelay` `close()` kết nối cũ rồi gán kết nối
+     * mới vào `connections[deviceId]`. Callback CONNECT_INTERRUPT/USB_DETACHED của kết
+     * nối cũ tới SAU đó và trước đây xoá nhầm `connections`/`pendingConnects` của kết
+     * nối MỚI -> CONNECT_SUCCESS của kết nối mới không còn pending nên không phát sự
+     * kiện USB connected, app không hiện màn tạo máy in (VD xoá máy in rồi cắm lại).
+     */
+    internal fun makeConnectListener(
+        deviceId: String,
+        owner: (() -> IDeviceConnection?)? = null
+    ): IConnectListener =
         IConnectListener { code, _, _ ->
             val isBuiltIn = isBuiltInPrinter()
+            val ownerConn = owner?.invoke()
+            if (ownerConn != null && connections[deviceId] !== ownerConn) {
+                Log.d("USB_CONNECT", "Bỏ qua sự kiện $code của kết nối cũ [$deviceId]")
+                return@IConnectListener
+            }
 
             when (code) {
                 POSConnect.CONNECT_SUCCESS -> {
@@ -468,9 +527,13 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thành công!")
                     }
-                    if (pending?.type == ConnectionType.USB) emitUsbEvent(deviceId, true)
+                    // Không chỉ dựa vào `pending`: pending có thể đã bị lấy mất (kết nối
+                    // song song, timeout...) nhưng kết nối USB này vẫn thành công thật.
+                    val isUsb = pending?.type == ConnectionType.USB ||
+                        connectionTypes[deviceId] == ConnectionType.USB
+                    if (isUsb) emitUsbEvent(deviceId, true)
 
-                    if (pending?.type == ConnectionType.USB) {
+                    if (isUsb) {
                         // USB: SDK báo CONNECT_SUCCESS đôi khi TRƯỚC KHI driver thực sự
                         // sẵn sàng nhận ghi (lần in đầu ngay sau connect hay bị "sendSync
                         // trả -1 tại byte 0" — xem PrinterThermal.sendAllSync). Callback
@@ -593,16 +656,37 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         if (deviceId.startsWith("USB:")) usbDevicePaths[deviceId] ?: deviceId.substringAfter(':')
         else deviceId.substringAfter(':')
 
+    // Serial đã đọc được, theo đường dẫn thiết bị (/dev/bus/usb/...). Từ Android 10,
+    // `serialNumber` ném SecurityException khi app CHƯA có quyền USB (và cả lúc thiết
+    // bị vừa rút ra), nên nếu không nhớ lại thì id của cùng một máy in sẽ đổi từ
+    // `USB:v_p` (trước khi cấp quyền / lúc DETACHED) sang `USB:v_p_s<serial>` (sau khi cấp).
+    private val usbSerialByPath = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun usbModelId(device: UsbDevice): String =
+        "USB:v${device.vendorId}_p${device.productId}"
+
     private fun stableUsbId(device: UsbDevice): String {
-        val serial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1)
-            runCatching { device.serialNumber }.getOrNull() else null
-        return if (!serial.isNullOrBlank())
-            "USB:v${device.vendorId}_p${device.productId}_s$serial"
-        else
-            "USB:v${device.vendorId}_p${device.productId}"
+        val serial = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1)
+            runCatching { device.serialNumber }.getOrNull() else null)
+            ?.takeIf { it.isNotBlank() }
+            ?.also { usbSerialByPath[device.deviceName] = it }
+            ?: usbSerialByPath[device.deviceName]
+        return if (!serial.isNullOrBlank()) "${usbModelId(device)}_s$serial"
+        else usbModelId(device)
     }
 
-    internal fun scheduleConnectTimeout(deviceId: String) {
+    /**
+     * [deviceId] đã lưu có thể thuộc về [device] không? Khớp chính xác, hoặc — khi
+     * chưa có quyền nên chưa đọc được serial — cùng vendor/product id.
+     */
+    private fun usbMayMatch(device: UsbDevice, deviceId: String): Boolean {
+        val id = stableUsbId(device)
+        if (id == deviceId) return true
+        val model = usbModelId(device)
+        return id == model && (deviceId == model || deviceId.startsWith("${model}_s"))
+    }
+
+    internal fun scheduleConnectTimeout(deviceId: String, timeoutMs: Long = CONNECT_TIMEOUT_MS) {
         Handler(Looper.getMainLooper()).postDelayed({
             if (isDetached) return@postDelayed
 
@@ -620,7 +704,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             if (!isBuiltInPrinter()) {
                 toast("Kết nối $deviceId hết thời gian chờ")
             }
-        }, CONNECT_TIMEOUT_MS)
+        }, timeoutMs)
     }
 
     // ─── Máy in LAN dùng chung nhiều thiết bị ────────────────────────────────
@@ -644,6 +728,27 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     private val lanRetryBaseDelayMs = 400L
     private val lanMaxAttempts = 4
 
+    /// Hết giờ (mạng yếu/mất, máy in tắt) chỉ thử lại 1 lần: mỗi lượt đã tự gửi SYN nhiều
+    /// lần trong LanSocketConnection.CONNECT_TIMEOUT_MS, thử tiếp chỉ làm người dùng chờ
+    /// lâu hơn. "Máy in bận" (từ chối/reset) mới đáng thử đủ lanMaxAttempts.
+    private val lanMaxTimeoutAttempts = 2
+
+    /// Lý do kết nối LAN thất bại gần nhất theo IP — để báo lỗi đúng nguyên nhân cho Dart.
+    internal val lanLastFailure = java.util.concurrent.ConcurrentHashMap<String, LanSocketConnection.Failure>()
+
+    /// Thông báo lỗi dễ hiểu theo lý do thất bại gần nhất của [ip].
+    internal fun lanFailureMessage(ip: String): String = when (lanLastFailure[ip]) {
+        LanSocketConnection.Failure.TIMEOUT ->
+            "LAN_TIMEOUT: Không tới được máy in $ip (mạng yếu/mất hoặc máy in đang tắt)"
+        LanSocketConnection.Failure.BUSY ->
+            "LAN_BUSY: Máy in $ip đang bận (thiết bị khác đang in), thử lại sau ít giây"
+        LanSocketConnection.Failure.UNREACHABLE ->
+            "LAN_UNREACHABLE: Thiết bị không cùng mạng với máy in $ip (kiểm tra Wi-Fi)"
+        LanSocketConnection.Failure.SEND_FAILED ->
+            "LAN_SEND_FAILED: Mất kết nối tới máy in $ip khi đang gửi"
+        else -> "No connected printer found"
+    }
+
     /// Mở lại kết nối LAN tới [ipAddress] và CHỜ kết quả (đang ở luồng nền khi in).
     /// Thử lại có giãn nhịp: máy in đang in cho thiết bị khác sẽ từ chối kết nối, chờ
     /// một nhịp rồi thử lại thay vì báo lỗi ngay như thể máy in offline.
@@ -657,50 +762,56 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         // đang đợi, IConnectListener của nó không bao giờ được gọi -> báo "connect time
         // out"; rồi scheduleConnectTimeout đóng luôn socket giữa lúc đang in -> KHÔNG IN RA.
         // Chờ lệnh của người dùng xong rồi dùng kết quả đó.
-        val pendingDeadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
+        val pendingDeadline = System.currentTimeMillis() + LAN_CONNECT_TIMEOUT_MS
         while (pendingConnects.containsKey(deviceId) && System.currentTimeMillis() < pendingDeadline) {
             runCatching { Thread.sleep(50) }
             if (isConnectionActive(deviceId)) return connections[deviceId]
         }
 
+        var timeouts = 0
         for (attempt in 1..lanMaxAttempts) {
             // Người dùng bấm Connect xen vào giữa các lần thử → nhường cho lệnh đó.
             if (pendingConnects.containsKey(deviceId)) return null
 
-            val latch = java.util.concurrent.CountDownLatch(1)
-            val ok = java.util.concurrent.atomic.AtomicBoolean(false)
-
-            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET)
-            if (device == null) {
-                Log.w("PRINTER_LOG", "Không tạo được device LAN cho $ipAddress")
-                return null
-            }
+            // Socket tự quản thay cho cổng Ethernet của SDK (SDK chỉ chờ 1s, bóp buffer
+            // 512 byte, ghi không timeout) — xem LanSocketConnection.
+            val device = LanSocketConnection(mContext)
             // Chỉ đóng device CŨ sau khi đã tạo được device mới, và chỉ đóng đúng cái ta
             // đang thay thế — tránh đóng kết nối mà luồng khác vừa mở xong.
             val previous = connections.put(deviceId, device)
             if (previous != null && previous !== device) runCatching { previous.close() }
             connectionTypes[deviceId] = ConnectionType.LAN
-            runCatching {
-                device.connect(ipAddress, IConnectListener { code, _, _ ->
-                    if (code == POSConnect.CONNECT_SUCCESS) ok.set(true)
-                    latch.countDown()
-                })
-            }.onFailure { latch.countDown() }
+            // connectSync: chặn ngay luồng nền này, KHÔNG cần main thread báo kết quả (bản
+            // cũ chờ listener của SDK — vốn được post lên main — nên gọi từ main là treo tới
+            // hết timeout). Tự giới hạn bởi LanSocketConnection.CONNECT_TIMEOUT_MS.
+            val connected = runCatching {
+                device.connectSync(ipAddress, IConnectListener { _, _, _ -> })
+            }.getOrDefault(false)
+            if (connected && device.isConnect) {
+                lanLastFailure.remove(ipAddress)
+                return device
+            }
 
-            latch.await(CONNECT_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (ok.get() && device.isConnect) return device
-
+            val failure = device.lastFailure ?: LanSocketConnection.Failure.TIMEOUT
+            lanLastFailure[ipAddress] = failure
             runCatching { device.close() }
             // remove() có điều kiện: nếu luồng khác đã thay device khác vào thì giữ nguyên.
             connections.remove(deviceId, device)
+
+            // Không cùng mạng / Wi-Fi rớt: thử lại vô ích, báo ngay.
+            if (failure == LanSocketConnection.Failure.UNREACHABLE) break
+            if (failure == LanSocketConnection.Failure.TIMEOUT && ++timeouts >= lanMaxTimeoutAttempts) break
+
             if (attempt < lanMaxAttempts) {
-                // Giãn dần 0.4s, 0.8s, 1.6s — nhường socket cho thiết bị đang in xong.
-                val delay = lanRetryBaseDelayMs shl (attempt - 1)
-                Log.i("PRINTER_LOG", "Máy in $ipAddress đang bận, thử lại sau ${delay}ms (lần ${attempt + 1}/$lanMaxAttempts)")
+                // Giãn dần 0.4s, 0.8s, 1.6s (±25% ngẫu nhiên để hai thiết bị cùng chờ một
+                // máy in không thử lại đúng cùng nhịp) — nhường socket cho thiết bị đang in.
+                val base = lanRetryBaseDelayMs shl (attempt - 1)
+                val delay = (base * (0.75 + Math.random() * 0.5)).toLong()
+                Log.i("PRINTER_LOG", "Máy in $ipAddress chưa kết nối được ($failure), thử lại sau ${delay}ms (lần ${attempt + 1}/$lanMaxAttempts)")
                 runCatching { Thread.sleep(delay) }
             }
         }
-        Log.w("PRINTER_LOG", "Không kết nối được máy in LAN $ipAddress sau $lanMaxAttempts lần thử")
+        Log.w("PRINTER_LOG", "Không kết nối được máy in LAN $ipAddress: ${lanFailureMessage(ipAddress)}")
         return null
     }
 
@@ -836,11 +947,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 return
             }
 
-            val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_ETHERNET) ?: run {
-                pendingConnects.remove(deviceId)
-                result.error("CREATE_DEVICE_FAIL", "Cannot create device", null)
-                return
-            }
+            // Socket tự quản thay cho cổng Ethernet của SDK — xem LanSocketConnection.
+            val device = LanSocketConnection(mContext)
             // Đóng device CŨ chỉ sau khi đã có device mới, và chỉ đúng cái đang bị thay —
             // close() trước khi tạo sẽ đóng cả kết nối mà luồng in khác vừa mở xong.
             val previousDevice = connections.put(deviceId, device)
@@ -849,7 +957,9 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             }
             connectionTypes[deviceId] = ConnectionType.LAN
             device.connect(ipAddress, makeConnectListener(deviceId))
-            scheduleConnectTimeout(deviceId)
+            // Lớp chờ ngoài PHẢI dài hơn timeout connect bên trong, nếu không nó đóng socket
+            // khi đang bắt tay dở.
+            scheduleConnectTimeout(deviceId, LAN_CONNECT_TIMEOUT_MS)
         } catch (e: Exception) {
             connections.remove(deviceId)
             connectionTypes.remove(deviceId)
@@ -874,8 +984,14 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             result.success(true)
             return
         }
-        val device = usbManager.deviceList.values.find { stableUsbId(it) == deviceId }
-        if (device == null) {
+        val attached = usbManager.deviceList.values
+        val device = attached.find { stableUsbId(it) == deviceId }
+        // Không khớp chính xác: có thể máy in vẫn cắm nhưng CHƯA có quyền (VD vừa bật
+        // lại nguồn) nên chưa đọc được serial -> id hiện tại thiếu `_s<serial>`. Xin quyền
+        // cho các máy cùng vendor/product rồi mới biết máy nào đúng là [deviceId].
+        val candidates = if (device != null) emptyList()
+            else attached.filter { !usbManager.hasPermission(it) && usbMayMatch(it, deviceId) }
+        if (device == null && candidates.isEmpty()) {
             result.success(false)
             return
         }
@@ -886,43 +1002,191 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         )
         if (existing != null) {
             synchronized(existing.results) { existing.results.add(result) }
-            return
         }
 
-        if (usbManager.hasPermission(device)) {
-            tryConnectWithDelay(device, 0)
-        } else {
-            requestUsbPermissionOnce(device)
+        if (device != null) {
+            if (existing != null) return
+            if (usbManager.hasPermission(device)) {
+                tryConnectWithDelay(device, 0)
+            } else {
+                requestUsbPermissionOnce(device)
+            }
+            return
+        }
+        for (candidate in candidates) {
+            permissionWaiters[candidate.deviceName] = deviceId
+            requestUsbPermissionOnce(candidate)
         }
     }
 
     /**
-     * Xin quyền USB cho [device], nhưng CHỈ MỘT dialog cho mỗi deviceId tại một
+     * Xin quyền USB cho [device], nhưng CHỈ MỘT dialog cho mỗi máy tại một
      * thời điểm — dùng [pendingPermissionRequests] để chặn lời gọi trùng.
      *
      * `handleUsbDeviceAttached` (broadcast lúc cắm dây) và `connectUsb` (Dart gọi
      * khi bấm in) đều có thể chạy tới đây gần như đồng thời ở lần cắm USB đầu
      * tiên. Không chặn trùng thì `usbManager.requestPermission()` bị gọi 2 lần,
-     * Android hiện dialog xin quyền lặp/che nhau — mlication backgrounded" trong log) và ỗi lần dialog che app đều
-     * khiến app mất foreground ("Appkéo
+     * Android hiện dialog xin quyền lặp/che nhau — mỗi lần dialog che app đều
+     * khiến app mất foreground ("Application backgrounded" trong log) và kéo
      * theo hệ điều hành đóng USB session đang mở (`UsbDeviceConnectionJNI
      * close`). Kết nối dựng ngay sau đó thất bại ngay ở gói đầu tiên vì session
      * USB vừa bị xáo trộn — không phải "chưa kịp sẵn sàng" nên retry gửi lại
      * không cứu được.
+     *
+     * Khoá theo `device.deviceName` (đường dẫn /dev/bus/usb/...), KHÔNG theo
+     * [stableUsbId]: id đó đổi ngay khi được cấp quyền (đọc được serial), nên khoá
+     * theo id thì lúc nhận kết quả sẽ xoá nhầm khoá, máy kẹt "đang xin quyền" mãi.
+     * Ngoài ra các máy KHÁC NHAU cũng phải xin LẦN LƯỢT (xem [permissionQueue]).
      */
     private fun requestUsbPermissionOnce(device: UsbDevice) {
-        val deviceId = stableUsbId(device)
-        if (!pendingPermissionRequests.add(deviceId)) return
+        if (!pendingPermissionRequests.add(device.deviceName)) return
+        permissionQueue.addLast(device)
+        pumpPermissionQueue()
+    }
 
+    // Hàng đợi xin quyền USB — chỉ chạy trên main thread (broadcast receiver,
+    // method channel, EventChannel.onListen đều ở main thread).
+    //
+    // Android chỉ hiện ĐƯỢC MỘT dialog xin quyền USB tại một thời điểm: gọi
+    // `requestPermission()` cho máy B khi dialog của máy A còn đang mở thì hệ
+    // thống chỉ đưa activity dialog cũ lên trước, lời xin của B bị NUỐT IM LẶNG —
+    // không hiện dialog, cũng không bao giờ bắn broadcast kết quả. Hậu quả cũ: sau
+    // khi bật lại máy (quyền USB tạm bị xoá), auto-scan xin quyền cho mọi máy in
+    // cùng lúc -> chỉ 1 dialog hiện; các máy còn lại kẹt mãi trong
+    // [pendingPermissionRequests] nên kể cả bấm in (`connectUsb`) cũng không xin
+    // lại được, phải rút/cắm lại dây mới hết. Vì vậy xin lần lượt: chờ kết quả
+    // máy trước (đồng ý/từ chối/rút dây) rồi mới xin máy sau.
+    private val permissionQueue = ArrayDeque<UsbDevice>()
+    private var permissionInFlight: String? = null  // deviceName
+
+    // deviceName của máy đang xin quyền hộ `connectUsb` -> deviceId Dart đang chờ.
+    // Chỉ dùng khi chưa biết chắc máy nào là [deviceId] (xem `connectUsb`).
+    private val permissionWaiters = mutableMapOf<String, String>()
+
+    private fun pumpPermissionQueue() {
+        if (permissionInFlight != null) return
+        while (permissionQueue.isNotEmpty()) {
+            val device = permissionQueue.removeFirst()
+            val path = device.deviceName
+            // Đã rút dây trong lúc xếp hàng.
+            if (usbManager.deviceList.values.none { it.deviceName == path }) {
+                pendingPermissionRequests.remove(path)
+                continue
+            }
+            // Quyền đã có sẵn (VD người dùng đã tick "Luôn mở Easy Pos..." ở dialog
+            // trước, hoặc hệ thống tự cấp qua intent-filter USB_DEVICE_ATTACHED).
+            if (usbManager.hasPermission(device)) {
+                onUsbPermissionResult(device, granted = true)
+                continue
+            }
+            // Máy vừa cắm / vừa bật lại nguồn: chờ hệ thống tự cấp quyền cho app mặc
+            // định (xem [USB_SYSTEM_GRANT_WAIT_MS]) rồi mới hiện dialog.
+            val waitMs = systemGrantWaitMs(path)
+            if (waitMs > 0) {
+                permissionQueue.addFirst(device)
+                if (!systemGrantWaitScheduled) {
+                    systemGrantWaitScheduled = true
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        systemGrantWaitScheduled = false
+                        if (!isDetached) pumpPermissionQueue()
+                    }, waitMs)
+                }
+                return
+            }
+
+            permissionInFlight = path
+            permissionBatchIndex++
+            val total = permissionBatchIndex + permissionQueue.size
+            // Các máy in cùng model hiện dialog Y HỆT nhau ("...truy cập vào Printer-80?"),
+            // bấm OK xong dialog máy sau hiện ngay trông như dialog không tắt -> đánh số.
+            if (total > 1) toast("Cấp quyền máy in USB $permissionBatchIndex/$total")
+            requestSystemUsbPermission(device)
+            return
+        }
+        // Hết lượt xin quyền.
+        permissionBatchIndex = 0
+        val callbacks = permissionBatchCallbacks.toList()
+        permissionBatchCallbacks.clear()
+        callbacks.forEach { it() }
+    }
+
+    // deviceName -> thời điểm (uptimeMillis) nhận broadcast ATTACHED gần nhất.
+    private val usbAttachedAt = mutableMapOf<String, Long>()
+    private var systemGrantWaitScheduled = false
+
+    /** Số ms còn phải chờ hệ thống tự cấp quyền cho máy vừa cắm tại [path], 0 = khỏi chờ. */
+    private fun systemGrantWaitMs(path: String): Long {
+        val attachedAt = usbAttachedAt[path] ?: return 0
+        val remaining = attachedAt + USB_SYSTEM_GRANT_WAIT_MS - android.os.SystemClock.uptimeMillis()
+        if (remaining <= 0) usbAttachedAt.remove(path)
+        return remaining.coerceAtLeast(0)
+    }
+
+    // Số thứ tự máy đang xin quyền trong lượt hiện tại (để đánh số "2/3").
+    private var permissionBatchIndex = 0
+
+    // Chờ hàng đợi xin quyền chạy hết (xem `requestUsbPermissions`).
+    private val permissionBatchCallbacks = mutableListOf<() -> Unit>()
+
+    private fun requestSystemUsbPermission(device: UsbDevice) {
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         else PendingIntent.FLAG_UPDATE_CURRENT
+        // requestCode riêng cho từng máy để PendingIntent không dùng chung giữa các máy.
         val permIntent = PendingIntent.getBroadcast(
-            mContext!!, 0,
+            mContext!!, device.deviceName.hashCode(),
             Intent(ACTION_USB_PERMISSION).apply { setPackage(mContext!!.packageName) },
             flags
         )
         usbManager.requestPermission(device, permIntent)
+    }
+
+    /**
+     * Có tự bật popup xin quyền cho máy in USB ĐÃ CẮM SẴN lúc mở app không (mặc định có).
+     *
+     * Sau khi tắt/bật nguồn, Android xoá quyền USB tạm -> mở app là popup hệ thống bật
+     * lên liên tiếp mà người dùng không hiểu vì sao. App host tắt cờ này để tự hiện
+     * hướng dẫn (VD banner) rồi mới gọi `requestUsbPermissions` khi người dùng đồng ý.
+     * Cắm máy in MỚI (broadcast ATTACHED) và `connectUsb` lúc in vẫn tự xin quyền như cũ,
+     * vì lúc đó người dùng đang chủ động thao tác với máy in.
+     */
+    @Volatile internal var autoRequestUsbPermission = true
+
+    private fun attachedUsbPrintersWithoutPermission(): List<UsbDevice> =
+        runCatching {
+            usbManager.deviceList.values.filter { isUsbPrinter(it) && !usbManager.hasPermission(it) }
+        }.getOrDefault(emptyList())
+
+    /** Máy in USB đang cắm nhưng chưa có quyền: `[{device_id, name}]`. */
+    internal fun getUsbPrintersNeedingPermission(): List<Map<String, String>> =
+        attachedUsbPrintersWithoutPermission().map { device ->
+            mapOf(
+                "device_id" to stableUsbId(device),
+                "name" to (runCatching { device.productName }.getOrNull()
+                    ?.takeIf { it.isNotBlank() } ?: device.deviceName)
+            )
+        }
+
+    /**
+     * Xin quyền LẦN LƯỢT cho mọi máy in USB đang cắm mà chưa có quyền. Trả về số máy
+     * được cấp quyền sau khi người dùng trả lời hết các popup.
+     */
+    internal fun requestUsbPermissions(result: Result) {
+        val devices = attachedUsbPrintersWithoutPermission()
+        if (devices.isEmpty()) {
+            result.success(0)
+            return
+        }
+        val paths = devices.map { it.deviceName }.toSet()
+        permissionBatchCallbacks.add {
+            val granted = usbManager.deviceList.values.count {
+                it.deviceName in paths && usbManager.hasPermission(it)
+            }
+            runCatching { result.success(granted) }
+        }
+        devices.forEach { requestUsbPermissionOnce(it) }
+        // Mọi máy đều đã nằm sẵn trong hàng đợi / đang xin dở -> callback chạy khi lượt đó xong.
+        pumpPermissionQueue()
     }
 
     private val permissionReceiver = object : BroadcastReceiver() {
@@ -930,18 +1194,41 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             if (intent?.action != ACTION_USB_PERMISSION) return
             val device: UsbDevice? = getUsbDeviceFromIntent(intent)
             val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-            device?.let { pendingPermissionRequests.remove(stableUsbId(it)) }
-            if (granted && device != null) {
-                toast("Đã cấp quyền USB cho thiết bị")
-                tryConnectWithDelay(device, 0)
-            } else {
+            // Broadcast kết quả tới MỌI instance plugin (xem [isUsbOwner]) — chỉ xử lý
+            // máy mà CHÍNH instance này đã xin, nếu không 2 instance cùng connect 1 máy.
+            if (device != null && !pendingPermissionRequests.contains(device.deviceName)) return
+            if (device == null && permissionInFlight == null) return
+            // Dialog hiện tại đã đóng -> xin quyền cho máy kế tiếp trong hàng đợi.
+            permissionInFlight = null
+            Handler(Looper.getMainLooper()).post { if (!isDetached) pumpPermissionQueue() }
+            if (device == null) {
                 toast("Người dùng từ chối quyền USB")
-                val d = device ?: return
-                val deviceId = stableUsbId(d)
-                pendingConnects[deviceId]?.complete(false)
-                pendingConnects.remove(deviceId)
+                return
             }
+            toast(if (granted) "Đã cấp quyền USB cho thiết bị" else "Người dùng từ chối quyền USB")
+            onUsbPermissionResult(device, granted)
         }
+    }
+
+    private fun onUsbPermissionResult(device: UsbDevice, granted: Boolean) {
+        pendingPermissionRequests.remove(device.deviceName)
+        val waiter = permissionWaiters.remove(device.deviceName)
+        // Gọi SAU khi có quyền -> id đã gồm serial thật của máy.
+        val deviceId = stableUsbId(device)
+        if (granted) {
+            if (connections[deviceId]?.isConnect != true) tryConnectWithDelay(device, 0)
+        } else {
+            pendingConnects.remove(deviceId)?.complete(false)
+        }
+        // Máy vừa xử lý không phải máy `connectUsb` cần (cùng model, khác serial) và
+        // không còn máy nào khác đang xin quyền hộ -> báo thất bại để Dart khỏi chờ mãi.
+        if (waiter != null && (!granted || deviceId != waiter)) failUsbWaiterIfNoCandidate(waiter)
+    }
+
+    private fun failUsbWaiterIfNoCandidate(waiterId: String) {
+        if (permissionWaiters.containsValue(waiterId)) return
+        if (connections[waiterId]?.isConnect == true) return
+        pendingConnects.remove(waiterId)?.complete(false)
     }
 
     private fun getUsbDeviceFromIntent(intent: Intent): UsbDevice? =
@@ -957,7 +1244,19 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             mContext?.registerReceiver(permissionReceiver, filter)
     }
 
-    fun handleUsbDeviceAttached(device: UsbDevice) {
+    /**
+     * [justPlugged] = true khi gọi từ broadcast ATTACHED (máy vừa cắm / vừa bật lại
+     * nguồn), false khi quét máy đã cắm sẵn lúc mở app.
+     *
+     * Với máy vừa cắm, Android bắn broadcast ATTACHED TRƯỚC rồi mới cấp quyền cho app
+     * được tick "Luôn mở ... khi kết nối" (UsbProfileGroupSettingsManager.deviceAttached:
+     * sendBroadcast -> resolveActivity -> grantDevicePermission). Xin quyền ngay lúc nhận
+     * broadcast là chen vào trước bước cấp quyền đó -> dialog hiện lại dù đã tick.
+     * Vì vậy ghi lại thời điểm cắm để [pumpPermissionQueue] chờ hệ thống cấp quyền trước.
+     */
+    fun handleUsbDeviceAttached(device: UsbDevice, justPlugged: Boolean = false) {
+        if (justPlugged) usbAttachedAt[device.deviceName] = android.os.SystemClock.uptimeMillis()
+        if (!isUsbOwner) return
         val deviceId = stableUsbId(device)
         usbDevicePaths[deviceId] = device.deviceName  // update path for this plug-in event
         toast("USB được gắn: $deviceId")
@@ -965,28 +1264,34 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             tryConnectWithDelay(device, 0)
         } else {
             requestUsbPermissionOnce(device)
-            Handler(Looper.getMainLooper()).postDelayed({
-                if (!isDetached && usbManager.hasPermission(device) &&
-                    connections[deviceId]?.isConnect != true) {
-                    tryConnectWithDelay(device, 0)
-                }
-            }, 500L)
         }
     }
 
     fun handleUsbDeviceDetached(device: UsbDevice?) {
         if (device == null) return
+        val path = device.deviceName
+        // Lúc DETACHED không đọc được serial nữa -> lấy từ cache theo đường dẫn.
         val deviceId = stableUsbId(device)
         runCatching { connections[deviceId]?.close() }
         connections.remove(deviceId)
         connectionTypes.remove(deviceId)
         usbDevicePaths.remove(deviceId)
+        usbSerialByPath.remove(path)
+        usbAttachedAt.remove(path)
         // Nếu rút dây đúng lúc đang chờ dialog xin quyền / đang giữa các lần thử
         // connect, `permissionReceiver`/`tryConnectWithDelay` có thể không bao
         // giờ chạy tới bước dọn cờ tương ứng — dọn luôn ở đây để lần ATTACHED kế
         // tiếp (cắm lại) không bị `requestUsbPermissionOnce` chặn nhầm là "đang
         // xin quyền rồi" (xem comment tại hàm đó).
-        pendingPermissionRequests.remove(deviceId)
+        pendingPermissionRequests.remove(path)
+        permissionQueue.removeAll { it.deviceName == path }
+        permissionWaiters.remove(path)?.let { failUsbWaiterIfNoCandidate(it) }
+        if (permissionInFlight == path) {
+            // Dialog của máy vừa rút thường tự đóng và vẫn bắn broadcast "từ chối";
+            // nhả hàng đợi luôn ở đây phòng khi broadcast đó không tới.
+            permissionInFlight = null
+            pumpPermissionQueue()
+        }
         pendingConnects.remove(deviceId)?.complete(false)
         emitUsbEvent(deviceId, false)
         toast("USB bị ngắt kết nối [$deviceId]")
@@ -1037,7 +1342,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 }
                 connections[deviceId] = posDevice
                 connectionTypes[deviceId] = ConnectionType.USB
-                posDevice.connect(rawId(deviceId), makeConnectListener(deviceId))
+                posDevice.connect(rawId(deviceId), makeConnectListener(deviceId) { posDevice })
             } catch (e: Exception) {
                 Log.e("USB_CONNECT", "Attempt $attempt failed", e)
                 tryConnectWithDelay(device, attempt + 1)
@@ -1050,6 +1355,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     private val usbEventStreamHandler = object : EventChannel.StreamHandler {
         override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
             usbEventSink = events
+            takeUsbOwnership()
             scanAndConnectExistingUsbDevices()
         }
 
@@ -1059,12 +1365,14 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     }
 
     private fun scanAndConnectExistingUsbDevices() {
+        if (!isUsbOwner) return
         try {
             val deviceList = usbManager.deviceList
             for (device in deviceList.values) {
-                if (isUsbPrinter(device)) {
-                    handleUsbDeviceAttached(device)
-                }
+                if (!isUsbPrinter(device)) continue
+                // Chưa có quyền + app host tự hướng dẫn (xem [autoRequestUsbPermission]).
+                if (!autoRequestUsbPermission && !usbManager.hasPermission(device)) continue
+                handleUsbDeviceAttached(device)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1082,8 +1390,20 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
     /** Emit USB connect/disconnect events to Flutter. */
     private fun emitUsbEvent(deviceId: String, connected: Boolean) {
+        Log.d(
+            "USB_CONNECT",
+            "emit $deviceId connected=$connected owner=$isUsbOwner sink=${usbEventSink != null}"
+        )
+        // Tên model máy in tự báo qua USB (VD "Printer-80") để app đặt tên mặc định dễ
+        // nhận biết. Lúc rút dây thiết bị không còn trong deviceList -> không có tên.
+        val name = runCatching {
+            usbManager.deviceList.values.firstOrNull { stableUsbId(it) == deviceId }
+                ?.productName?.trim()
+        }.getOrNull()
         Handler(Looper.getMainLooper()).post {
-            usbEventSink?.success(mapOf("device_id" to deviceId, "connected" to connected))
+            usbEventSink?.success(
+                mapOf("device_id" to deviceId, "connected" to connected, "name" to name)
+            )
         }
     }
 
@@ -1485,9 +1805,20 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     internal fun toast(str: String) = Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
 
     companion object {
+        /** Instance được tự kết nối USB, xem [isUsbOwner]. */
+        @Volatile private var usbOwner: PrinterLabelPlugin? = null
         internal const val REQUEST_PERMISSIONS_CODE = 1002
         private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"
         private const val CONNECT_TIMEOUT_MS = 3_000L
+
+        /// Thời gian chờ hệ thống tự cấp quyền USB cho app mặc định sau khi cắm máy in
+        /// (xem [handleUsbDeviceAttached]). Hết thời gian mà vẫn chưa có quyền (người
+        /// dùng chưa tick "Luôn mở...") thì mới hiện dialog xin quyền.
+        private const val USB_SYSTEM_GRANT_WAIT_MS = 1_500L
+
+        /// Lớp chờ ngoài cho một lượt connect LAN: dài hơn LanSocketConnection.CONNECT_TIMEOUT_MS
+        /// (6s) để không cắt ngang lúc socket đang bắt tay.
+        internal const val LAN_CONNECT_TIMEOUT_MS = 8_000L
 
         /** A no-op Result used for fire-and-forget connects (e.g. USB auto-attach). */
         private val NoOpResult = object : Result {

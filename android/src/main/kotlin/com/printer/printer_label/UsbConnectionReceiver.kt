@@ -27,7 +27,7 @@ class UsbConnectionReceiver(
             }
         when (action) {
             UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                device?.let { printerLabelPlugin.handleUsbDeviceAttached(it) }
+                device?.let { printerLabelPlugin.handleUsbDeviceAttached(it, justPlugged = true) }
             }
 
             UsbManager.ACTION_USB_DEVICE_DETACHED -> {

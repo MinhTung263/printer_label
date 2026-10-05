@@ -83,6 +83,19 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     plugin.connectUsb(deviceId, result)
                 }
     
+                "set_auto_request_usb_permission" -> {
+                    plugin.autoRequestUsbPermission = call.argument<Boolean>("enabled") ?: true
+                    result.success(true)
+                }
+
+                "get_usb_printers_needing_permission" -> {
+                    result.success(plugin.getUsbPrintersNeedingPermission())
+                }
+
+                "request_usb_permissions" -> {
+                    plugin.requestUsbPermissions(result)
+                }
+
                 "auto_connect_built_in" -> {
                     plugin.isBuiltInPrinterDisabled = false
                     plugin.bluetoothManager.autoConnectBuiltIn(result)
@@ -213,7 +226,9 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     Thread {
                         try {
                             val socket = java.net.Socket()
-                            socket.connect(java.net.InetSocketAddress(ip, port), 2000)
+                            // 5s (không phải 2s): Wi-Fi đông hay trễ vọt >1–2s, SYN đầu mất
+                            // thì Android phải chờ ~1s mới gửi lại.
+                            socket.connect(java.net.InetSocketAddress(ip, port), 5000)
                             socket.outputStream.write(bytes)
                             socket.outputStream.flush()
                             Thread.sleep(300)
@@ -233,26 +248,33 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     // Hỏi trạng thái thật thì BẮT BUỘC phải có socket. Máy in LAN dùng chung
                     // đã nhả socket sau lần in trước nên phải mở lại, nếu không sẽ báo
                     // "offline" cho một máy in vẫn hoạt động bình thường.
-                    var conn = plugin.getConn(call)
-                    if (conn == null || !conn.isConnect) {
-                        val deviceId = call.argument<String>("device_id")
-                        val ip = deviceId?.let { plugin.rawId(it) }
-                        // Chỉ mở lại khi đang bật chế độ nhả socket; nếu không, device sẵn có
-                        // vẫn dùng được và tạo device mới sẽ làm gián đoạn kết nối đang tốt.
-                        if (plugin.releaseLanSocketAfterPrint && ip != null &&
-                            plugin.registeredLanPrinters.contains(ip)) {
-                            conn = plugin.ensureLanConnectedSync(ip)
+                    // Chạy trên luồng nền: mở lại socket LAN có thể mất vài giây (mạng yếu),
+                    // chặn main thread ở đây là treo UI / ANR.
+                    kotlin.concurrent.thread {
+                        var conn = plugin.getConn(call)
+                        if (conn == null || !conn.isConnect) {
+                            val deviceId = call.argument<String>("device_id")
+                            val ip = deviceId?.let { plugin.rawId(it) }
+                            // Chỉ mở lại khi đang bật chế độ nhả socket; nếu không, device sẵn có
+                            // vẫn dùng được và tạo device mới sẽ làm gián đoạn kết nối đang tốt.
+                            if (plugin.releaseLanSocketAfterPrint && ip != null &&
+                                plugin.registeredLanPrinters.contains(ip)) {
+                                conn = plugin.ensureLanConnectedSync(ip)
+                            }
                         }
-                    }
-                    if (conn == null || !conn.isConnect) {
-                        result.success("offline")
-                        return
-                    }
-                    val type = call.argument<String>("type") ?: "TSPL"
-                    if (type == "ESC") {
-                        plugin.checkStatusESC(conn, result)
-                    } else {
-                        plugin.checkStatusTSPL(conn, result)
+                        val target = conn
+                        Handler(Looper.getMainLooper()).post {
+                            if (target == null || !target.isConnect) {
+                                result.success("offline")
+                                return@post
+                            }
+                            val type = call.argument<String>("type") ?: "TSPL"
+                            if (type == "ESC") {
+                                plugin.checkStatusESC(target, result)
+                            } else {
+                                plugin.checkStatusTSPL(target, result)
+                            }
+                        }
                     }
                 }
     
@@ -398,8 +420,15 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
         kotlin.concurrent.thread {
             val conns = plugin.resolveConnectionsForPrint(call)
             if (conns.isEmpty()) {
+                // Máy in LAN: báo đúng nguyên nhân (mạng yếu / máy in bận / khác mạng) thay
+                // vì một câu chung chung. Mã lỗi giữ nguyên NO_CONNECTION để Dart cũ không vỡ;
+                // lý do chi tiết nằm trong message và details["reason"].
+                val ip = call.argument<String>("device_id")?.let { plugin.rawId(it) }
+                val reason = ip?.let { plugin.lanLastFailure[it] }
+                val message = if (ip != null && reason != null) plugin.lanFailureMessage(ip)
+                    else "No connected printer found"
                 Handler(Looper.getMainLooper()).post {
-                    result.error("NO_CONNECTION", "No connected printer found", null)
+                    result.error("NO_CONNECTION", message, reason?.let { mapOf("reason" to it.name, "ip" to ip) })
                 }
                 return@thread
             }

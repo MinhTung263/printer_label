@@ -146,7 +146,7 @@ object LanPrinterProbe {
             // IEEE ghi 00:1A:EF là "Loopcomm Technology, Inc." — hãng làm MODULE MẠNG,
             // không phải PDIT. Máy in hãng khác dùng module Loopcomm cũng sẽ hiện "PDIT".
             prefix6.startsWith("001AEF") -> "PDIT"
-
+            prefix6.startsWith("00BACB") -> "KiotViet"
             else -> null
         }
     }
