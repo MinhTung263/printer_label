@@ -524,59 +524,121 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     // MARK: - Print Routing
 
+    /// Gửi [data] tới máy in theo deviceId / connectionType.
+    ///
+    /// [completion] được gọi ĐÚNG 1 lần trên main thread với kết quả THẬT:
+    ///  - LAN: sau khi `LANPrinterConnection` gửi xong hoặc bỏ cuộc (hết lượt thử lại).
+    ///    Trước đây hàm này "gửi rồi quên": Dart nhận `true` ngay khi bấm in, lỗi chỉ được
+    ///    log — mạng mất vài giây thì bill in trễ / in trùng (nhân viên bấm lại) / mất âm thầm.
+    ///  - BLE: giữ hành vi cũ (báo ngay theo trạng thái kết nối).
     @discardableResult
-    func sendToPrinter(_ data: Data, deviceId: String? = nil, connectionType: String? = nil) -> Bool {
+    func sendToPrinter(_ data: Data, deviceId: String? = nil, connectionType: String? = nil,
+                       completion: ((Bool, Error?) -> Void)? = nil) -> Bool {
         print("[PrinterLabelPlugin] sendToPrinter called: deviceId=\(deviceId ?? "nil"), connectionType=\(connectionType ?? "nil"), data size=\(data.count)")
-        
+        let done: (Bool, Error?) -> Void = { ok, err in
+            if Thread.isMainThread { completion?(ok, err) } else { DispatchQueue.main.async { completion?(ok, err) } }
+        }
+
         if connectionType == "Bluetooth" {
             print("[PrinterLabelPlugin] → Route: Bluetooth")
             let bleId = deviceId.flatMap { extractBLEIdentifier(from: $0) }
             routeToBLE(data, identifier: bleId)
-            return BLEManager.shared.hasAnyConnection()
+            let ok = BLEManager.shared.hasAnyConnection()
+            done(ok, nil)
+            return ok
         } else if let id = deviceId, let bleId = extractBLEIdentifier(from: id) {
             print("[PrinterLabelPlugin] → Route: BLE (extracted UUID: \(bleId))")
             routeToBLE(data, identifier: bleId)
-            return BLEManager.shared.hasAnyConnection()
+            let ok = BLEManager.shared.hasAnyConnection()
+            done(ok, nil)
+            return ok
         } else if let id = deviceId {
             print("[PrinterLabelPlugin] → Route: LAN (deviceId: \(id))")
             if let ip = extractLANIp(from: id) {
                 print("[PrinterLabelPlugin] → Extracted IP: \(ip)")
                 LANPrinterManager.shared.send(data: data, to: ip, completion: { ok, err in
-                    // sendToPrinter là fire-and-forget nên không trả lỗi về Dart được;
-                    // log lại để chẩn đoán khi máy in bận vì thiết bị khác đang in.
                     if !ok {
                         print("[PrinterLabelPlugin] ❌ LAN write failed (\(ip)): \(err?.localizedDescription ?? "unknown")")
                     }
+                    done(ok, err)
                 })
                 return true
             } else {
                 print("[PrinterLabelPlugin] ❌ Failed to extract IP from \(id)")
+                done(false, nil)
                 return false
             }
         } else {
             print("[PrinterLabelPlugin] → Route: Default (no deviceId)")
+            // Gửi tới MỌI máy in đang ghép nối; thành công nếu ít nhất 1 máy nhận (giống
+            // Android runPrintJob). Lỗi trả về là lỗi của máy LAN cuối cùng thất bại.
+            let group = DispatchGroup()
+            var anyOk = false
+            var lastError: Error?
+            let lock = NSLock()
             var sent = false
             if BLEManager.shared.hasAnyConnection() {
                 print("[PrinterLabelPlugin] → Broadcast to all connected BLE devices")
                 BLEManager.shared.writeDataToAllConnected(data) { _ in }
                 sent = true
+                anyOk = true
             }
             let ips = LANPrinterManager.shared.getConnectedPrinters()
             print("[PrinterLabelPlugin] Found \(ips.count) LAN printers: \(ips)")
-            if !ips.isEmpty {
-                for ip in ips {
-                    LANPrinterManager.shared.send(data: data, to: ip, completion: { ok, err in
-                    // sendToPrinter là fire-and-forget nên không trả lỗi về Dart được;
-                    // log lại để chẩn đoán khi máy in bận vì thiết bị khác đang in.
+            for ip in ips {
+                group.enter()
+                LANPrinterManager.shared.send(data: data, to: ip, completion: { ok, err in
                     if !ok {
                         print("[PrinterLabelPlugin] ❌ LAN write failed (\(ip)): \(err?.localizedDescription ?? "unknown")")
                     }
+                    lock.lock()
+                    if ok { anyOk = true } else { lastError = err }
+                    lock.unlock()
+                    group.leave()
                 })
-                }
                 sent = true
             }
+            group.notify(queue: .main) { done(anyOk, anyOk ? nil : lastError) }
             return sent
         }
+    }
+
+    /// Gửi rồi trả kết quả THẬT về Dart: `true`, hoặc FlutterError cùng mã lỗi với Android
+    /// (`NO_CONNECTION` khi chưa gửi được byte nào, `PRINT_ERROR` khi đứt giữa chừng).
+    func sendAndReply(_ data: Data, deviceId: String?, connectionType: String?, result: @escaping FlutterResult) {
+        sendToPrinter(data, deviceId: deviceId, connectionType: connectionType) { ok, err in
+            if ok { result(true); return }
+            result(PrinterLabelPlugin.flutterError(for: err))
+        }
+    }
+
+    /// Gửi nhiều gói nối tiếp (VD nhiều tem) và trả MỘT kết quả khi tất cả xong.
+    func sendAllAndReply(_ items: [Data], deviceId: String?, connectionType: String?, result: @escaping FlutterResult) {
+        guard !items.isEmpty else { result(false); return }
+        let group = DispatchGroup()
+        var firstError: Error?
+        var allOk = true
+        for item in items {
+            group.enter()
+            sendToPrinter(item, deviceId: deviceId, connectionType: connectionType) { ok, err in
+                // completion luôn chạy trên main thread nên không cần khóa.
+                if !ok { allOk = false; if firstError == nil { firstError = err } }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            if allOk { result(true) } else { result(PrinterLabelPlugin.flutterError(for: firstError)) }
+        }
+    }
+
+    static func flutterError(for err: Error?) -> FlutterError {
+        if let e = err as? LANPrinterConnection.SendError {
+            let code = e.kind == .partiallySent ? "PRINT_ERROR" : "NO_CONNECTION"
+            return FlutterError(code: code, message: e.errorDescription, details: ["reason": e.kind.rawValue])
+        }
+        return FlutterError(code: "NO_CONNECTION",
+                            message: err?.localizedDescription ?? "No connected printer found",
+                            details: nil)
     }
 
     private func routeToBLE(_ data: Data, identifier: String?) {
@@ -662,6 +724,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let targetWidth = labelWidthMM * 8
         let targetHeight = labelHeightMM * 8
 
+        var labelPayloads: [Data] = []
         for imageData in images {
             autoreleasepool {
                 let cmd = PTCommandTSPL()
@@ -688,10 +751,11 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                     bitmapMode: .binary, compress: .none
                 )
                 cmd.print(withSets: 1, copies: 1)
-                sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
+                labelPayloads.append(cmd.cmdData as Data)
             }
         }
-        result(true)
+        // Trả kết quả khi TẤT CẢ tem đã gửi xong (hoặc lỗi), không báo thành công sớm.
+        sendAllAndReply(labelPayloads, deviceId: deviceId, connectionType: connectionType, result: result)
     }
 
     func printText(args: [String: Any], result: @escaping FlutterResult) {
@@ -729,8 +793,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         )
         
         cmd.print(withSets: 1, copies: 1)
-        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
-        result(true)
+        sendAndReply(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType, result: result)
     }
 
     func printTextESC(args: [String: Any], result: @escaping FlutterResult) {
@@ -747,8 +810,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
         let data = esc.getCommandData() as Data?
         if let printData = data {
-            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
-            result(true)
+            sendAndReply(printData, deviceId: deviceId, connectionType: connectionType, result: result)
         } else {
             result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC text command", details: nil))
         }
@@ -801,8 +863,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         )
 
         cmd.print(withSets: 1, copies: 1)
-        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
-        result(true)
+        sendAndReply(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType, result: result)
     }
 
     func printQRCode(args: [String: Any], result: @escaping FlutterResult) {
@@ -841,8 +902,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         )
 
         cmd.print(withSets: 1, copies: 1)
-        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
-        result(true)
+        sendAndReply(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType, result: result)
     }
 
     func printBarcodeESC(args: [String: Any], result: @escaping FlutterResult) {
@@ -878,8 +938,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
         let data = esc.getCommandData() as Data?
         if let printData = data {
-            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
-            result(true)
+            sendAndReply(printData, deviceId: deviceId, connectionType: connectionType, result: result)
         } else {
             result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC barcode command", details: nil))
         }
@@ -901,8 +960,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
         let data = esc.getCommandData() as Data?
         if let printData = data {
-            sendToPrinter(printData, deviceId: deviceId, connectionType: connectionType)
-            result(true)
+            sendAndReply(printData, deviceId: deviceId, connectionType: connectionType, result: result)
         } else {
             result(FlutterError(code: "BUILD_FAILED", message: "Cannot build ESC QR code command", details: nil))
         }
@@ -942,8 +1000,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             bitmapMode: .binary, compress: .none
         )
         cmd.print(withSets: 1, copies: 1)
-        sendToPrinter(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType)
-        result(true)
+        sendAndReply(cmd.cmdData as Data, deviceId: deviceId, connectionType: connectionType, result: result)
     }
 
 

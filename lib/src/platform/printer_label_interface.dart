@@ -69,6 +69,21 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// device matches [deviceId].
   Future<bool> connectUsb({required String deviceId});
 
+  /// Android only. Whether the plugin pops the system USB permission dialog by
+  /// itself for printers that are ALREADY plugged in when the app starts
+  /// (default `true`). Set `false` before listening to [usbDeviceStream] to
+  /// show your own guidance first, then call [requestUsbPermissions].
+  Future<void> setAutoRequestUsbPermission(bool enabled);
+
+  /// Android only. USB printers currently plugged in that the app has no
+  /// permission for yet (e.g. right after the device was rebooted).
+  Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission();
+
+  /// Android only. Shows the system permission dialog for every USB printer
+  /// returned by [getUsbPrintersNeedingPermission], one after another.
+  /// Completes after the user answered all of them, with how many were granted.
+  Future<int> requestUsbPermissions();
+
   /// iOS: Starts scanning for Bluetooth Low Energy (BLE) devices.
   ///
   /// Discovered devices are emitted through [bluetoothScanStream].

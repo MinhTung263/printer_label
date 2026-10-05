@@ -100,6 +100,33 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<void> setAutoRequestUsbPermission(bool enabled) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod<bool>(
+      PrinterMethod.set_auto_request_usb_permission.name,
+      {"enabled": enabled},
+    );
+  }
+
+  @override
+  Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission() async {
+    if (!Platform.isAndroid) return const [];
+    final raw = await _channel.invokeListMethod<Map<dynamic, dynamic>>(
+      PrinterMethod.get_usb_printers_needing_permission.name,
+    );
+    return (raw ?? const []).map(UsbPrinterInfo.fromMap).toList();
+  }
+
+  @override
+  Future<int> requestUsbPermissions() async {
+    if (!Platform.isAndroid) return 0;
+    return await _channel.invokeMethod<int>(
+          PrinterMethod.request_usb_permissions.name,
+        ) ??
+        0;
+  }
+
+  @override
   Future<bool> startBluetoothScan() async {
     return await _channel.invokeMethod<bool>(PrinterMethod.scan_bt.name) ??
         false;
@@ -263,6 +290,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       return UsbConnectionEvent(
         deviceId: (map['device_id'] ?? '').toString(),
         connected: map['connected'] == true,
+        name: switch ((map['name'] as String?)?.trim()) {
+          final n? when n.isNotEmpty => n,
+          _ => null,
+        },
       );
     });
     return _usbDeviceStream!;

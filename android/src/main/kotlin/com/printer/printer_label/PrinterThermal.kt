@@ -107,6 +107,18 @@ class PrinterThermal {
          */
         @JvmStatic
         fun awaitLabelSent(conn: IDeviceConnection, timeoutMs: Long = 300L) {
+            // Socket LAN tự quản: không bị throttle callback như SDK nên chờ được tới khi
+            // gửi hết THẬT (mạng yếu có thể mất vài giây), và biết được là đã lỗi — trước
+            // đây tem gửi lỗi vẫn bị báo in thành công.
+            if (conn is LanSocketConnection) {
+                if (!conn.awaitIdle(LAN_LABEL_SEND_TIMEOUT_MS)) {
+                    Log.w("TSPL_FLUSH", "Quá ${LAN_LABEL_SEND_TIMEOUT_MS}ms chưa gửi xong tem qua LAN")
+                }
+                if (!conn.isConnect) {
+                    throw java.io.IOException(conn.lastErrorMessage ?: "Mất kết nối tới máy in khi đang gửi tem")
+                }
+                return
+            }
             val latch = java.util.concurrent.CountDownLatch(1)
             // Giữ tham chiếu MẠNH tới callback trong suốt lúc chờ. SDK chỉ giữ nó bằng
             // WeakReference (xem setSendCallback), nên nếu để lambda làm đối tượng tạm thì
@@ -147,6 +159,9 @@ class PrinterThermal {
         // đã chết thật (rút dây) — trường hợp đó sendSync tiếp tục trả <=0 tới hết
         // số lần thử rồi mới ném lỗi như cũ.
         private const val FIRST_CHUNK_MAX_RETRY = 8
+
+        /** Hạn chờ một tem gửi xong qua LAN tự quản (watchdog ghi tự cắt sớm hơn nếu kẹt). */
+        private const val LAN_LABEL_SEND_TIMEOUT_MS = 30_000L
         private const val FIRST_CHUNK_RETRY_BASE_DELAY_MS = 150L
 
         /**
@@ -180,14 +195,18 @@ class PrinterThermal {
                 val chunk = data.copyOfRange(offset, offset + count)
 
                 var sent = conn.sendSync(chunk)
-                if (sent <= 0 && offset == 0) {
+                // Retry gói đầu là để chờ driver USB "warm up". Socket LAN tự quản trả -1 nghĩa
+                // là kết nối đã chết thật (đã đóng) — thử lại chỉ tốn ~2.4s vô ích.
+                if (sent <= 0 && offset == 0 && conn !is LanSocketConnection) {
                     sent = retryFirstChunkSync(conn::sendSync, chunk, "PRINT_SEND")
                 }
 
                 if (sent <= 0) {
+                    val reason = (conn as? LanSocketConnection)?.lastErrorMessage
                     throw java.io.IOException(
                         "Gửi dữ liệu tới máy in thất bại tại byte $offset/${data.size} " +
-                            "(sendSync trả về $sent). Máy in có thể đã mất kết nối hoặc đầy buffer."
+                            (reason?.let { "($it)." }
+                                ?: "(sendSync trả về $sent). Máy in có thể đã mất kết nối hoặc đầy buffer.")
                     )
                 }
                 // sendSync có thể gửi thiếu -> chỉ tiến đúng số byte đã gửi được.

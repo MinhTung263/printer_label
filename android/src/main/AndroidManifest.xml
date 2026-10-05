@@ -9,4 +9,8 @@
         <package android:name="android.printservice.urovoprint" />
     </queries>
     <uses-permission android:name="smartpos.deviceservice.permission.Printer" />
+    <!-- In LAN: gắn socket vào đúng mạng Wi-Fi chứa máy in (ConnectivityManager) và giữ
+         Wi-Fi không ngủ trong lúc in (WifiLock). Đều là quyền thường, không hỏi người dùng. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>

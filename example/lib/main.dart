@@ -534,8 +534,26 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   Future<void> _printTestSlip(LanDeviceModel device) async {
-    context.showSnackBar('Đang in phiếu test xác nhận IP ${device.ip}...',
+    // Đo mạng tới máy in trước khi in (vài lần bắt tay TCP, không gửi byte): Wi-Fi quán
+    // đông thì báo trước cho nhân viên thay vì để họ chờ trong im lặng rồi bấm in lại.
+    context.showSnackBar('Đang kiểm tra mạng tới máy in ${device.ip}...',
         backgroundColor: Colors.blueGrey);
+    final quality =
+        await PrinterLabel.checkLanQuality(device.ip, port: device.port);
+    debugPrint('[LAN] $quality');
+    if (!mounted) return;
+    if (quality.level == LanQualityLevel.offline) {
+      context.showSnackBar('${quality.emoji} ${quality.message} (${device.ip})',
+          backgroundColor: const Color(0xFFF43F5E));
+      return;
+    }
+    context.showSnackBar(
+      quality.shouldWarn
+          ? '${quality.emoji} ${quality.message} — đang in phiếu test (${quality.medianMs}ms)...'
+          : 'Đang in phiếu test xác nhận IP ${device.ip}...',
+      backgroundColor:
+          quality.shouldWarn ? const Color(0xFFF59E0B) : Colors.blueGrey,
+    );
     final ok = await PrinterLabel.identifyLanPrinter(
       ipAddress: device.ip,
       port: device.port,
@@ -576,7 +594,8 @@ class _MyHomePageState extends State<MyHomePage>
                 children: [
                   Icon(Icons.devices, size: 20),
                   SizedBox(width: 8),
-                  Text("Thiết bị", style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Thiết bị",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -586,7 +605,8 @@ class _MyHomePageState extends State<MyHomePage>
                 children: [
                   Icon(Icons.print, size: 20),
                   SizedBox(width: 8),
-                  Text("Chức năng", style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Chức năng",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             ),

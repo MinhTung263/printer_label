@@ -98,6 +98,24 @@ class PrinterLabel {
     return await _platform.connectUsb(deviceId: deviceId);
   }
 
+  /// Android only. Whether the plugin pops the system USB permission dialog by
+  /// itself for printers already plugged in when the app starts (default
+  /// `true`). Turn it off to show your own guidance first (e.g. a banner), then
+  /// call [requestUsbPermissions] once the user agrees.
+  static Future<void> setAutoRequestUsbPermission(bool enabled) =>
+      _platform.setAutoRequestUsbPermission(enabled);
+
+  /// Android only. USB printers currently plugged in that still need the user
+  /// to grant permission (e.g. after the device was powered off and on).
+  static Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission() =>
+      _platform.getUsbPrintersNeedingPermission();
+
+  /// Android only. Shows the system permission dialog for each printer from
+  /// [getUsbPrintersNeedingPermission], one after another. Returns how many
+  /// printers were granted.
+  static Future<int> requestUsbPermissions() =>
+      _platform.requestUsbPermissions();
+
   /// Discovers LAN printers by scanning the local network for open port 9100.
   ///
   /// Returns a stream of IP addresses (e.g. '192.168.1.10') that have the port open.
@@ -1509,6 +1527,20 @@ class PrinterLabel {
 
     return null;
   }
+
+  /// Đo chất lượng mạng từ thiết bị này tới máy in LAN [ip] (🟢 tốt / 🟡 yếu / 🟠 rất yếu /
+  /// 🔴 mất kết nối) bằng vài lần bắt tay TCP tới [port] — không gửi byte nào nên máy in
+  /// không in gì. Dùng để cảnh báo người dùng trước khi in khi Wi-Fi quán quá tải.
+  ///
+  /// Chỉ gọi khi cần (mở màn hình in / ngay trước khi in), không đo liên tục: máy in LAN
+  /// chỉ nhận một kết nối tại một thời điểm. Xem [LanQuality.measure].
+  static Future<LanQuality> checkLanQuality(
+    String ip, {
+    int port = 9100,
+    int samples = 5,
+    Duration cacheFor = const Duration(seconds: 10),
+  }) =>
+      LanQuality.measure(ip, port: port, samples: samples, cacheFor: cacheFor);
 
   /// Discovers LAN printers on the local network and queries their hardware/model names.
   static Stream<LanDeviceModel> discoverLanDevices({

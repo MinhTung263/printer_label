@@ -23,6 +23,9 @@ public final class LANPrinterConnection {
         case busy
         /// Không thấy máy in: sai IP, khác mạng, hoặc đã tắt nguồn.
         case unreachable
+        /// Không nhận được phản hồi trong `connectionTimeout`: mạng tới máy in quá yếu/mất,
+        /// hoặc máy in tắt. Mỗi lượt NWConnection đã tự gửi SYN nhiều lần nên chỉ thử lại 1 lần.
+        case timeout
         /// Đã gửi được một phần dữ liệu rồi mới lỗi — KHÔNG được gửi lại (xem `send`).
         case partiallySent
     }
@@ -36,6 +39,8 @@ public final class LANPrinterConnection {
                 return "Máy in đang in đơn của thiết bị khác. Vui lòng thử lại sau vài giây."
             case .unreachable:
                 return "Không kết nối được máy in. Kiểm tra máy in đã bật và cùng mạng Wi-Fi."
+            case .timeout:
+                return "Không tới được máy in (mạng yếu/mất hoặc máy in đang tắt). Kiểm tra Wi-Fi rồi thử lại."
             case .partiallySent:
                 return "Gửi dữ liệu tới máy in bị ngắt giữa lúc in. Kiểm tra bản in trước khi in lại."
             }
@@ -76,14 +81,18 @@ public final class LANPrinterConnection {
     /// bị khác đang giữ kênh in). Máy in từ chối gần như tức thì nên 400ms là đủ.
     private let acceptConfirmDelay: TimeInterval = 0.4
 
-    // connection timeout
-    private let connectionTimeout: TimeInterval = 4
+    // connection timeout — 6s (trước là 4s): Wi-Fi đông hay trễ vọt 1–2s, đủ để NWConnection
+    // gửi lại SYN vài lần trong một lượt thử.
+    private let connectionTimeout: TimeInterval = 6
 
     // MARK: - Retry có giới hạn + backoff
     // TRƯỚC ĐÂY: send lỗi → đẩy data về đầu queue → connect() → lỗi nữa → lặp VÔ HẠN,
     // không giới hạn số lần, không giãn nhịp. Khi 2 điện thoại tranh socket 9100 thì cả
     // hai cùng rơi vào vòng này và liên tục đập vào máy in, càng làm nhau khó kết nối.
     private let maxAttempts = 4
+    /// Hết giờ / không có đường tới máy in: tối đa 1 lần thử lại (mỗi lượt đã chờ cả
+    /// `connectionTimeout`). Thử đủ `maxAttempts` như "máy in bận" làm bill bị treo ~30s.
+    private let maxTimeoutRetries = 1
     /// Giãn dần: 0.4s, 0.8s, 1.6s. Cho thiết bị đang giữ socket kịp in xong và nhả ra.
     private let retryBaseDelay: TimeInterval = 0.4
 
@@ -172,32 +181,15 @@ public final class LANPrinterConnection {
                     self.fireConnectCompletions(true)
                     self.flushQueue()
                 case .failed(let error):
-                    self.state = .failed
-                    self.lastConnectError = error
-                    // Không còn job nào chờ → đây là socket của một job ĐÃ GỬI XONG đang
-                    // được máy in đóng lại (RAW/JetDirect thường reset thay vì FIN sạch sau
-                    // khi nhận hết job). Đó là hành vi BÌNH THƯỜNG, không phải lỗi in; log
-                    // "❌ Connection failed" ở đây làm tưởng lần in vừa rồi thất bại.
-                    // Job vừa đẩy xuống TCP nhưng máy in ĐÓNG NGAY → nó chưa được in (thiết
-                    // bị khác đang giữ kênh in). Đưa lại đầu hàng đợi để retry theo backoff,
-                    // thay vì báo thành công giả và mất job im lặng.
-                    if let unconfirmed = self.pendingConfirmJob {
-                        self.pendingConfirmJob = nil
-                        self.writeQueue.insert(unconfirmed, at: 0)
-                        print("[LANPrinterConnection] ↩️ Máy in \(self.ip) đóng ngay sau khi nhận — job chưa in, sẽ thử lại")
-                    }
-                    let hasPendingWork = !self.writeQueue.isEmpty || self.isWriting
-                    if hasPendingWork {
-                        print("[LANPrinterConnection] ❌ Connection failed to \(self.ip): \(error)")
-                        self.onDisconnected?(error)
-                    } else {
-                        print("[LANPrinterConnection] ⏹️ Máy in \(self.ip) đã đóng kết nối sau khi nhận xong job")
-                    }
-                    self.teardownConnection()
-                    self.fireConnectCompletions(false)
-                    // Máy in bận/tắt → thử lại theo backoff thay vì bỏ job im lặng.
-                    // (scheduleRetryOrFail tự return ngay nếu hàng đợi rỗng.)
-                    self.scheduleRetryOrFail(error: error)
+                    self.handleConnectFailure(error)
+                case .waiting(let error):
+                    // NWConnection "chờ" = không kết nối được ngay (bị từ chối vì thiết bị khác
+                    // đang giữ máy in, hoặc không có đường mạng) và sẽ tự đợi mạng đổi. Trước
+                    // đây bỏ qua trạng thái này nên lần nào cũng chờ hết connectionTimeout mới
+                    // retry. Xử lý như lỗi để retry/backoff của ta quyết định ngay.
+                    guard self.state == .connecting else { break }
+                    print("[LANPrinterConnection] ⏳ \(self.ip) chưa kết nối được (\(error)), xử lý như lỗi")
+                    self.handleConnectFailure(error)
                 case .cancelled:
                     self.state = .disconnected
                     print("[LANPrinterConnection] ⏹️ Disconnected from \(self.ip)")
@@ -230,6 +222,36 @@ public final class LANPrinterConnection {
                 self.scheduleRetryOrFail(error: timeoutError)
             }
         }
+    }
+
+    /// Kết nối (hoặc socket đang dùng) lỗi. Phải gọi từ trong self.queue.
+    private func handleConnectFailure(_ error: NWError) {
+        self.state = .failed
+        self.lastConnectError = error
+        // Không còn job nào chờ → đây là socket của một job ĐÃ GỬI XONG đang
+        // được máy in đóng lại (RAW/JetDirect thường reset thay vì FIN sạch sau
+        // khi nhận hết job). Đó là hành vi BÌNH THƯỜNG, không phải lỗi in; log
+        // "❌ Connection failed" ở đây làm tưởng lần in vừa rồi thất bại.
+        // Job vừa đẩy xuống TCP nhưng máy in ĐÓNG NGAY → nó chưa được in (thiết
+        // bị khác đang giữ kênh in). Đưa lại đầu hàng đợi để retry theo backoff,
+        // thay vì báo thành công giả và mất job im lặng.
+        if let unconfirmed = self.pendingConfirmJob {
+            self.pendingConfirmJob = nil
+            self.writeQueue.insert(unconfirmed, at: 0)
+            print("[LANPrinterConnection] ↩️ Máy in \(self.ip) đóng ngay sau khi nhận — job chưa in, sẽ thử lại")
+        }
+        let hasPendingWork = !self.writeQueue.isEmpty || self.isWriting
+        if hasPendingWork {
+            print("[LANPrinterConnection] ❌ Connection failed to \(self.ip): \(error)")
+            self.onDisconnected?(error)
+        } else {
+            print("[LANPrinterConnection] ⏹️ Máy in \(self.ip) đã đóng kết nối sau khi nhận xong job")
+        }
+        self.teardownConnection()
+        self.fireConnectCompletions(false)
+        // Máy in bận/tắt → thử lại theo backoff thay vì bỏ job im lặng.
+        // (scheduleRetryOrFail tự return ngay nếu hàng đợi rỗng.)
+        self.scheduleRetryOrFail(error: error)
     }
 
     /// Đóng socket hiện tại và bỏ tham chiếu. Phải gọi từ trong self.queue.
@@ -383,7 +405,8 @@ public final class LANPrinterConnection {
         let kind = Self.classify(error ?? lastConnectError)
         let attempts = writeQueue[0].attempts
 
-        guard attempts < maxAttempts else {
+        let noMoreRetries = (kind == .timeout || kind == .unreachable) && attempts >= maxTimeoutRetries
+        guard attempts < maxAttempts, !noMoreRetries else {
             let failed = writeQueue.removeFirst()
             print("[LANPrinterConnection] 🚫 Bỏ job tới \(ip) sau \(attempts) lần thử: \(kind.rawValue)")
             DispatchQueue.main.async {
@@ -414,7 +437,9 @@ public final class LANPrinterConnection {
             switch nwError {
             case .posix(let code):
                 switch code {
-                case .ECONNREFUSED, .ECONNRESET, .ETIMEDOUT, .EBUSY, .EADDRINUSE:
+                case .ETIMEDOUT:
+                    return .timeout
+                case .ECONNREFUSED, .ECONNRESET, .EBUSY, .EADDRINUSE:
                     return .busy
                 case .EHOSTDOWN, .EHOSTUNREACH, .ENETDOWN, .ENETUNREACH:
                     return .unreachable
@@ -427,9 +452,11 @@ public final class LANPrinterConnection {
                 return .unreachable
             }
         }
-        // Timeout tự đặt (code -1): máy in có thể đang bận in cho thiết bị khác.
+        // Timeout tự đặt (code -1): không có phản hồi nào trong connectionTimeout. Máy in bận
+        // thường TỪ CHỐI ngay (ECONNREFUSED/RST, giờ bắt được qua .waiting), nên im lặng tới
+        // hết giờ là dấu hiệu mạng yếu/mất hoặc máy in tắt.
         let ns = error as NSError
-        if ns.domain == "LANPrinterConnection" && ns.code == -1 { return .busy }
+        if ns.domain == "LANPrinterConnection" && ns.code == -1 { return .timeout }
         return .unreachable
     }
 

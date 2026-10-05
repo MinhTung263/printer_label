@@ -40,8 +40,9 @@ final class ESCPosPrinter {
                 data.reserveCapacity(oneCopy.count * quantity)
                 for _ in 1..<quantity { data.append(oneCopy) }
             }
-            self.plugin?.sendToPrinter(data, deviceId: deviceId, connectionType: connectionType)
-            result(true)
+            // Chờ kết quả THẬT rồi mới trả về Dart (trước đây báo true ngay khi xếp hàng).
+            guard let plugin = self.plugin else { result(false); return }
+            plugin.sendAndReply(data, deviceId: deviceId, connectionType: connectionType, result: result)
         }
     }
 
@@ -173,8 +174,11 @@ final class ESCPosPrinter {
 
             var out = Data()
             out.append(contentsOf: [0x1B, 0x70, 0x00, 0x19, 0xFA, 0x1B, 0x70, 0x01, 0x19, 0xFA])
-            let sent = plugin?.sendToPrinter(out, deviceId: deviceId, connectionType: connectionType) ?? false
-            result(sent)
+            // Dart openDrawer() nhận bool: trả false khi thật sự không gửi được lệnh mở két.
+            guard let plugin = plugin else { result(false); return }
+            plugin.sendToPrinter(out, deviceId: deviceId, connectionType: connectionType) { ok, _ in
+                result(ok)
+            }
         } catch {
             print("[ESCPosPrinter] ❌ openDrawer error: \(error)")
             result(false)
