@@ -45,13 +45,6 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
     super.dispose();
   }
 
-  bool _isEpson(String name, String? vendor) {
-    final lower = '${vendor ?? ''} $name'.toLowerCase();
-    return lower.contains('epson') ||
-        lower.contains('tm-') ||
-        lower.contains('ub-e');
-  }
-
   String _getBrandType(String? vendor, String name) {
     final lower = '${vendor ?? ''} $name'.toLowerCase();
     if (lower.contains('tsc') || lower.contains('godex')) {
@@ -62,6 +55,11 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
     }
     return 'POS';
   }
+
+  /// Máy trả lời XP0001FIND (Xprinter/PDIT...) hoặc là máy TSC/Zebra thì đổi IP được
+  /// từ app. Còn lại (VD Epson) plugin sẽ báo không hỗ trợ.
+  bool _canChangeIp(Map<String, String> p) =>
+      p['xp'] == 'true' || _getBrandType(p['vendor'], p['name'] ?? '') != 'POS';
 
   String _getMethodLabel(String brandType) {
     switch (brandType) {
@@ -84,7 +82,7 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
     });
 
     try {
-      // 1. Quét UDP broadcast độc quyền (Xprinter/POS)
+      // 1. Quét UDP broadcast (XP0001FIND): máy trả lời được -> đổi IP được qua UDP.
       PrinterLabel.scanNetPrinters().then((list) {
         if (!mounted) return;
         setState(() {
@@ -92,59 +90,44 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
             final ip = item['ip'];
             final mac = item['mac'];
             if (ip == null || ip.isEmpty) continue;
-            if (_isEpson(item['name'] ?? '', item['vendor'])) continue;
 
             final index = printers.indexWhere(
               (p) =>
                   p['ip'] == ip ||
                   (mac != null && mac.isNotEmpty && p['mac'] == mac),
             );
-            if (index >= 0) {
-              if (mac != null && mac.isNotEmpty) {
-                printers[index]['mac'] = mac;
-              }
-            } else {
-              printers.add({
-                'ip': ip,
-                'mac': mac ?? '',
-                'name': item['name'] ?? 'Máy in LAN',
-                'vendor': item['vendor'] ?? '',
-                'mask': item['mask'] ?? '255.255.255.0',
-                'gateway': item['gateway'] ?? '192.168.1.1',
-                'dhcp': (item['dhcp'] == 'true') ? 'true' : 'false',
-              });
+            final entry = index >= 0 ? printers[index] : <String, String>{};
+            entry['ip'] = ip;
+            entry['xp'] = 'true';
+            if (mac != null && mac.isNotEmpty) entry['mac'] = mac;
+            entry.putIfAbsent('mac', () => '');
+            entry.putIfAbsent('name', () => item['name'] ?? 'Máy in LAN');
+            entry.putIfAbsent('vendor', () => item['vendor'] ?? '');
+            if (item['mask']?.isNotEmpty == true) entry['mask'] = item['mask']!;
+            if (item['gateway']?.isNotEmpty == true) {
+              entry['gateway'] = item['gateway']!;
             }
+            entry['dhcp'] = (item['dhcp'] == 'true') ? 'true' : 'false';
+            if (index < 0) printers.add(entry);
           }
         });
       }).catchError((_) {});
 
-      // 2. Quét mạng LAN (bổ sung thiết bị đã xác định MAC và không phải Epson)
+      // 2. Quét mạng LAN (cổng 9100): hiện MỌI máy in, kể cả Epson / máy không có
+      // MAC — máy không đổi IP được từ app sẽ được đánh dấu trên thẻ.
       final completer = Completer<void>();
       _lanSub = PrinterLabel.discoverLanDevices().listen(
         (device) {
           if (!mounted) return;
           setState(() {
-            if (_isEpson(device.name, device.vendor)) {
-              printers.removeWhere((p) =>
-                  p['ip'] == device.ip ||
-                  (device.mac != null &&
-                      device.mac!.isNotEmpty &&
-                      p['mac'] == device.mac));
-              if (selectedPrinter?['ip'] == device.ip) {
-                selectedPrinter = null;
-              }
-              return;
-            }
-
-            if (device.mac == null || device.mac!.isEmpty) {
-              return;
-            }
-
+            final mac = device.mac ?? '';
             final index = printers.indexWhere(
-              (p) => p['ip'] == device.ip || p['mac'] == device.mac,
+              (p) =>
+                  p['ip'] == device.ip ||
+                  (mac.isNotEmpty && p['mac'] == mac),
             );
             if (index >= 0) {
-              printers[index]['mac'] = device.mac!;
+              if (mac.isNotEmpty) printers[index]['mac'] = mac;
               if (device.name != 'Máy in LAN') {
                 printers[index]['name'] = device.name;
               }
@@ -154,12 +137,13 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
             } else {
               printers.add({
                 'ip': device.ip,
-                'mac': device.mac!,
+                'mac': mac,
                 'name': device.name,
                 'vendor': device.vendor ?? '',
                 'mask': '255.255.255.0',
-                'gateway': '192.168.1.1',
+                'gateway': '',
                 'dhcp': 'false',
+                'xp': 'false',
               });
             }
           });
@@ -202,69 +186,70 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
       final newGateway = gatewayController.text.trim();
       final targetMac = selectedPrinter!['mac'] ?? '';
       final oldIp = selectedPrinter!['ip'] ?? '';
-      final vendor = selectedPrinter!['vendor'] ?? '';
-      final brandType = _getBrandType(vendor, selectedPrinter!['name'] ?? '');
 
-      final success = await PrinterLabel.setNetIp(
-        mac: targetMac,
-        ip: newIp,
+      // Plugin tự chọn cách gửi lệnh theo máy in, tự kiểm tra trùng IP và xác minh.
+      final result = await PrinterLabel.changeLanPrinterIp(
+        currentIp: oldIp,
+        mac: targetMac.isNotEmpty ? targetMac : null,
+        newIp: useDhcp ? null : newIp,
+        dhcp: useDhcp,
         mask: newMask,
         gateway: newGateway,
-        dhcp: useDhcp,
-        currentIp: oldIp,
-        vendor: vendor.isNotEmpty ? vendor : brandType,
+      );
+      debugPrint('[changeLanPrinterIp] $result');
+
+      if (!mounted) return;
+      final ok = result.status == LanIpChangeStatus.success;
+      final warn = result.status == LanIpChangeStatus.unverified;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          content: Row(
+            children: [
+              Icon(
+                ok
+                    ? Icons.check_circle
+                    : (warn ? Icons.info_outline : Icons.error_outline),
+                color: Colors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  result.message,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: ok
+              ? const Color(0xFF10B981)
+              : (warn ? const Color(0xFFF59E0B) : const Color(0xFFEF4444)),
+          duration: Duration(seconds: ok || warn ? 5 : 4),
+        ),
       );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Row(
-              children: [
-                Icon(
-                  success ? Icons.check_circle : Icons.error_outline,
-                  color: Colors.white,
-                  size: 20,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    success
-                        ? "Cấu hình thành công! Đang đồng bộ lại mạng..."
-                        : "Cấu hình thất bại! Vui lòng thử lại.",
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor:
-                success ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+      if (ok || warn) {
+        setState(() {
+          final idx = printers.indexWhere((p) =>
+              (targetMac.isNotEmpty && p['mac'] == targetMac) ||
+              (oldIp.isNotEmpty && p['ip'] == oldIp));
+          if (idx >= 0) {
+            if (result.ip != null) printers[idx]['ip'] = result.ip!;
+            printers[idx]['mask'] = newMask;
+            printers[idx]['gateway'] = newGateway;
+            printers[idx]['dhcp'] = useDhcp ? 'true' : 'false';
+            selectedPrinter = printers[idx];
+          }
+        });
 
-        if (success) {
-          setState(() {
-            final idx = printers.indexWhere((p) =>
-                (targetMac.isNotEmpty && p['mac'] == targetMac) ||
-                (oldIp.isNotEmpty && p['ip'] == oldIp));
-            if (idx >= 0) {
-              printers[idx]['ip'] = newIp;
-              printers[idx]['mask'] = newMask;
-              printers[idx]['gateway'] = newGateway;
-              printers[idx]['dhcp'] = useDhcp ? 'true' : 'false';
-              selectedPrinter = printers[idx];
-            }
-          });
-
-          Future.delayed(const Duration(milliseconds: 1500), () {
-            if (mounted) {
-              _scan();
-            }
-          });
-        }
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (mounted) {
+            _scan();
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -285,6 +270,17 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
         });
       }
     }
+  }
+
+  /// Điền mask/gateway theo cấu hình thật của máy in (nếu máy trả lời XP0001FIND).
+  Future<void> _prefillFromPrinter(String ip) async {
+    final info = await PrinterLabel.queryXpUdpInfo(ip);
+    if (info == null || !mounted || selectedPrinter?['ip'] != ip) return;
+    setState(() {
+      maskController.text = info.mask;
+      gatewayController.text = info.gateway;
+      useDhcp = info.dhcp;
+    });
   }
 
   void _autoSuggestGatewayFromIp(String ip) {
@@ -634,6 +630,8 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
               }
               useDhcp = (p['dhcp'] == 'true');
             });
+            final ip = p['ip'];
+            if (ip != null && ip.isNotEmpty) _prefillFromPrinter(ip);
           },
           borderRadius: BorderRadius.circular(16),
           child: AnimatedContainer(
@@ -713,9 +711,12 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
                               ),
                             ),
                             child: Text(
-                              p['vendor']?.isNotEmpty == true
-                                  ? p['vendor']!
-                                  : brandType,
+                              (p['vendor']?.isNotEmpty == true
+                                      ? p['vendor']!
+                                      : brandType) +
+                                  (_canChangeIp(p)
+                                      ? ''
+                                      : ' · không đổi IP được'),
                               style: const TextStyle(
                                 fontSize: 9.5,
                                 color: Color(0xFF4F46E5),

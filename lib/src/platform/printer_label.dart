@@ -2272,16 +2272,74 @@ class PrinterLabel {
       await Future.delayed(const Duration(milliseconds: 1500));
     }
 
-    // Broadcast có thể bị chặn (iPhone thật không có entitlement multicast) → quét
-    // dải /24 tìm máy mở cổng 9100 rồi hỏi MAC từng máy (unicast).
+    return findLanPrinterIpByMac(mac);
+  }
+
+  /// Tìm IP hiện tại của máy in LAN theo [mac] — dùng khi máy in đã đổi IP (DHCP)
+  /// và app chỉ còn IP cũ đã lưu.
+  ///
+  /// Thứ tự, từ nhanh tới chậm:
+  /// 1. [lastIp] (nếu có): máy ở IP cũ trả đúng MAC thì dùng luôn.
+  /// 2. Broadcast `XP0001FIND` / SDK (`scanNetPrinters`, ~1.5s): gói trả lời có sẵn
+  ///    cả MAC lẫn IP. Có thể bị chặn trên iPhone thật nếu thiếu entitlement multicast.
+  /// 3. Quét dải /24 tìm máy mở cổng 9100, hỏi MAC từng máy (unicast `XP0001FIND`,
+  ///    SNMP, HTTP, NetBIOS, ARP) song song; gặp máy đúng MAC là dừng.
+  ///
+  /// Không mở thêm kết nối thử vào cổng in 9100 ở IP tìm được: máy in nhiệt thường chỉ
+  /// nhận một kết nối, mở/đóng dồn dập ngay trước khi in làm máy in tưởng đang bận và bỏ
+  /// lệnh in kế tiếp. MAC khớp đã đủ chứng minh đúng máy. Trả `null` khi không tìm thấy,
+  /// hoặc khi máy in không trả lời MAC qua kênh nào — lúc đó hãy cho người dùng chọn
+  /// lại máy in từ danh sách `discoverLanDevices`.
+  static Future<String?> findLanPrinterIpByMac(
+    String mac, {
+    String? lastIp,
+  }) async {
+    final target = normalizeMac(mac);
+    if (target == null) return null;
+
+    // 1. IP cũ.
+    final old = lastIp?.trim();
+    if (old != null && _ipv4ToInt(old) != null) {
+      final atOld = (await queryXpUdpInfo(old))?.mac ??
+          normalizeMac(await resolveLanPrinterMac(old));
+      // Chỉ nhận khi đọc được đúng MAC — cổng 9100 mở thôi có thể là máy in khác.
+      if (atOld == target) return old;
+    }
+
+    // 2. Broadcast.
     try {
-      await for (final ip in discoverLanPrinters()) {
-        final found = (await queryXpUdpInfo(ip))?.mac ??
-            normalizeMac(await resolveLanPrinterMac(ip));
-        if (found == mac) return ip;
+      final list = await scanNetPrinters();
+      for (final item in list) {
+        final ip = item['ip'];
+        if (ip == null || ip.isEmpty) continue;
+        if (normalizeMac(item['mac']) == target) return ip;
       }
     } catch (_) {}
-    return null;
+
+    // 3. Quét /24, hỏi MAC từng máy ngay khi tìm thấy (không chờ quét xong).
+    final completer = Completer<String?>();
+    final pending = <Future<void>>[];
+    StreamSubscription<String>? sub;
+    sub = discoverLanPrinters().listen(
+      (ip) {
+        pending.add(() async {
+          if (completer.isCompleted) return;
+          final found = (await queryXpUdpInfo(ip))?.mac ??
+              normalizeMac(await resolveLanPrinterMac(ip));
+          if (found == target && !completer.isCompleted) {
+            completer.complete(ip);
+            await sub?.cancel();
+          }
+        }());
+      },
+      onError: (_) {},
+      onDone: () async {
+        await Future.wait(pending);
+        if (!completer.isCompleted) completer.complete(null);
+      },
+      cancelOnError: false,
+    );
+    return completer.future;
   }
 
   /// Gửi một lệnh cấu hình dạng văn bản (TSPL / ZPL) vào cổng in 9100.
@@ -2341,6 +2399,32 @@ class PrinterLabel {
     final info = await queryXpUdpInfo(oldIp);
     String? printerMac = normalizeMac(mac) ?? info?.mac;
     printerMac ??= normalizeMac(await resolveLanPrinterMac(oldIp));
+
+    // Cách gửi lệnh: máy trả lời XP0001FIND -> UDP XP0001SAVE; TSC/Godex/Zebra do
+    // plugin tự nhận ra -> lệnh văn bản qua 9100.
+    final vendor = vendorFromMac(printerMac) ??
+        (info == null
+            ? detectVendor(await getLanPrinterName(oldIp) ?? '')
+            : null);
+    final lowerVendor = (vendor ?? '').toLowerCase();
+    final isTspl = info == null &&
+        (lowerVendor.contains('tsc') || lowerVendor.contains('godex'));
+    final isZpl = info == null && lowerVendor.contains('zebra');
+
+    // Có MAC nhưng máy không trả lời XP0001FIND và không phải TSC/Zebra (VD Epson,
+    // Star): máy không hiểu XP0001SAVE -> báo ngay thay vì gửi vô ích rồi chờ xác minh.
+    // (Không có MAC thì vẫn để native thử SDK riêng của nền tảng ở bước 4.)
+    if (info == null && !isTspl && !isZpl && printerMac != null) {
+      return LanIpChangeResult(
+        status: LanIpChangeStatus.notSupported,
+        mac: printerMac,
+        message: 'Máy in ${vendor != null ? '$vendor ' : ''}($oldIp) không hỗ trợ '
+            'đổi IP từ app. '
+            'Hãy đổi IP trên trang cấu hình của máy in (gõ $oldIp vào trình '
+            'duyệt; Epson tự chuyển sang https), hoặc đặt DHCP reservation '
+            'trên router.',
+      );
+    }
 
     String? pick(String? value) =>
         (value != null && value.trim().isNotEmpty) ? value.trim() : null;
@@ -2431,14 +2515,6 @@ class PrinterLabel {
 
     // 4. Gửi lệnh — plugin tự chọn cách theo những gì máy in trả lời được.
     String? method;
-    final vendor = vendorFromMac(printerMac) ??
-        (info == null
-            ? detectVendor(await getLanPrinterName(oldIp) ?? '')
-            : null);
-    final lowerVendor = (vendor ?? '').toLowerCase();
-    final isTspl = info == null &&
-        (lowerVendor.contains('tsc') || lowerVendor.contains('godex'));
-    final isZpl = info == null && lowerVendor.contains('zebra');
 
     if (isTspl || isZpl) {
       // Giữ nguyên cú pháp lệnh của bản trước — chưa kiểm trên máy TSC/Zebra thật.

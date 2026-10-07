@@ -34,6 +34,9 @@ class DevicesTab extends StatefulWidget {
   final Function(LanDeviceModel device)? onIdentifyLanDevice;
   final Function(LanDeviceModel device)? onPrintTestSlip;
 
+  /// Gọi khi đóng màn hình "Đổi IP" — để cập nhật IP các máy in đã kết nối.
+  final VoidCallback? onNetworkConfigClosed;
+
   // Bluetooth inline parameters
   final List<BluetoothDeviceModel> btDevices;
   final bool isScanningBt;
@@ -68,6 +71,7 @@ class DevicesTab extends StatefulWidget {
     required this.onConnectLanDevice,
     this.onIdentifyLanDevice,
     this.onPrintTestSlip,
+    this.onNetworkConfigClosed,
     required this.btDevices,
     required this.isScanningBt,
     required this.hasScannedBt,
@@ -464,7 +468,7 @@ class _DevicesTabState extends State<DevicesTab> with TickerProviderStateMixin {
                       context,
                       MaterialPageRoute(
                           builder: (_) => const NetworkConfigScreen()),
-                    );
+                    ).then((_) => widget.onNetworkConfigClosed?.call());
                   },
                   child: Container(
                     padding:

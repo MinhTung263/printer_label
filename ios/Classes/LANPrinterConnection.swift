@@ -110,6 +110,9 @@ public final class LANPrinterConnection {
     // Callbacks
     public var onConnected: (() -> Void)?
     public var onDisconnected: ((_ error: Error?) -> Void)?
+    /// Bỏ cuộc vì không tới được máy in (timeout / unreachable) — máy có thể đã tắt hoặc
+    /// đổi IP. Gọi trên queue của connection.
+    public var onUnreachable: ((_ kind: FailureKind) -> Void)?
 
     // Hàng đợi completion cho connect(). Mọi caller gọi connect() trong khi đang
     // .connecting đều được thêm vào đây và fire CHÍNH XÁC 1 lần khi connected/failed/timeout.
@@ -131,6 +134,19 @@ public final class LANPrinterConnection {
         idleCloseWork?.cancel()
         connection?.stateUpdateHandler = nil
         connection?.cancel()
+        // Manager bỏ connection khỏi map ngay sau disconnect() -> object có thể bị giải
+        // phóng trước khi khối async (weak self) chạy. Caller đang chờ vẫn phải nhận kết quả.
+        let pendingConnects = connectCompletions
+        var pendingJobs = writeQueue
+        if let unconfirmed = pendingConfirmJob { pendingJobs.insert(unconfirmed, at: 0) }
+        if !pendingConnects.isEmpty || !pendingJobs.isEmpty {
+            DispatchQueue.main.async {
+                for c in pendingConnects { c(false) }
+                for job in pendingJobs {
+                    job.completion?(false, SendError(kind: .unreachable, underlying: nil))
+                }
+            }
+        }
     }
 
     // MARK: - Connect / Disconnect
@@ -278,6 +294,9 @@ public final class LANPrinterConnection {
             self.cancelIdleClose()
             self.teardownConnection()
             self.state = .disconnected
+            // Đang connect dở mà bị ngắt -> timeout không còn fire (connection đã nil),
+            // phải trả kết quả cho caller đang chờ, nếu không connectLan treo vĩnh viễn.
+            self.fireConnectCompletions(false)
             // Job chưa gửi bị hủy theo yêu cầu người dùng → trả lỗi cho caller đang chờ.
             if let unconfirmed = self.pendingConfirmJob {
                 self.pendingConfirmJob = nil
@@ -407,11 +426,19 @@ public final class LANPrinterConnection {
 
         let noMoreRetries = (kind == .timeout || kind == .unreachable) && attempts >= maxTimeoutRetries
         guard attempts < maxAttempts, !noMoreRetries else {
-            let failed = writeQueue.removeFirst()
-            print("[LANPrinterConnection] 🚫 Bỏ job tới \(ip) sau \(attempts) lần thử: \(kind.rawValue)")
+            // Không tới được máy in (timeout / unreachable) -> các job còn lại cùng IP chắc
+            // chắn cũng hỏng: báo lỗi CẢ hàng đợi ngay. Trước đây mỗi job tự chờ timeout
+            // lại từ đầu (~12s/job), in N tem tới IP đã chết thì treo N x 12s không báo gì.
+            let giveUpAll = kind == .timeout || kind == .unreachable
+            let failed = giveUpAll ? writeQueue : [writeQueue[0]]
+            writeQueue.removeFirst(failed.count)
+            print("[LANPrinterConnection] 🚫 Bỏ \(failed.count) job tới \(ip) sau \(attempts) lần thử: \(kind.rawValue)")
             DispatchQueue.main.async {
-                failed.completion?(false, SendError(kind: kind, underlying: error))
+                for job in failed {
+                    job.completion?(false, SendError(kind: kind, underlying: error))
+                }
             }
+            if giveUpAll { onUnreachable?(kind) }
             // Còn job khác thì tiếp tục thử.
             if !writeQueue.isEmpty { connect() }
             return
@@ -467,7 +494,8 @@ public final class LANPrinterConnection {
         idleCloseWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            guard self.writeQueue.isEmpty, !self.isWriting, self.state == .connected else { return }
+            guard self.writeQueue.isEmpty, !self.isWriting, self.state == .connected,
+                  let closing = self.connection else { return }
             print("[LANPrinterConnection] 💤 Nhả socket \(self.ip) để thiết bị khác dùng")
             // Đóng NHẸ NHÀNG, KHÔNG dùng cancel(). `contentProcessed` chỉ báo dữ liệu đã
             // được đẩy xuống tầng TCP, KHÔNG phải máy in đã nhận/in xong. Với đơn dài
@@ -479,24 +507,22 @@ public final class LANPrinterConnection {
             // `send(content: nil, isComplete: true)` gửi FIN sau khi toàn bộ dữ liệu đã
             // flush xong: máy in đọc hết những gì đã gửi, thấy EOF rồi tự đóng phía nó.
             // Đây cũng là cách máy in RAW/JetDirect nhận biết hết một job.
+            //
+            // Tách socket đang đóng khỏi `self.connection` NGAY: connect()/send() gọi trong
+            // lúc chờ FIN sẽ mở socket MỚI. Trước đây khi FIN xong lại teardown
+            // `self.connection` — tức socket MỚI đang connecting — mà không fire completion,
+            // timeout cũng bỏ qua (connection đã nil) -> connectLan treo vĩnh viễn.
             self.state = .disconnected
-            self.connection?.send(content: nil, contentContext: .finalMessage, isComplete: true,
-                                  completion: .contentProcessed({ [weak self] _ in
-                guard let self = self else { return }
+            self.connection = nil
+            closing.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                         completion: .contentProcessed({ _ in
                 // FIN đã đi; giờ mới thực sự dọn socket.
-                self.queue.async { self.finishIdleClose() }
+                closing.stateUpdateHandler = nil
+                closing.cancel()
             }))
         }
         idleCloseWork = work
         queue.asyncAfter(deadline: .now() + idleCloseDelay, execute: work)
-    }
-
-    /// Dọn socket sau khi FIN đã được gửi xong. Phải gọi từ trong self.queue.
-    private func finishIdleClose() {
-        // Có job mới xen vào trong lúc chờ FIN flush → giữ socket lại, đừng đóng.
-        guard writeQueue.isEmpty, !isWriting else { return }
-        teardownConnection()
-        state = .disconnected
     }
 
     private func cancelIdleClose() {

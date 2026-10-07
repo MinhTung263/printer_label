@@ -137,6 +137,11 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                     BLEManager.shared.disconnect(identifier: bleId, result: result)
                 } else if connectionType == "Bluetooth" {
                     BLEManager.shared.disconnectAll(result: result)
+                } else if let ip = extractLANIp(from: id) {
+                    // Chỉ ngắt ĐÚNG máy LAN được yêu cầu. Trước đây nhánh này gọi
+                    // disconnectLAN -> disconnectAll (printer.ip luôn rỗng): ngắt cứng mọi
+                    // máy in LAN, kể cả máy đang in hoặc vừa kết nối.
+                    LANPrinterManager.shared.disconnect(ip: ip) { ok in result(ok) }
                 } else {
                     disconnectLAN(result: result)
                 }
