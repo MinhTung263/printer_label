@@ -555,6 +555,27 @@ class PrinterThermal {
         return stream.toByteArray()
     }
 
+    /** Gửi nguyên [call.bytes] xuống máy in (VD lệnh còi nhận diện máy), không thêm gì. */
+    fun sendRawBytes(
+        call: MethodCall,
+        curConnect: IDeviceConnection,
+        result: MethodChannel.Result
+    ) {
+        try {
+            val bytes = call.argument<ByteArray>("bytes")
+            if (bytes == null || bytes.isEmpty()) {
+                result.success(false)
+                return
+            }
+            synchronized(lockFor(curConnect)) {
+                sendAllSync(curConnect, bytes, bytes.size)
+            }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("PRINT_ERROR", e.message, null)
+        }
+    }
+
     fun openDrawer(
         call: MethodCall,
         curConnect: IDeviceConnection,

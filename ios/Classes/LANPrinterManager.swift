@@ -52,6 +52,11 @@ public final class LANPrinterManager {
     private func connectionFor(ip: String, port: UInt16 = 9100) -> LANPrinterConnection {
         if let existing = connections[ip] { return existing }
         let conn = LANPrinterConnection(ip: ip, port: port)
+        // Không tới được máy in -> thôi coi IP này là "đã ghép nối", để checkConnect báo
+        // đúng và app có cơ hội tìm lại máy (VD máy in đổi IP) thay vì cứ in vào IP cũ.
+        conn.onUnreachable = { [weak self] _ in
+            self?.queue.async { _ = self?.registeredPrinters.remove(ip) }
+        }
         connections[ip] = conn
         return conn
     }

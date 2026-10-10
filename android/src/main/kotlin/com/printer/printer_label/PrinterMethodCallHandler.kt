@@ -88,12 +88,24 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     result.success(true)
                 }
 
+                "set_hold_usb_permission_queue" -> {
+                    plugin.holdUsbPermissionQueue = call.argument<Boolean>("enabled") ?: false
+                    if (!plugin.holdUsbPermissionQueue) plugin.releaseUsbPermissionQueue()
+                    result.success(true)
+                }
+
+                "release_usb_permission_queue" -> {
+                    plugin.releaseUsbPermissionQueue(call.argument<String>("device_id"))
+                    result.success(true)
+                }
+
                 "get_usb_printers_needing_permission" -> {
                     result.success(plugin.getUsbPrintersNeedingPermission())
                 }
 
                 "request_usb_permissions" -> {
-                    plugin.requestUsbPermissions(result)
+                    val deviceId = call.argument<String>("device_id")
+                    plugin.requestUsbPermissions(result, deviceId)
                 }
 
                 "auto_connect_built_in" -> {
@@ -207,6 +219,12 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                     runPrintJob(call, result) { conn, targetResult ->
                         plugin.printThermal.openDrawer(call, conn, targetResult)
+                    }
+                }
+
+                "send_raw_bytes" -> {
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printThermal.sendRawBytes(call, conn, targetResult)
                     }
                 }
 
@@ -333,7 +351,8 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
 
                 "scan_net_printers" -> {
-                    val devices = mutableListOf<Map<String, Any>>()
+                    // Callback của SDK chạy trên thread khác, main thread đọc sau 1.5s.
+                    val devices = java.util.Collections.synchronizedList(mutableListOf<Map<String, Any>>())
                     net.posprinter.POSPrinter.searchNetDevice { udpDevice ->
                         if (udpDevice != null) {
                             val map = mapOf(
@@ -350,7 +369,7 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     // Wait, usually it might be asynchronous. We should probably wait a bit or it returns immediately.
                     // Assuming we wait 1.5 seconds.
                     Handler(Looper.getMainLooper()).postDelayed({
-                        result.success(devices)
+                        result.success(synchronized(devices) { devices.toList() })
                     }, 1500)
                 }
 
@@ -360,12 +379,14 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     val mask = call.argument<String>("mask") ?: "255.255.255.0"
                     val gateway = call.argument<String>("gateway") ?: ""
                     val dhcp = call.argument<Boolean>("dhcp") ?: false
-                    val currentIp = call.argument<String>("current_ip") ?: ""
 
-                    // Chạy trên background thread — cả UDP lẫn TCP đều có thể block
+                    // Chạy trên background thread — gửi UDP có thể block.
+                    // Chỉ gửi UDP XP0001SAVE theo MAC tới cổng 9000 (không vào cổng in 9100
+                    // nên không in rác). Trả `true` = đã gửi được gói, KHÔNG phải máy in đã
+                    // đổi IP — Dart (`changeLanPrinterIp`) tự xác minh sau khi gửi.
+                    // Không có MAC thì không có cách gửi an toàn trên Android -> `false`.
                     kotlin.concurrent.thread {
-                        // --- Tuyến 1 (Ưu tiên): Xprinter UDP (hoạt động với Xprinter, POS printer) ---
-                        // Gửi gói UDP tới cổng 9000, không gửi tới cổng TCP 9100 để tránh máy in bị in rác/in hóa đơn trắng
+                        var sent = false
                         if (mac.isNotEmpty() && ip.isNotEmpty()) {
                             try {
                                 net.posprinter.POSPrinter.udpNetConfig(
@@ -376,31 +397,12 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                                     else ByteArray(4),
                                     dhcp
                                 )
-                                Handler(Looper.getMainLooper()).post {
-                                    result.success(true)
-                                }
-                                return@thread
+                                sent = true
                             } catch (_: Exception) {
-                                // Nếu UDP lỗi, tiếp tục thử tuyến TCP bên dưới
                             }
                         }
-
-                        // --- Tuyến 2: Chỉ khi không có MAC và có currentIp mới gửi qua TCP 9100 (Epson, Brother) ---
-                        var escOk = false
-                        if (currentIp.isNotEmpty() && ip.isNotEmpty()) {
-                            escOk = NetworkConfigHelper.sendEscIpConfig(
-                                currentIp = currentIp,
-                                newIp = ip,
-                                mask = mask,
-                                gateway = gateway,
-                                dhcp = dhcp,
-                            )
-                        }
-
-                        // Trả kết quả về main thread
-                        val success = escOk || mac.isNotEmpty()
                         Handler(Looper.getMainLooper()).post {
-                            result.success(success)
+                            result.success(sent)
                         }
                     }
                 }

@@ -60,7 +60,7 @@ class MyHomePage extends StatefulWidget {
 const String defaultPrinterIp = '192.168.1.199';
 
 class _MyHomePageState extends State<MyHomePage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   bool isConnected = false;
   bool isConnecting = false;
@@ -134,6 +134,7 @@ class _MyHomePageState extends State<MyHomePage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, initialIndex: 0, vsync: this);
+    WidgetsBinding.instance.addObserver(this);
     _checkConnectionState(ipAddress: textEditingController.text);
     _listenUsb();
     _checkBuiltInPrinter();
@@ -161,7 +162,14 @@ class _MyHomePageState extends State<MyHomePage>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Máy in có thể đã đổi IP (DHCP) trong lúc app ở nền.
+    if (state == AppLifecycleState.resumed) _refreshLanPrinterIps();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     textEditingController.dispose();
     focusNode.dispose();
@@ -454,6 +462,8 @@ class _MyHomePageState extends State<MyHomePage>
         );
       } catch (e) {
         debugPrint('Lỗi in trên thiết bị ${device.label}: $e');
+        // Lỗi in LAN có thể do máy in đã đổi IP — tìm lại theo MAC.
+        if (device.type == 'LAN') _refreshLanPrinterIps();
         if (mounted) {
           showTopNotification(context, 'Lỗi in trên ${device.label}: $e');
         }
@@ -467,6 +477,7 @@ class _MyHomePageState extends State<MyHomePage>
     if (input.isEmpty) return;
 
     final displayName = lanDevice?.name ?? 'LAN: $input';
+    final mac = PrinterLabel.normalizeMac(lanDevice?.mac);
 
     setState(() => isConnecting = true);
     try {
@@ -481,8 +492,10 @@ class _MyHomePageState extends State<MyHomePage>
             id: DeviceId.lan(input),
             label: '$displayName ($input)',
             type: 'LAN',
+            mac: mac,
           ));
         });
+        if (mac == null) _fillLanMac(DeviceId.lan(input), input);
         context.showSnackBar('Thiết bị LAN $displayName đã kết nối',
             backgroundColor: const Color(0xFF10B981));
         return;
@@ -497,16 +510,88 @@ class _MyHomePageState extends State<MyHomePage>
             id: DeviceId.lan(input),
             label: '$displayName ($input)',
             type: 'LAN',
+            mac: mac,
           ));
         }
       });
       focusNode.unfocus();
+      // Nhập IP tay thì chưa có MAC — hỏi máy in để sau này tìm lại được khi đổi IP.
+      if (ok && mac == null) _fillLanMac(DeviceId.lan(input), input);
       context.showSnackBar(
         ok ? 'Kết nối LAN thành công: $displayName' : 'Kết nối LAN thất bại',
         backgroundColor: ok ? const Color(0xFF10B981) : const Color(0xFFF43F5E),
       );
     } finally {
       if (mounted) setState(() => isConnecting = false);
+    }
+  }
+
+  /// Lấy MAC cho máy LAN đã kết nối nhưng chưa có MAC (VD nhập IP tay).
+  Future<void> _fillLanMac(String deviceId, String ip) async {
+    final mac =
+        PrinterLabel.normalizeMac(await PrinterLabel.resolveLanPrinterMac(ip));
+    if (mac == null || !mounted) return;
+    final index = _connectedDevices.indexWhere((d) => d.id == deviceId);
+    if (index < 0) return;
+    final d = _connectedDevices[index];
+    setState(() {
+      _connectedDevices[index] =
+          ConnectedDevice(id: d.id, label: d.label, type: d.type, mac: mac);
+    });
+  }
+
+  bool _isRefreshingLanIps = false;
+
+  /// Cập nhật IP cho các máy in LAN đã kết nối: tìm lại từng máy theo MAC bằng
+  /// [PrinterLabel.findLanPrinterIpByMac]. Máy nào đã sang IP khác thì kết nối lại
+  /// tới IP mới và cập nhật thẻ máy in trên màn hình.
+  Future<void> _refreshLanPrinterIps() async {
+    if (_isRefreshingLanIps) return;
+    _isRefreshingLanIps = true;
+    try {
+      final lanDevices = _connectedDevices
+          .where((d) => d.type == 'LAN' && d.mac != null)
+          .toList();
+      for (final device in lanDevices) {
+        final oldIp = device.id.replaceFirst('LAN:', '');
+        final newIp = await PrinterLabel.findLanPrinterIpByMac(
+          device.mac!,
+          lastIp: oldIp,
+        );
+        debugPrint(
+            '[LAN] ${device.mac}: $oldIp -> ${newIp ?? 'không tìm thấy'}');
+        if (newIp == null || newIp == oldIp || !mounted) continue;
+
+        final ok = await PrinterLabel.connectLan(ipAddress: newIp);
+        if (!mounted) return;
+        if (!ok) continue;
+        try {
+          await PrinterLabel.disconnectPrinter(deviceId: device.id);
+        } catch (_) {}
+        if (!mounted) return;
+
+        setState(() {
+          _connectedDevices.removeWhere((d) => d.id == device.id);
+          _connectedDevices.add(ConnectedDevice(
+            id: DeviceId.lan(newIp),
+            label: device.label.replaceAll(oldIp, newIp),
+            type: 'LAN',
+            mac: device.mac,
+          ));
+          for (int i = 0; i < _lanDevices.length; i++) {
+            if (PrinterLabel.normalizeMac(_lanDevices[i].mac) == device.mac) {
+              _lanDevices[i] = _lanDevices[i].copyWith(ip: newIp);
+            }
+          }
+          if (textEditingController.text == oldIp) {
+            textEditingController.text = newIp;
+          }
+        });
+        context.showSnackBar('Máy in đã đổi IP: $oldIp → $newIp',
+            backgroundColor: const Color(0xFF10B981));
+      }
+    } finally {
+      _isRefreshingLanIps = false;
     }
   }
 
@@ -643,6 +728,7 @@ class _MyHomePageState extends State<MyHomePage>
               },
               onIdentifyLanDevice: _identifyLanDevice,
               onPrintTestSlip: _printTestSlip,
+              onNetworkConfigClosed: _refreshLanPrinterIps,
               onConnectBuiltIn: () async {
                 setState(() => isConnecting = true);
                 try {

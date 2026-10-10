@@ -105,16 +105,29 @@ class PrinterLabel {
   static Future<void> setAutoRequestUsbPermission(bool enabled) =>
       _platform.setAutoRequestUsbPermission(enabled);
 
+  /// Android only. When `true`, the next printer's permission dialog waits until
+  /// [releaseUsbPermissionQueue] is called for the printer just granted (e.g.
+  /// after the app closed its "create printer" screen), so dialogs never pop up
+  /// over that screen. Released automatically if the connect fails or the
+  /// printer is unplugged.
+  static Future<void> setHoldUsbPermissionQueue(bool enabled) =>
+      _platform.setHoldUsbPermissionQueue(enabled);
+
+  /// Android only. Continue the permission queue held for [deviceId] (or any
+  /// printer when `null`). See [setHoldUsbPermissionQueue].
+  static Future<void> releaseUsbPermissionQueue({String? deviceId}) =>
+      _platform.releaseUsbPermissionQueue(deviceId: deviceId);
+
   /// Android only. USB printers currently plugged in that still need the user
   /// to grant permission (e.g. after the device was powered off and on).
   static Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission() =>
       _platform.getUsbPrintersNeedingPermission();
 
   /// Android only. Shows the system permission dialog for each printer from
-  /// [getUsbPrintersNeedingPermission], one after another. Returns how many
-  /// printers were granted.
-  static Future<int> requestUsbPermissions() =>
-      _platform.requestUsbPermissions();
+  /// [getUsbPrintersNeedingPermission], or a specific printer if [deviceId] is specified.
+  /// Returns how many printers were granted.
+  static Future<int> requestUsbPermissions({String? deviceId}) =>
+      _platform.requestUsbPermissions(deviceId: deviceId);
 
   /// Discovers LAN printers by scanning the local network for open port 9100.
   ///
@@ -135,27 +148,7 @@ class PrinterLabel {
       // 3 lần thử là đủ để WiFi kịp cấp IP sau khi vừa bật; 5 lần chỉ thêm 1s chờ
       // vô ích khi thiết bị thực sự không có mạng LAN.
       for (int retry = 0; retry < 3; retry++) {
-        final interfaces = await NetworkInterface.list(
-          type: InternetAddressType.IPv4,
-          includeLoopback: false,
-        );
-        validIps.clear();
-        for (var interface in interfaces) {
-          for (var address in interface.addresses) {
-            final ip = address.address;
-            bool isClassB = false;
-            if (ip.startsWith('172.')) {
-              final parts = ip.split('.');
-              if (parts.length >= 2) {
-                final secondOctet = int.tryParse(parts[1]) ?? 0;
-                isClassB = secondOctet >= 16 && secondOctet <= 31;
-              }
-            }
-            if (ip.startsWith('192.168.') || ip.startsWith('10.') || isClassB) {
-              validIps.add(ip);
-            }
-          }
-        }
+        validIps = await _localPrivateIpv4s();
         if (validIps.isNotEmpty) break;
         await Future.delayed(const Duration(milliseconds: 500));
       }
@@ -277,6 +270,33 @@ class PrinterLabel {
     return controller.stream;
   }
 
+  /// IPv4 nội bộ (192.168.x.x, 10.x.x.x, 172.16–31.x.x) của các interface đang bật
+  /// trên thiết bị — tức các mạng LAN mà thiết bị có thể tới được máy in.
+  static Future<List<String>> _localPrivateIpv4s() async {
+    final List<String> ips = [];
+    final interfaces = await NetworkInterface.list(
+      type: InternetAddressType.IPv4,
+      includeLoopback: false,
+    );
+    for (var interface in interfaces) {
+      for (var address in interface.addresses) {
+        final ip = address.address;
+        bool isClassB = false;
+        if (ip.startsWith('172.')) {
+          final parts = ip.split('.');
+          if (parts.length >= 2) {
+            final secondOctet = int.tryParse(parts[1]) ?? 0;
+            isClassB = secondOctet >= 16 && secondOctet <= 31;
+          }
+        }
+        if (ip.startsWith('192.168.') || ip.startsWith('10.') || isClassB) {
+          ips.add(ip);
+        }
+      }
+    }
+    return ips;
+  }
+
   /// Checks if a name is a generic clone emulation string rather than a true hardware model.
   static bool isGenericEmulation(String text) {
     final upper = text.toUpperCase();
@@ -364,6 +384,11 @@ class PrinterLabel {
     // 00:1A:EF là "Loopcomm Technology, Inc." (hãng làm MODULE MẠNG, không phải PDIT):
     // máy in hãng khác dùng module Loopcomm cũng sẽ hiện "PDIT".
     '001AEF': 'PDIT',
+    // KiotViet / Xprinter — bổ sung theo máy thực tế của khách (Xprinter đo từ
+    // 00:61:7B:6B:4D:39, 2026-10-05; 00:61:1B / 00:61:1D theo máy thực tế, 2026-10-10).
+    // Giữ khớp với `LanPrinterProbe.kt`.
+    '00BACB': 'KiotViet',
+    '00617B': 'Xprinter', '00611B': 'Xprinter', '00616D': 'Xprinter',
   };
 
   /// Tra hãng máy in theo MAC (VD "00:1A:EF:CB:2C:B0" -> "PDIT"). Trả null nếu không biết.
@@ -1390,15 +1415,18 @@ class PrinterLabel {
   }
 
   /// Resolves a LAN printer's hardware MAC address using safe, read-only network
-  /// queries — trying SNMP (`ifPhysAddress`), HTTP web config, and NetBIOS (Unit ID)
-  /// in parallel, then falling back to the native ARP / neighbor table (Android only).
-  /// Returns the first channel to yield a real (non-broadcast, non-zero) MAC, in that
-  /// priority order.
+  /// queries — trying `XP0001FIND` unicast, SNMP (`ifPhysAddress`), HTTP web config,
+  /// and NetBIOS (Unit ID) in parallel, then falling back to the native ARP / neighbor
+  /// table (Android only). Returns the first channel to yield a real (non-broadcast,
+  /// non-zero) MAC, in that priority order.
   static Future<String?> resolveLanPrinterMac(
     String ip, {
     Duration timeout = const Duration(milliseconds: 800),
   }) async {
     final results = await Future.wait([
+      // MAC do chính firmware máy in tự khai báo — đáng tin nhất, và gửi unicast nên
+      // chạy được trên iPhone thật mà không cần entitlement multicast.
+      queryXpUdpInfo(ip, timeout: timeout).then((v) => v?.mac),
       querySnmpMac(ip, timeout: timeout),
       queryHttpMac(ip, timeout: timeout),
       queryNetBiosMac(ip, timeout: timeout),
@@ -1615,16 +1643,38 @@ class PrinterLabel {
     return controller.stream;
   }
 
-  /// Sends an identify signal (audio beep, paper feed, or test slip) to a LAN printer to help
-  /// the user physically determine which printer on their desk matches [ipAddress].
-  static Future<bool> identifyLanPrinter({
-    required String ipAddress,
-    int port = 9100,
+  /// Android only. Signals a connected USB printer (e.g. right after the user
+  /// granted USB permission) so the user can tell which physical printer it is.
+  ///
+  /// The app cannot know whether the printer has a buzzer or speaks ESC/POS or
+  /// TSPL, so everything is sent at once: the [identifyLanPrinter] beep, a TSPL
+  /// `FEED` (label printers nudge the paper ~3mm instead of wasting a label) and,
+  /// when [slipText] is given, a short ESC/POS slip that is then cut (label
+  /// printers ignore it). TSPL text lines are sent BEFORE the slip so receipt
+  /// printers print them on the slip, not on top of the next receipt.
+  /// [slipText] should be plain ASCII (no diacritics).
+  /// Returns `false` if nothing was sent.
+  static Future<bool> identifyUsbPrinter({
+    required String deviceId,
     bool beep = true,
     bool feed = true,
-    bool printSlip = false,
-    Duration timeout = const Duration(seconds: 2),
+    String? slipText,
   }) async {
+    final payload = _identifyPayload(beep: beep, feed: feed);
+    if (slipText != null && slipText.isNotEmpty) {
+      payload.addAll([
+        0x1B, 0x40, // ESC @ - Initialize
+        0x1B, 0x61, 0x01, // Center align
+        ...utf8.encode("\n$slipText\n\n\n\n"),
+        0x1D, 0x56, 0x42, 0x00, // Cut paper
+      ]);
+    }
+    if (payload.isEmpty) return true;
+    return _platform.sendRawBytes(deviceId: deviceId, bytes: payload);
+  }
+
+  /// Lệnh còi / nhích giấy dùng chung cho mọi loại máy (ESC/POS + TSPL/CPCL/ZPL).
+  static List<int> _identifyPayload({required bool beep, required bool feed}) {
     final payload = <int>[];
 
     if (beep) {
@@ -1680,6 +1730,21 @@ class PrinterLabel {
       payload.addAll(utf8.encode("\r\nFEED 24\r\n")); // TSPL: feed 24 dots
       payload.addAll([0x1B, 0x4A, 0x18]); // ESC/POS: ESC J 24 dots
     }
+
+    return payload;
+  }
+
+  /// Sends an identify signal (audio beep, paper feed, or test slip) to a LAN printer to help
+  /// the user physically determine which printer on their desk matches [ipAddress].
+  static Future<bool> identifyLanPrinter({
+    required String ipAddress,
+    int port = 9100,
+    bool beep = true,
+    bool feed = true,
+    bool printSlip = false,
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    final payload = _identifyPayload(beep: beep, feed: feed);
 
     if (printSlip) {
       // ESC/POS Test Slip
@@ -2027,10 +2092,577 @@ class PrinterLabel {
     return _platform.scanNetPrinters();
   }
 
-  /// Sets the IP address of a printer on the network.
-  /// - POS / Xprinter printers: uses UDP Broadcast XP0001SAVE by MAC address.
-  /// - TSC / TSPL printers: sends TSPL `SET IP` / `SET DHCP` via TCP port 9100.
-  /// - Zebra / ZPL printers: sends ZPL `^ND` commands via TCP port 9100.
+  // ---------------------------------------------------------------------------
+  // Đổi IP cài trong máy in
+  // ---------------------------------------------------------------------------
+
+  /// Chuẩn hoá MAC về dạng `AA:BB:CC:DD:EE:FF` để so khớp giữa các nguồn (ARP Android
+  /// trả chữ thường, macOS bỏ số 0 đầu như `0:1a:ef`, SDK có thể dùng `-` hoặc không
+  /// có dấu phân cách). Trả `null` nếu không phải MAC hợp lệ, hoặc toàn 00 / toàn FF.
+  static String? normalizeMac(String? mac) {
+    if (mac == null) return null;
+    final trimmed = mac.trim();
+    final parts = trimmed.split(RegExp(r'[:\-]'));
+    final List<String> octets;
+    if (parts.length == 6) {
+      octets = parts.map((p) => p.padLeft(2, '0')).toList();
+    } else {
+      final hex = trimmed.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '');
+      if (hex.length != 12) return null;
+      octets = [for (int i = 0; i < 6; i++) hex.substring(i * 2, i * 2 + 2)];
+    }
+    final valid = RegExp(r'^[0-9A-Fa-f]{2}$');
+    if (!octets.every(valid.hasMatch)) return null;
+    final upper = octets.map((o) => o.toUpperCase()).toList();
+    if (upper.every((o) => o == '00') || upper.every((o) => o == 'FF')) {
+      return null;
+    }
+    return upper.join(':');
+  }
+
+  /// Hỏi cấu hình mạng của máy in tại [ip] bằng gói `XP0001FIND` gửi **unicast** tới
+  /// `ip:9000`. Máy in (Xprinter, PDIT và các máy cùng firmware) trả lời `XP0001FOUND`
+  /// kèm MAC, IP, mask, gateway và cờ DHCP. Trả `null` nếu máy in không trả lời.
+  ///
+  /// Gửi unicast (không broadcast) nên chạy được trên iPhone thật mà không cần
+  /// entitlement `com.apple.developer.networking.multicast`. Không gửi gì vào cổng in
+  /// 9100 nên không thể làm máy in in ra giấy.
+  static Future<LanPrinterNetInfo?> queryXpUdpInfo(
+    String ip, {
+    Duration timeout = const Duration(milliseconds: 800),
+  }) async {
+    final dest = InternetAddress.tryParse(ip.trim());
+    if (dest == null || dest.type != InternetAddressType.IPv4) return null;
+
+    RawDatagramSocket? socket;
+    try {
+      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      final completer = Completer<LanPrinterNetInfo?>();
+
+      socket.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final dg = socket?.receive();
+        if (dg == null || completer.isCompleted) return;
+        // Chỉ nhận trả lời từ đúng IP được hỏi.
+        if (dg.address.address != dest.address) return;
+        final info = _parseXpFoundPacket(dg.data);
+        if (info != null) completer.complete(info);
+      });
+
+      final packet = ascii.encode('XP0001FIND');
+      socket.send(packet, dest, 9000);
+      // Gửi lặp một lần phòng mất gói UDP trên Wi-Fi yếu.
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (completer.isCompleted) return;
+        try {
+          socket?.send(packet, dest, 9000);
+        } catch (_) {}
+      });
+
+      return await completer.future.timeout(timeout, onTimeout: () => null);
+    } catch (_) {
+      return null;
+    } finally {
+      socket?.close();
+      socket = null;
+    }
+  }
+
+  /// Parse gói `XP0001FOUND` (34 byte, đo từ máy PDIT thật):
+  /// `[0..10]` "XP0001FOUND" · `[11..16]` MAC · `[17..18]` 0x22 0x00 · `[19..22]` IP ·
+  /// `[23..26]` mask · `[27..30]` gateway · `[31..32]` port (LE) · `[33]` DHCP (1 = bật).
+  static LanPrinterNetInfo? _parseXpFoundPacket(List<int> d) {
+    if (d.length < 31) return null;
+    if (String.fromCharCodes(d.sublist(0, 11)) != 'XP0001FOUND') return null;
+    final mac = normalizeMac(d
+        .sublist(11, 17)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(':'));
+    if (mac == null) return null;
+    String ipAt(int i) => d.sublist(i, i + 4).join('.');
+    return LanPrinterNetInfo(
+      mac: mac,
+      ip: ipAt(19),
+      mask: ipAt(23),
+      gateway: ipAt(27),
+      dhcp: d.length >= 34 && d[33] == 1,
+    );
+  }
+
+  static int? _ipv4ToInt(String? ip) {
+    if (ip == null) return null;
+    final parts = ip.trim().split('.');
+    if (parts.length != 4) return null;
+    int value = 0;
+    for (final part in parts) {
+      if (part.isEmpty || part.length > 3) return null;
+      final n = int.tryParse(part);
+      if (n == null || n < 0 || n > 255) return null;
+      value = (value << 8) | n;
+    }
+    return value;
+  }
+
+  static String _intToIpv4(int v) =>
+      '${(v >> 24) & 0xFF}.${(v >> 16) & 0xFF}.${(v >> 8) & 0xFF}.${v & 0xFF}';
+
+  /// Mask hợp lệ: dãy bit 1 liên tục từ trái, khác 0.
+  static bool _isValidMask(int mask) {
+    if (mask == 0) return false;
+    final inverted = (~mask) & 0xFFFFFFFF;
+    return (inverted & (inverted + 1)) == 0;
+  }
+
+  /// `true` nếu kết nối TCP được tới `ip:port`.
+  static Future<bool> _tcpOpen(
+    String ip,
+    int port, {
+    Duration timeout = const Duration(milliseconds: 1500),
+  }) async {
+    try {
+      final socket = await Socket.connect(ip, port, timeout: timeout);
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// `true` nếu có máy trả lời ở `ip:port`: kết nối được, hoặc bị từ chối / RST ngay
+  /// (máy tồn tại nhưng cổng đóng). Hết giờ hoặc không tới được thì `false`.
+  ///
+  /// Mặc định chờ 2.5s: điện thoại ở chế độ tiết kiệm pin trả lời ARP chậm, chờ
+  /// 600ms chỉ bắt được khoảng một nửa số máy chờ 5s bắt được (đo 2026-10-05).
+  static Future<bool> _tcpPortAnswers(
+    String ip,
+    int port, {
+    Duration timeout = const Duration(milliseconds: 2500),
+  }) async {
+    try {
+      final socket = await Socket.connect(ip, port, timeout: timeout);
+      socket.destroy();
+      return true;
+    } on SocketException catch (e) {
+      final code = e.osError?.errorCode;
+      // ECONNREFUSED: 61 (iOS/macOS), 111 (Android/Linux). ECONNRESET: 54 / 104.
+      return code == 61 || code == 111 || code == 54 || code == 104;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Ping [ip] bằng lệnh `ping` của hệ thống — chỉ có trên Android (iOS không cho
+  /// app chạy tiến trình con). Trả `false` trên nền tảng khác hoặc khi lỗi.
+  static Future<bool> _systemPing(String ip) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final result =
+          await Process.run('ping', ['-c', '2', '-i', '0.3', '-W', '1', ip])
+              .timeout(const Duration(seconds: 4));
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Có thiết bị nào đang dùng [ip] không — **chỉ là dò tốt nhất có thể**.
+  ///
+  /// App không đọc được bảng ARP (Android 10+, iOS), mà ARP là cách duy nhất mọi thiết
+  /// bị đều buộc phải trả lời. Vì vậy hàm dò gián tiếp: hỏi máy in qua UDP, gõ cửa vài
+  /// cổng TCP phổ biến (máy in, web, iPhone 62078) và ping (Android). Đo trên mạng thật
+  /// 96 thiết bị (2026-10-05): TCP + ping chỉ phát hiện khoảng 55–60% — điện thoại bật
+  /// riêng tư / tường lửa không trả lời gì. `false` KHÔNG có nghĩa IP chắc chắn trống,
+  /// và router vẫn có thể cấp IP này cho thiết bị khác về sau.
+  static Future<bool> isLanIpInUse(String ip) async {
+    final checks = <Future<bool>>[
+      queryXpUdpInfo(ip).then((v) => v != null),
+      _systemPing(ip),
+      for (final port in const [9100, 80, 443, 515, 631, 8080, 62078])
+        _tcpPortAnswers(ip, port),
+    ];
+    final results = await Future.wait(checks);
+    return results.any((v) => v);
+  }
+
+  /// Máy in (đúng [mac] nếu biết) có đang trả lời ở [ip] và in được không.
+  static Future<bool> _printerAnswersAt(String ip, String? mac) async {
+    final xp = await queryXpUdpInfo(ip);
+    if (xp != null && mac != null && xp.mac != mac) return false;
+    if (xp == null && mac != null) {
+      final found = normalizeMac(await resolveLanPrinterMac(ip));
+      // Đọc được MAC mà khác → máy khác. Không đọc được MAC → chỉ dựa vào cổng in.
+      if (found != null && found != mac) return false;
+    }
+    return _tcpOpen(ip, 9100);
+  }
+
+  /// Tìm IP hiện tại của máy in theo [mac] sau khi chuyển sang DHCP.
+  static Future<String?> _findPrinterIpByMac(
+    String mac,
+    String oldIp,
+    DateTime deadline,
+  ) async {
+    while (DateTime.now().isBefore(deadline)) {
+      // Router thường cấp lại đúng IP cũ. Chỉ nhận khi máy in đã báo DHCP bật, để
+      // không nhầm với lúc máy in chưa kịp áp dụng cấu hình mới.
+      final atOld = await queryXpUdpInfo(oldIp);
+      if (atOld != null && atOld.mac == mac && atOld.dhcp) {
+        if (await _tcpOpen(oldIp, 9100)) return oldIp;
+      }
+
+      try {
+        final list = await scanNetPrinters();
+        for (final item in list) {
+          final ip = item['ip'];
+          if (ip == null || ip.isEmpty || ip == oldIp) continue;
+          if (normalizeMac(item['mac']) != mac) continue;
+          if (await _printerAnswersAt(ip, mac)) return ip;
+        }
+      } catch (_) {}
+
+      await Future.delayed(const Duration(milliseconds: 1500));
+    }
+
+    return findLanPrinterIpByMac(mac);
+  }
+
+  /// Tìm IP hiện tại của máy in LAN theo [mac] — dùng khi máy in đã đổi IP (DHCP)
+  /// và app chỉ còn IP cũ đã lưu.
+  ///
+  /// Thứ tự, từ nhanh tới chậm:
+  /// 1. [lastIp] (nếu có): máy ở IP cũ trả đúng MAC thì dùng luôn.
+  /// 2. Broadcast `XP0001FIND` / SDK (`scanNetPrinters`, ~1.5s): gói trả lời có sẵn
+  ///    cả MAC lẫn IP. Có thể bị chặn trên iPhone thật nếu thiếu entitlement multicast.
+  /// 3. Quét dải /24 tìm máy mở cổng 9100, hỏi MAC từng máy (unicast `XP0001FIND`,
+  ///    SNMP, HTTP, NetBIOS, ARP) song song; gặp máy đúng MAC là dừng.
+  ///
+  /// Không mở thêm kết nối thử vào cổng in 9100 ở IP tìm được: máy in nhiệt thường chỉ
+  /// nhận một kết nối, mở/đóng dồn dập ngay trước khi in làm máy in tưởng đang bận và bỏ
+  /// lệnh in kế tiếp. MAC khớp đã đủ chứng minh đúng máy. Trả `null` khi không tìm thấy,
+  /// hoặc khi máy in không trả lời MAC qua kênh nào — lúc đó hãy cho người dùng chọn
+  /// lại máy in từ danh sách `discoverLanDevices`.
+  static Future<String?> findLanPrinterIpByMac(
+    String mac, {
+    String? lastIp,
+  }) async {
+    final target = normalizeMac(mac);
+    if (target == null) return null;
+
+    // 1. IP cũ.
+    final old = lastIp?.trim();
+    if (old != null && _ipv4ToInt(old) != null) {
+      final atOld = (await queryXpUdpInfo(old))?.mac ??
+          normalizeMac(await resolveLanPrinterMac(old));
+      // Chỉ nhận khi đọc được đúng MAC — cổng 9100 mở thôi có thể là máy in khác.
+      if (atOld == target) return old;
+    }
+
+    // 2. Broadcast.
+    try {
+      final list = await scanNetPrinters();
+      for (final item in list) {
+        final ip = item['ip'];
+        if (ip == null || ip.isEmpty) continue;
+        if (normalizeMac(item['mac']) == target) return ip;
+      }
+    } catch (_) {}
+
+    // 3. Quét /24, hỏi MAC từng máy ngay khi tìm thấy (không chờ quét xong).
+    final completer = Completer<String?>();
+    final pending = <Future<void>>[];
+    StreamSubscription<String>? sub;
+    sub = discoverLanPrinters().listen(
+      (ip) {
+        pending.add(() async {
+          if (completer.isCompleted) return;
+          final found = (await queryXpUdpInfo(ip))?.mac ??
+              normalizeMac(await resolveLanPrinterMac(ip));
+          if (found == target && !completer.isCompleted) {
+            completer.complete(ip);
+            await sub?.cancel();
+          }
+        }());
+      },
+      onError: (_) {},
+      onDone: () async {
+        await Future.wait(pending);
+        if (!completer.isCompleted) completer.complete(null);
+      },
+      cancelOnError: false,
+    );
+    return completer.future;
+  }
+
+  /// Gửi một lệnh cấu hình dạng văn bản (TSPL / ZPL) vào cổng in 9100.
+  static Future<bool> _sendRawNetCommand(String ip, String command) async {
+    try {
+      final socket = await Socket.connect(
+        ip,
+        9100,
+        timeout: const Duration(seconds: 3),
+      );
+      socket.add(utf8.encode(command));
+      await socket.flush();
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Đổi IP cài trong máy in LAN: đặt IP tĩnh ([newIp]) hoặc chuyển về DHCP ([dhcp]).
+  ///
+  /// Phía gọi không cần biết hãng máy in — plugin tự chọn cách gửi lệnh:
+  /// - Máy trả lời `XP0001FIND` (Xprinter, PDIT...) hoặc đã biết MAC: gói UDP
+  ///   `XP0001SAVE` theo MAC tới cổng 9000 (không đi vào cổng in, không in rác).
+  /// - Máy TSC / Godex (TSPL) hoặc Zebra (ZPL) do plugin tự nhận ra: lệnh văn bản
+  ///   vào cổng 9100. Chỉ gửi khi nhận ra hãng, vì máy ESC/POS sẽ in lệnh này ra giấy.
+  ///
+  /// Trình tự: lấy cấu hình hiện tại của máy in → kiểm tra IP mới (định dạng, cùng
+  /// subnet với thiết bị, không phải IP của gateway / thiết bị) → kiểm tra trùng IP
+  /// ([checkConflict]) → gửi lệnh → chờ xác minh máy in (đúng MAC) trả lời ở IP mới.
+  ///
+  /// [mask] / [gateway] để trống thì lấy theo cấu hình hiện tại của máy in (qua UDP),
+  /// nếu không có thì dùng `255.255.255.0` và `x.y.z.1` của subnet.
+  ///
+  /// Lưu ý: IP tĩnh đặt từ app **router không biết**. Khi máy in tắt, router có thể
+  /// cấp IP đó cho thiết bị khác và gây trùng IP. Cách an toàn nhất là đặt DHCP
+  /// reservation (giữ IP theo MAC) trên router.
+  static Future<LanIpChangeResult> changeLanPrinterIp({
+    required String currentIp,
+    String? mac,
+    String? newIp,
+    bool dhcp = false,
+    String? mask,
+    String? gateway,
+    bool checkConflict = true,
+    Duration verifyTimeout = const Duration(seconds: 15),
+  }) async {
+    final oldIp = currentIp.trim();
+    if (_ipv4ToInt(oldIp) == null) {
+      return LanIpChangeResult(
+        status: LanIpChangeStatus.invalidIp,
+        message: 'IP hiện tại của máy in không hợp lệ: "$currentIp"',
+      );
+    }
+
+    // 1. Cấu hình hiện tại và MAC của máy in.
+    final info = await queryXpUdpInfo(oldIp);
+    String? printerMac = normalizeMac(mac) ?? info?.mac;
+    printerMac ??= normalizeMac(await resolveLanPrinterMac(oldIp));
+
+    // Cách gửi lệnh: máy trả lời XP0001FIND -> UDP XP0001SAVE; TSC/Godex/Zebra do
+    // plugin tự nhận ra -> lệnh văn bản qua 9100.
+    final vendor = vendorFromMac(printerMac) ??
+        (info == null
+            ? detectVendor(await getLanPrinterName(oldIp) ?? '')
+            : null);
+    final lowerVendor = (vendor ?? '').toLowerCase();
+    final isTspl = info == null &&
+        (lowerVendor.contains('tsc') || lowerVendor.contains('godex'));
+    final isZpl = info == null && lowerVendor.contains('zebra');
+
+    // Có MAC nhưng máy không trả lời XP0001FIND và không phải TSC/Zebra (VD Epson,
+    // Star): máy không hiểu XP0001SAVE -> báo ngay thay vì gửi vô ích rồi chờ xác minh.
+    // (Không có MAC thì vẫn để native thử SDK riêng của nền tảng ở bước 4.)
+    if (info == null && !isTspl && !isZpl && printerMac != null) {
+      return LanIpChangeResult(
+        status: LanIpChangeStatus.notSupported,
+        mac: printerMac,
+        message: 'Máy in ${vendor != null ? '$vendor ' : ''}($oldIp) không hỗ trợ '
+            'đổi IP từ app. '
+            'Hãy đổi IP trên trang cấu hình của máy in (gõ $oldIp vào trình '
+            'duyệt; Epson tự chuyển sang https), hoặc đặt DHCP reservation '
+            'trên router.',
+      );
+    }
+
+    String? pick(String? value) =>
+        (value != null && value.trim().isNotEmpty) ? value.trim() : null;
+
+    final effMask = pick(mask) ??
+        ((info != null && _isValidMask(_ipv4ToInt(info.mask) ?? 0))
+            ? info.mask
+            : '255.255.255.0');
+    final maskInt = _ipv4ToInt(effMask);
+    if (maskInt == null || !_isValidMask(maskInt)) {
+      return LanIpChangeResult(
+        status: LanIpChangeStatus.invalidIp,
+        mac: printerMac,
+        message: 'Subnet mask không hợp lệ: "$effMask"',
+      );
+    }
+
+    // 2. Kiểm tra IP mới (chỉ khi đặt IP tĩnh).
+    String? targetIp;
+    String effGateway = pick(gateway) ?? '';
+    if (!dhcp) {
+      targetIp = newIp?.trim();
+      final targetInt = _ipv4ToInt(targetIp);
+      if (targetIp == null || targetInt == null) {
+        return LanIpChangeResult(
+          status: LanIpChangeStatus.invalidIp,
+          mac: printerMac,
+          message: 'IP mới không hợp lệ: "${newIp ?? ''}"',
+        );
+      }
+      final network = targetInt & maskInt;
+      final broadcast = network | ((~maskInt) & 0xFFFFFFFF);
+      if (targetInt == network || targetInt == broadcast) {
+        return LanIpChangeResult(
+          status: LanIpChangeStatus.invalidIp,
+          mac: printerMac,
+          message:
+              '$targetIp là địa chỉ mạng/broadcast, không đặt cho máy in được',
+        );
+      }
+
+      final localIps = await _localPrivateIpv4s();
+      if (localIps.contains(targetIp)) {
+        return LanIpChangeResult(
+          status: LanIpChangeStatus.invalidIp,
+          mac: printerMac,
+          message: '$targetIp đang là IP của chính thiết bị này',
+        );
+      }
+      final sameSubnet = localIps.any((ip) {
+        final v = _ipv4ToInt(ip);
+        return v != null && (v & maskInt) == network;
+      });
+      if (localIps.isNotEmpty && !sameSubnet) {
+        return LanIpChangeResult(
+          status: LanIpChangeStatus.invalidIp,
+          mac: printerMac,
+          message: '$targetIp không cùng mạng với thiết bị '
+              '(${localIps.join(', ')}). Đặt IP này thì thiết bị sẽ không tới được máy in.',
+        );
+      }
+
+      if (effGateway.isEmpty) {
+        final printerGw = _ipv4ToInt(info?.gateway);
+        effGateway = (printerGw != null && (printerGw & maskInt) == network)
+            ? info!.gateway
+            : _intToIpv4(network | 1);
+      }
+      if (effGateway == targetIp) {
+        return LanIpChangeResult(
+          status: LanIpChangeStatus.invalidIp,
+          mac: printerMac,
+          message: '$targetIp là IP của router (gateway)',
+        );
+      }
+
+      // 3. Kiểm tra trùng IP.
+      if (checkConflict && targetIp != oldIp && await isLanIpInUse(targetIp)) {
+        return LanIpChangeResult(
+          status: LanIpChangeStatus.conflict,
+          mac: printerMac,
+          message: '$targetIp đang có thiết bị khác dùng. Hãy chọn IP khác.',
+        );
+      }
+    } else if (effGateway.isEmpty) {
+      effGateway = info?.gateway ?? '';
+    }
+
+    // 4. Gửi lệnh — plugin tự chọn cách theo những gì máy in trả lời được.
+    String? method;
+
+    if (isTspl || isZpl) {
+      // Giữ nguyên cú pháp lệnh của bản trước — chưa kiểm trên máy TSC/Zebra thật.
+      final command = isTspl
+          ? (dhcp
+              ? 'SET DHCP\r\n'
+              : 'SET IP "$targetIp","$effMask","$effGateway"\r\n')
+          : (dhcp
+              ? '^XA^ND2,D^NRE^XZ'
+              : '^XA^ND2,Z,$targetIp,$effMask,$effGateway^NRE^XZ');
+      if (await _sendRawNetCommand(oldIp, command)) {
+        method = isTspl ? 'tspl' : 'zpl';
+      }
+    } else {
+      // Có MAC: XP0001SAVE qua UDP. Không có MAC: native thử SDK riêng của nền tảng.
+      final sent = await _platform.setNetIp(
+        mac: printerMac ?? '',
+        ip: targetIp ?? oldIp,
+        mask: effMask,
+        gateway: effGateway,
+        dhcp: dhcp,
+        currentIp: oldIp,
+      );
+      if (sent) method = printerMac != null ? 'udp' : 'native';
+    }
+
+    if (method == null) {
+      return LanIpChangeResult(
+        status: printerMac == null && vendor == null
+            ? LanIpChangeStatus.notSupported
+            : LanIpChangeStatus.failed,
+        mac: printerMac,
+        message: printerMac == null && vendor == null
+            ? 'Máy in không trả lời MAC và không nhận ra hãng nên không gửi được lệnh '
+                'đổi IP. Hãy đổi IP trên trang cấu hình của máy in, hoặc đặt DHCP '
+                'reservation trên router.'
+            : 'Gửi lệnh đổi IP tới máy in $oldIp thất bại',
+      );
+    }
+
+    // 5. Xác minh máy in đã nhận cấu hình mới.
+    final deadline = DateTime.now().add(verifyTimeout);
+    await Future.delayed(const Duration(seconds: 2));
+    String? verifiedIp;
+    if (!dhcp) {
+      while (true) {
+        if (await _printerAnswersAt(targetIp!, printerMac)) {
+          verifiedIp = targetIp;
+          break;
+        }
+        if (!DateTime.now().isBefore(deadline)) break;
+        await Future.delayed(const Duration(milliseconds: 1500));
+      }
+    } else if (printerMac != null) {
+      verifiedIp = await _findPrinterIpByMac(printerMac, oldIp, deadline);
+    }
+
+    if (verifiedIp == null) {
+      return LanIpChangeResult(
+        status: LanIpChangeStatus.unverified,
+        ip: targetIp,
+        mac: printerMac,
+        method: method,
+        message: dhcp
+            ? 'Đã gửi lệnh chuyển máy in sang DHCP nhưng chưa tìm thấy IP mới. '
+                'Hãy quét lại máy in sau vài giây.'
+            : 'Đã gửi lệnh nhưng chưa thấy máy in trả lời ở $targetIp. '
+                'Hãy chờ máy in khởi động lại mạng rồi quét lại.',
+      );
+    }
+
+    // 6. Dọn kết nối tới IP cũ.
+    if (verifiedIp != oldIp) {
+      try {
+        await _platform.disconnectPrinter(deviceId: DeviceId.lan(oldIp));
+      } catch (_) {}
+    }
+
+    return LanIpChangeResult(
+      status: LanIpChangeStatus.success,
+      ip: verifiedIp,
+      mac: printerMac,
+      method: method,
+      message: dhcp
+          ? 'Máy in đã chuyển sang DHCP, IP hiện tại: $verifiedIp'
+          : 'Đã đổi IP máy in sang $verifiedIp. Lưu ý: router vẫn có thể cấp IP này '
+              'cho thiết bị khác khi máy in tắt — nên đặt DHCP reservation (giữ IP '
+              'theo MAC) trên router.',
+    );
+  }
+
+  /// Đổi IP máy in (API cũ, giữ để tương thích).
+  ///
+  /// Có [currentIp] thì chạy [changeLanPrinterIp] (không kiểm tra trùng IP, chờ xác
+  /// minh tối đa 8s) và trả `true` khi đã gửi được lệnh. Không có [currentIp] thì chỉ
+  /// gửi gói UDP `XP0001SAVE` theo [mac] như trước. [vendor] không còn dùng — plugin
+  /// tự nhận ra hãng. Code mới nên gọi [changeLanPrinterIp] để biết kết quả chi tiết.
   static Future<bool> setNetIp({
     required String mac,
     required String ip,
@@ -2040,63 +2672,36 @@ class PrinterLabel {
     String? currentIp,
     String? vendor,
   }) async {
-    bool directCommandOk = false;
-    final lowerVendor = (vendor ?? '').toLowerCase();
-
-    // 1. TSC / TSPL (máy in mã vạch/tem nhãn TSC, Godex, Gprinter TSPL)
-    if ((lowerVendor.contains('tsc') || lowerVendor.contains('godex')) &&
-        currentIp != null &&
-        currentIp.isNotEmpty) {
-      try {
-        final socket = await Socket.connect(
-          currentIp,
-          9100,
-          timeout: const Duration(seconds: 2),
-        );
-        final cmd = dhcp
-            ? 'SET DHCP\r\n'
-            : 'SET IP "$ip","$mask","${gateway.isNotEmpty ? gateway : '192.168.1.1'}"\r\n';
-        socket.add(utf8.encode(cmd));
-        await socket.flush();
-        socket.destroy();
-        directCommandOk = true;
-      } catch (_) {}
+    if (currentIp == null || currentIp.trim().isEmpty) {
+      if (mac.isEmpty) return false;
+      return _platform.setNetIp(
+        mac: mac,
+        ip: ip,
+        mask: mask,
+        gateway: gateway,
+        dhcp: dhcp,
+      );
     }
-
-    // 2. Zebra / ZPL (máy in Zebra ZD, ZT series)
-    if (lowerVendor.contains('zebra') &&
-        currentIp != null &&
-        currentIp.isNotEmpty) {
-      try {
-        final socket = await Socket.connect(
-          currentIp,
-          9100,
-          timeout: const Duration(seconds: 2),
-        );
-        final gw = gateway.isNotEmpty ? gateway : '192.168.1.1';
-        final cmd =
-            dhcp ? '^XA^ND2,D^NRE^XZ' : '^XA^ND2,Z,$ip,$mask,$gw^NRE^XZ';
-        socket.add(utf8.encode(cmd));
-        await socket.flush();
-        socket.destroy();
-        directCommandOk = true;
-      } catch (_) {}
-    }
-
-    // 3. UDP Broadcast (XP0001SAVE) qua native SDK cho Xprinter, POS, Sunmi, Rongta, HPRT
-    final platformOk = await _platform.setNetIp(
-      mac: mac,
-      ip: ip,
-      mask: mask,
-      gateway: gateway,
-      dhcp: dhcp,
+    final result = await changeLanPrinterIp(
       currentIp: currentIp,
+      mac: mac.isEmpty ? null : mac,
+      newIp: ip,
+      dhcp: dhcp,
+      mask: mask,
+      gateway: gateway.isEmpty ? null : gateway,
+      checkConflict: false,
+      verifyTimeout: const Duration(seconds: 8),
     );
-
-    return directCommandOk || platformOk;
+    return result.status == LanIpChangeStatus.success ||
+        result.status == LanIpChangeStatus.unverified;
   }
 
   /// Attempts to configure IP on printers supporting Web Config (Epson, Brother, generic web interfaces).
+  ///
+  /// Endpoint và tham số được đoán theo mẫu chung, không theo tài liệu hãng nào; mọi
+  /// mã 2xx/3xx đều bị coi là thành công nên kết quả không đáng tin.
+  @Deprecated(
+      'Endpoint đoán mò, kết quả không đáng tin. Dùng changeLanPrinterIp.')
   static Future<bool> configureWebPrinterIp({
     required String currentIp,
     required String newIp,

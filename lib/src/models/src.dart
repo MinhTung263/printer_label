@@ -3,6 +3,7 @@ export 'device_id.dart';
 export 'bluetooth_device_model.dart';
 export 'lan_device_model.dart';
 export 'lan_quality.dart';
+export 'lan_ip_change_result.dart';
 export 'label_model.dart';
 export 'product_barcode_model.dart';
 export 'print_thermal.dart';

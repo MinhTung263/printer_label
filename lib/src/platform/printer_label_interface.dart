@@ -75,14 +75,25 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// show your own guidance first, then call [requestUsbPermissions].
   Future<void> setAutoRequestUsbPermission(bool enabled);
 
+  /// Android only. When `true`, after a USB printer is granted permission the
+  /// plugin waits for [releaseUsbPermissionQueue] before showing the permission
+  /// dialog of the next printer (default `false`). Lets the app finish its own UI
+  /// for that printer (e.g. a "create printer" screen) first. The queue is also
+  /// released automatically if connecting that printer fails or it is unplugged.
+  Future<void> setHoldUsbPermissionQueue(bool enabled);
+
+  /// Android only. Lets the permission queue held by [setHoldUsbPermissionQueue]
+  /// continue. With [deviceId], only releases if the queue is held for it.
+  Future<void> releaseUsbPermissionQueue({String? deviceId});
+
   /// Android only. USB printers currently plugged in that the app has no
   /// permission for yet (e.g. right after the device was rebooted).
   Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission();
 
   /// Android only. Shows the system permission dialog for every USB printer
-  /// returned by [getUsbPrintersNeedingPermission], one after another.
+  /// returned by [getUsbPrintersNeedingPermission], or a specific printer if [deviceId] is specified.
   /// Completes after the user answered all of them, with how many were granted.
-  Future<int> requestUsbPermissions();
+  Future<int> requestUsbPermissions({String? deviceId});
 
   /// iOS: Starts scanning for Bluetooth Low Energy (BLE) devices.
   ///
@@ -254,6 +265,15 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     int port = 9100,
   }) {
     throw UnimplementedError('getLanPrinterInfo() has not been implemented.');
+  }
+
+  /// Android only. Sends [bytes] as-is to the connected printer [deviceId]
+  /// (e.g. identify / buzzer commands).
+  Future<bool> sendRawBytes({
+    required String deviceId,
+    required List<int> bytes,
+  }) {
+    throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
 
   /// Sends raw identify / buzzer commands to a LAN printer via native socket (NWConnection on iOS).

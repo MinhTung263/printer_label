@@ -8,6 +8,8 @@ enum PrinterMethod {
   connect_bt,
   connect_usb,
   set_auto_request_usb_permission,
+  set_hold_usb_permission_queue,
+  release_usb_permission_queue,
   get_usb_printers_needing_permission,
   request_usb_permissions,
   scan_bt,
@@ -28,5 +30,6 @@ enum PrinterMethod {
   auto_connect_built_in,
   has_built_in_printer,
   get_built_in_printer_paper_size,
+  send_raw_bytes,
   open_drawer;
 }
