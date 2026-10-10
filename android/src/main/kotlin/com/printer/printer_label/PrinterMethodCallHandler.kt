@@ -88,12 +88,24 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     result.success(true)
                 }
 
+                "set_hold_usb_permission_queue" -> {
+                    plugin.holdUsbPermissionQueue = call.argument<Boolean>("enabled") ?: false
+                    if (!plugin.holdUsbPermissionQueue) plugin.releaseUsbPermissionQueue()
+                    result.success(true)
+                }
+
+                "release_usb_permission_queue" -> {
+                    plugin.releaseUsbPermissionQueue(call.argument<String>("device_id"))
+                    result.success(true)
+                }
+
                 "get_usb_printers_needing_permission" -> {
                     result.success(plugin.getUsbPrintersNeedingPermission())
                 }
 
                 "request_usb_permissions" -> {
-                    plugin.requestUsbPermissions(result)
+                    val deviceId = call.argument<String>("device_id")
+                    plugin.requestUsbPermissions(result, deviceId)
                 }
 
                 "auto_connect_built_in" -> {
@@ -207,6 +219,12 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                     runPrintJob(call, result) { conn, targetResult ->
                         plugin.printThermal.openDrawer(call, conn, targetResult)
+                    }
+                }
+
+                "send_raw_bytes" -> {
+                    runPrintJob(call, result) { conn, targetResult ->
+                        plugin.printThermal.sendRawBytes(call, conn, targetResult)
                     }
                 }
 

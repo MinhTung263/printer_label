@@ -105,16 +105,29 @@ class PrinterLabel {
   static Future<void> setAutoRequestUsbPermission(bool enabled) =>
       _platform.setAutoRequestUsbPermission(enabled);
 
+  /// Android only. When `true`, the next printer's permission dialog waits until
+  /// [releaseUsbPermissionQueue] is called for the printer just granted (e.g.
+  /// after the app closed its "create printer" screen), so dialogs never pop up
+  /// over that screen. Released automatically if the connect fails or the
+  /// printer is unplugged.
+  static Future<void> setHoldUsbPermissionQueue(bool enabled) =>
+      _platform.setHoldUsbPermissionQueue(enabled);
+
+  /// Android only. Continue the permission queue held for [deviceId] (or any
+  /// printer when `null`). See [setHoldUsbPermissionQueue].
+  static Future<void> releaseUsbPermissionQueue({String? deviceId}) =>
+      _platform.releaseUsbPermissionQueue(deviceId: deviceId);
+
   /// Android only. USB printers currently plugged in that still need the user
   /// to grant permission (e.g. after the device was powered off and on).
   static Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission() =>
       _platform.getUsbPrintersNeedingPermission();
 
   /// Android only. Shows the system permission dialog for each printer from
-  /// [getUsbPrintersNeedingPermission], one after another. Returns how many
-  /// printers were granted.
-  static Future<int> requestUsbPermissions() =>
-      _platform.requestUsbPermissions();
+  /// [getUsbPrintersNeedingPermission], or a specific printer if [deviceId] is specified.
+  /// Returns how many printers were granted.
+  static Future<int> requestUsbPermissions({String? deviceId}) =>
+      _platform.requestUsbPermissions(deviceId: deviceId);
 
   /// Discovers LAN printers by scanning the local network for open port 9100.
   ///
@@ -372,9 +385,10 @@ class PrinterLabel {
     // máy in hãng khác dùng module Loopcomm cũng sẽ hiện "PDIT".
     '001AEF': 'PDIT',
     // KiotViet / Xprinter — bổ sung theo máy thực tế của khách (Xprinter đo từ
-    // 00:61:7B:6B:4D:39, 2026-10-05). Giữ khớp với `LanPrinterProbe.kt`.
+    // 00:61:7B:6B:4D:39, 2026-10-05; 00:61:1B / 00:61:1D theo máy thực tế, 2026-10-10).
+    // Giữ khớp với `LanPrinterProbe.kt`.
     '00BACB': 'KiotViet',
-    '00617B': 'Xprinter',
+    '00617B': 'Xprinter', '00611B': 'Xprinter', '00616D': 'Xprinter',
   };
 
   /// Tra hãng máy in theo MAC (VD "00:1A:EF:CB:2C:B0" -> "PDIT"). Trả null nếu không biết.
@@ -1629,16 +1643,38 @@ class PrinterLabel {
     return controller.stream;
   }
 
-  /// Sends an identify signal (audio beep, paper feed, or test slip) to a LAN printer to help
-  /// the user physically determine which printer on their desk matches [ipAddress].
-  static Future<bool> identifyLanPrinter({
-    required String ipAddress,
-    int port = 9100,
+  /// Android only. Signals a connected USB printer (e.g. right after the user
+  /// granted USB permission) so the user can tell which physical printer it is.
+  ///
+  /// The app cannot know whether the printer has a buzzer or speaks ESC/POS or
+  /// TSPL, so everything is sent at once: the [identifyLanPrinter] beep, a TSPL
+  /// `FEED` (label printers nudge the paper ~3mm instead of wasting a label) and,
+  /// when [slipText] is given, a short ESC/POS slip that is then cut (label
+  /// printers ignore it). TSPL text lines are sent BEFORE the slip so receipt
+  /// printers print them on the slip, not on top of the next receipt.
+  /// [slipText] should be plain ASCII (no diacritics).
+  /// Returns `false` if nothing was sent.
+  static Future<bool> identifyUsbPrinter({
+    required String deviceId,
     bool beep = true,
     bool feed = true,
-    bool printSlip = false,
-    Duration timeout = const Duration(seconds: 2),
+    String? slipText,
   }) async {
+    final payload = _identifyPayload(beep: beep, feed: feed);
+    if (slipText != null && slipText.isNotEmpty) {
+      payload.addAll([
+        0x1B, 0x40, // ESC @ - Initialize
+        0x1B, 0x61, 0x01, // Center align
+        ...utf8.encode("\n$slipText\n\n\n\n"),
+        0x1D, 0x56, 0x42, 0x00, // Cut paper
+      ]);
+    }
+    if (payload.isEmpty) return true;
+    return _platform.sendRawBytes(deviceId: deviceId, bytes: payload);
+  }
+
+  /// Lệnh còi / nhích giấy dùng chung cho mọi loại máy (ESC/POS + TSPL/CPCL/ZPL).
+  static List<int> _identifyPayload({required bool beep, required bool feed}) {
     final payload = <int>[];
 
     if (beep) {
@@ -1694,6 +1730,21 @@ class PrinterLabel {
       payload.addAll(utf8.encode("\r\nFEED 24\r\n")); // TSPL: feed 24 dots
       payload.addAll([0x1B, 0x4A, 0x18]); // ESC/POS: ESC J 24 dots
     }
+
+    return payload;
+  }
+
+  /// Sends an identify signal (audio beep, paper feed, or test slip) to a LAN printer to help
+  /// the user physically determine which printer on their desk matches [ipAddress].
+  static Future<bool> identifyLanPrinter({
+    required String ipAddress,
+    int port = 9100,
+    bool beep = true,
+    bool feed = true,
+    bool printSlip = false,
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    final payload = _identifyPayload(beep: beep, feed: feed);
 
     if (printSlip) {
       // ESC/POS Test Slip

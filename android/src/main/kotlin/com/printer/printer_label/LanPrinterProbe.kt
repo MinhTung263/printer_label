@@ -147,7 +147,10 @@ object LanPrinterProbe {
             // không phải PDIT. Máy in hãng khác dùng module Loopcomm cũng sẽ hiện "PDIT".
             prefix6.startsWith("001AEF") -> "PDIT"
             prefix6.startsWith("00BACB") -> "KiotViet"
-            prefix6.startsWith("00617B") -> "Xprinter"
+            // Xprinter — đo từ máy thực tế (00:61:7B 2026-10-05; 00:61:1B, 00:61:1D 2026-10-10).
+            prefix6.startsWith("00617B") ||
+            prefix6.startsWith("00611B") ||
+            prefix6.startsWith("00616D") -> "Xprinter"
             else -> null
         }
     }

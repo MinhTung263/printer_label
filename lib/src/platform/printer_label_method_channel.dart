@@ -109,6 +109,24 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<void> setHoldUsbPermissionQueue(bool enabled) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod<bool>(
+      PrinterMethod.set_hold_usb_permission_queue.name,
+      {"enabled": enabled},
+    );
+  }
+
+  @override
+  Future<void> releaseUsbPermissionQueue({String? deviceId}) async {
+    if (!Platform.isAndroid) return;
+    await _channel.invokeMethod<bool>(
+      PrinterMethod.release_usb_permission_queue.name,
+      {"device_id": deviceId},
+    );
+  }
+
+  @override
   Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission() async {
     if (!Platform.isAndroid) return const [];
     final raw = await _channel.invokeListMethod<Map<dynamic, dynamic>>(
@@ -118,10 +136,11 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<int> requestUsbPermissions() async {
+  Future<int> requestUsbPermissions({String? deviceId}) async {
     if (!Platform.isAndroid) return 0;
     return await _channel.invokeMethod<int>(
           PrinterMethod.request_usb_permissions.name,
+          deviceId != null ? {'device_id': deviceId} : null,
         ) ??
         0;
   }
@@ -482,6 +501,24 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       return result;
     } catch (_) {
       return null;
+    }
+  }
+
+  @override
+  Future<bool> sendRawBytes({
+    required String deviceId,
+    required List<int> bytes,
+  }) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        PrinterMethod.send_raw_bytes.name,
+        {'device_id': deviceId, 'bytes': Uint8List.fromList(bytes)},
+      );
+      return result ?? false;
+    } catch (e, stack) {
+      debugPrint("Error sending raw bytes: $e\n$stack");
+      return false;
     }
   }
 

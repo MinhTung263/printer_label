@@ -195,6 +195,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         pendingPermissionRequests.clear()
         permissionWaiters.clear()
         permissionInFlight = null
+        permissionHoldPath = null
+        permissionHoldId = null
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -339,7 +341,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     internal fun isConnectionActive(deviceId: String): Boolean {
         val conn = connections[deviceId] ?: return false
         if (!conn.isConnect) return false
-        
+
         // Nếu là kết nối Bluetooth mà Bluetooth adapter của hệ thống đang tắt, coi như mất kết nối
         if (connectionTypes[deviceId] == ConnectionType.BT) {
             try {
@@ -379,7 +381,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         if (!deviceId.isNullOrEmpty()) {
             val conn = connections[deviceId]
             if (conn != null && isConnectionActive(deviceId)) return conn
-            
+
             // Thử khớp khóa phụ (không có tiền tố hoặc tự thêm tiền tố LAN/BT).
             //
             // LUÔN kiểm tra ĐÚNG khóa vừa khớp. Trước đây `conn2` lấy từ một trong ba khóa
@@ -569,6 +571,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                     connections.remove(deviceId)
                     connectionTypes.remove(deviceId)
                     pending?.complete(false)
+                    releaseUsbPermissionQueue(deviceId)
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thất bại hoặc bị gián đoạn")
                     }
@@ -611,8 +614,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     internal fun disconnectPrinter(deviceId: String, result: Result) {
         try {
             if (deviceId == "BUILT_IN") {
-                val builtInEntry = connections.entries.firstOrNull { 
-                    bluetoothManager.isConnectionToBuiltInPrinter(it.value) 
+                val builtInEntry = connections.entries.firstOrNull {
+                    bluetoothManager.isConnectionToBuiltInPrinter(it.value)
                 }
                 if (builtInEntry != null) {
                     builtInEntry.value.close()
@@ -1064,7 +1067,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     private val permissionWaiters = mutableMapOf<String, String>()
 
     private fun pumpPermissionQueue() {
-        if (permissionInFlight != null) return
+        if (permissionInFlight != null || permissionHoldPath != null) return
         while (permissionQueue.isNotEmpty()) {
             val device = permissionQueue.removeFirst()
             val path = device.deviceName
@@ -1077,6 +1080,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             // trước, hoặc hệ thống tự cấp qua intent-filter USB_DEVICE_ATTACHED).
             if (usbManager.hasPermission(device)) {
                 onUsbPermissionResult(device, granted = true)
+                if (permissionHoldPath != null) return
                 continue
             }
             // Máy vừa cắm / vừa bật lại nguồn: chờ hệ thống tự cấp quyền cho app mặc
@@ -1128,6 +1132,30 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     // Chờ hàng đợi xin quyền chạy hết (xem `requestUsbPermissions`).
     private val permissionBatchCallbacks = mutableListOf<() -> Unit>()
 
+    /**
+     * Có giữ hàng đợi xin quyền sau mỗi máy được cấp quyền không (mặc định không).
+     *
+     * App host hiện màn tạo máy in ngay khi nhận sự kiện "USB connected" của máy vừa
+     * được cấp quyền. Không giữ thì popup xin quyền của máy kế tiếp bật lên ĐÈ lên màn
+     * tạo máy đó. Bật cờ này thì sau khi cấp quyền cho 1 máy, hàng đợi dừng lại tới khi
+     * Dart gọi `releaseUsbPermissionQueue` (xử lý xong máy đó), kết nối máy đó thất bại,
+     * hoặc máy đó bị rút dây.
+     */
+    @Volatile internal var holdUsbPermissionQueue = false
+
+    // Máy vừa được cấp quyền đang giữ hàng đợi: đường dẫn + id (đã gồm serial).
+    private var permissionHoldPath: String? = null
+    private var permissionHoldId: String? = null
+
+    /** Nhả hàng đợi nếu đang giữ cho [deviceId] (null = nhả bất kể máy nào). */
+    internal fun releaseUsbPermissionQueue(deviceId: String? = null) {
+        if (permissionHoldPath == null) return
+        if (deviceId != null && deviceId != permissionHoldId) return
+        permissionHoldPath = null
+        permissionHoldId = null
+        if (!isDetached) pumpPermissionQueue()
+    }
+
     private fun requestSystemUsbPermission(device: UsbDevice) {
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -1171,8 +1199,13 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
      * Xin quyền LẦN LƯỢT cho mọi máy in USB đang cắm mà chưa có quyền. Trả về số máy
      * được cấp quyền sau khi người dùng trả lời hết các popup.
      */
-    internal fun requestUsbPermissions(result: Result) {
-        val devices = attachedUsbPrintersWithoutPermission()
+    internal fun requestUsbPermissions(result: Result, targetDeviceId: String? = null) {
+        val allDevices = attachedUsbPrintersWithoutPermission()
+        val devices = if (!targetDeviceId.isNullOrEmpty()) {
+            allDevices.filter { usbMayMatch(it, targetDeviceId) }.take(1)
+        } else {
+            allDevices
+        }
         if (devices.isEmpty()) {
             result.success(0)
             return
@@ -1216,7 +1249,15 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         // Gọi SAU khi có quyền -> id đã gồm serial thật của máy.
         val deviceId = stableUsbId(device)
         if (granted) {
-            if (connections[deviceId]?.isConnect != true) tryConnectWithDelay(device, 0)
+            if (connections[deviceId]?.isConnect != true) {
+                // Chỉ giữ khi chắc chắn sẽ có sự kiện "connected" gửi tới Dart đang nghe,
+                // nếu không sẽ không ai gọi `releaseUsbPermissionQueue`.
+                if (holdUsbPermissionQueue && isUsbOwner && usbEventSink != null) {
+                    permissionHoldPath = device.deviceName
+                    permissionHoldId = deviceId
+                }
+                tryConnectWithDelay(device, 0)
+            }
         } else {
             pendingConnects.remove(deviceId)?.complete(false)
         }
@@ -1262,7 +1303,9 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         toast("USB được gắn: $deviceId")
         if (usbManager.hasPermission(device)) {
             tryConnectWithDelay(device, 0)
-        } else {
+        } else if (autoRequestUsbPermission || justPlugged) {
+            // [autoRequestUsbPermission] chỉ áp cho máy CẮM SẴN lúc mở app; máy vừa cắm
+            // (người dùng đang chủ động thao tác) thì luôn xin quyền.
             requestUsbPermissionOnce(device)
         }
     }
@@ -1286,6 +1329,11 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         pendingPermissionRequests.remove(path)
         permissionQueue.removeAll { it.deviceName == path }
         permissionWaiters.remove(path)?.let { failUsbWaiterIfNoCandidate(it) }
+        if (permissionHoldPath == path) {
+            permissionHoldPath = null
+            permissionHoldId = null
+            pumpPermissionQueue()
+        }
         if (permissionInFlight == path) {
             // Dialog của máy vừa rút thường tự đóng và vẫn bắn broadcast "từ chối";
             // nhả hàng đợi luôn ở đây phòng khi broadcast đó không tới.
@@ -1304,6 +1352,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             toast("Kết nối USB thất bại sau nhiều lần thử")
             pendingConnects[deviceId]?.complete(false)
             pendingConnects.remove(deviceId)
+            // Không có sự kiện "connected" nào cho Dart -> tự nhả hàng đợi xin quyền.
+            releaseUsbPermissionQueue(deviceId)
             return
         }
 
@@ -1516,30 +1566,30 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
                 val size = call.argument<Map<String, Any>>("size")
                 val (sizeWidth, sizeHeight) = extractSizeImage(size)
-                
+
                 // 8 dots per mm
                 val targetWidthDots = sizeWidth * 8
                 val targetHeightDots = sizeHeight * 8
 
                 val urovoPrinter = UrovoPrinterManager()
                 if (!urovoPrinter.isSupported()) {
-                    Handler(Looper.getMainLooper()).post { 
-                        result.error("UROVO_ERROR", "Urovo PrinterManager not supported", null) 
+                    Handler(Looper.getMainLooper()).post {
+                        result.error("UROVO_ERROR", "Urovo PrinterManager not supported", null)
                     }
                     return@thread
                 }
 
                 urovoPrinter.openPrinter()
-                
+
                 // Tối ưu tốc độ in
                 urovoPrinter.setSpeedLevel(9)
                 urovoPrinter.setGrayLevel(0)
-                
+
                 images.forEach { imageData ->
                     val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size) ?: return@forEach
-                    
+
                     val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidthDots, targetHeightDots, true)
-                    
+
                     urovoPrinter.setupPage(targetWidthDots, targetHeightDots)
                     urovoPrinter.drawBitmap(scaledBitmap, 0, 0)
                     urovoPrinter.printPage(0)
@@ -1569,14 +1619,14 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
                 val urovoPrinter = UrovoPrinterManager()
                 if (!urovoPrinter.isSupported()) {
-                    Handler(Looper.getMainLooper()).post { 
-                        result.error("UROVO_ERROR", "Urovo PrinterManager not supported", null) 
+                    Handler(Looper.getMainLooper()).post {
+                        result.error("UROVO_ERROR", "Urovo PrinterManager not supported", null)
                     }
                     return@thread
                 }
 
                 urovoPrinter.openPrinter()
-                
+
                 // Tối ưu tốc độ: Speed level cao nhất (9), độ đậm nhạt thấp nhất (0) để in nhanh nhất
                 urovoPrinter.setSpeedLevel(9)
                 urovoPrinter.setGrayLevel(0)
@@ -1744,7 +1794,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 urovoPrinter.printPage(0)
                 urovoPrinter.paperFeed(100)
                 urovoPrinter.closePrinter()
-                
+
                 Handler(Looper.getMainLooper()).post { result.success(true) }
             } catch (e: Exception) {
                 Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
@@ -1769,7 +1819,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 urovoPrinter.printPage(0)
                 urovoPrinter.paperFeed(100)
                 urovoPrinter.closePrinter()
-                
+
                 Handler(Looper.getMainLooper()).post { result.success(true) }
             } catch (e: Exception) {
                 Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
@@ -1794,7 +1844,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 urovoPrinter.printPage(0)
                 urovoPrinter.paperFeed(100)
                 urovoPrinter.closePrinter()
-                
+
                 Handler(Looper.getMainLooper()).post { result.success(true) }
             } catch (e: Exception) {
                 Handler(Looper.getMainLooper()).post { result.error("PRINT_ERROR", e.message, null) }
