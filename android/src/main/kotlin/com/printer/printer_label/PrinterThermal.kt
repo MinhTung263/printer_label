@@ -213,7 +213,67 @@ class PrinterThermal {
                 offset += sent
             }
         }
+
+        /**
+         * Hỏi cảm biến giấy/nắp của máy in trên CHÍNH kết nối sắp dùng để in, bằng
+         * lệnh thời gian thực `DLE EOT 2` (nguyên nhân offline) và `DLE EOT 4` (cảm
+         * biến cuộn giấy). Lệnh thời gian thực được máy in trả lời cả khi đang
+         * offline vì hết giấy / mở nắp — đúng lúc cần hỏi.
+         *
+         * Chỉ hỏi qua LAN (socket tự quản) và USB. Bluetooth không hỏi: nhiều máy BT
+         * không trả lời, mỗi lần in sẽ phí trọn thời gian chờ.
+         *
+         * Không trả lời / trả lời sai định dạng -> [PaperStatus.UNKNOWN]: vẫn in như
+         * cũ, không chặn máy in không hỗ trợ lệnh này.
+         */
+        @JvmStatic
+        fun queryPaperStatus(conn: IDeviceConnection): PaperStatus {
+            val isLan = conn is LanSocketConnection
+            if (!isLan && conn.getConnectType() != POSConnect.DEVICE_TYPE_USB) return PaperStatus.UNKNOWN
+            // LAN tính thêm thời gian khứ hồi trên Wi-Fi đông; USB trả lời gần như tức thì.
+            val timeoutMs = if (isLan) 800 else 300
+            return try {
+                // Bỏ byte cũ còn tồn trong bộ đệm nhận (VD máy in tự gửi trạng thái),
+                // nếu không sẽ đọc nhầm thành câu trả lời.
+                for (i in 0 until 4) {
+                    if (conn.readSync(1) == null) break
+                }
+                // Hỏi TỪNG câu và chấp nhận trả lời lẻ: nhiều máy giá rẻ chỉ hiểu DLE EOT 4.
+                // Cuộn giấy hỏi trước — không trả lời thì máy không hỗ trợ, khỏi hỏi tiếp.
+                val roll = askRealtimeStatus(conn, 4, timeoutMs) ?: return PaperStatus.UNKNOWN
+                val offline = askRealtimeStatus(conn, 2, timeoutMs)
+                when {
+                    offline != null && (offline and 0x04) != 0 -> PaperStatus.COVER_OPEN
+                    (roll and 0x60) != 0 || (offline != null && (offline and 0x20) != 0) -> PaperStatus.PAPER_END
+                    (roll and 0x0C) != 0 -> PaperStatus.NEAR_END
+                    else -> PaperStatus.OK
+                }
+            } catch (e: Exception) {
+                Log.w("PAPER_STATUS", "Không hỏi được trạng thái giấy: ${e.message}")
+                PaperStatus.UNKNOWN
+            }
+        }
+
+        /**
+         * Gửi `DLE EOT n` và chờ MỘT byte trạng thái hợp lệ (bit 1, bit 4 = 1; bit 0,
+         * bit 7 = 0). Trả null nếu hết [timeoutMs] mà không có.
+         */
+        private fun askRealtimeStatus(conn: IDeviceConnection, n: Int, timeoutMs: Int): Int? {
+            if (conn.sendSync(byteArrayOf(0x10, 0x04, n.toByte())) <= 0) return null
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (true) {
+                val left = (deadline - System.currentTimeMillis()).toInt()
+                if (left <= 0) return null
+                val data = conn.readSync(left) ?: continue
+                data.map { it.toInt() and 0xFF }.firstOrNull { (it and 0x93) == 0x12 }?.let { return it }
+            }
+        }
     }
+
+    enum class PaperStatus { OK, NEAR_END, PAPER_END, COVER_OPEN, UNKNOWN }
+
+    /** Lỗi do trạng thái máy in (hết giấy, mở nắp) — mang mã lỗi riêng lên Dart. */
+    class PrinterStatusException(val code: String, message: String) : Exception(message)
 
     fun printImageESC(
         call: MethodCall,
@@ -305,6 +365,18 @@ class PrinterThermal {
                 // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection).
                 // Các máy khác dùng khóa khác nên vẫn in song song, không đợi nhau.
                 synchronized(lockFor(curConnect)) {
+                    // Hết giấy / mở nắp: KHÔNG gửi phiếu. Nhiều máy vẫn nhận dữ liệu vào bộ
+                    // nhớ rồi in khi thay giấy xong -> phiếu ra trễ, nhân viên đã in lại
+                    // thì ra 2 phiếu. Báo lỗi ngay để người dùng xử lý rồi in lại.
+                    when (queryPaperStatus(curConnect)) {
+                        PaperStatus.PAPER_END -> throw PrinterStatusException(
+                            "PRINTER_OUT_OF_PAPER", "Máy in hết giấy"
+                        )
+                        PaperStatus.COVER_OPEN -> throw PrinterStatusException(
+                            "PRINTER_COVER_OPEN", "Máy in đang mở nắp"
+                        )
+                        else -> Unit
+                    }
                     if (isBluetooth && !isTargetBuiltIn) {
                         // Cấu hình vừa tầm cân bằng cho máy in Bluetooth ngoài: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
                         // chunkSize, Thread.sleep và khoảng nghỉ giữa các gói quyết định: tốc độ in, độ ổn định (lỗi hay không - mất byte), 
@@ -356,8 +428,9 @@ class PrinterThermal {
                     result.success(true)
                 }
             } catch (e: Exception) {
+                val code = (e as? PrinterStatusException)?.code ?: "PRINT_ERROR"
                 Handler(Looper.getMainLooper()).post {
-                    result.error("PRINT_ERROR", e.message, null)
+                    result.error(code, e.message, null)
                 }
             }
         }

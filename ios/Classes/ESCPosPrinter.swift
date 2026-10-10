@@ -42,7 +42,9 @@ final class ESCPosPrinter {
             }
             // Chờ kết quả THẬT rồi mới trả về Dart (trước đây báo true ngay khi xếp hàng).
             guard let plugin = self.plugin else { result(false); return }
-            plugin.sendAndReply(data, deviceId: deviceId, connectionType: connectionType, result: result)
+            // Hỏi cảm biến giấy/nắp trước khi gửi (chỉ LAN): hết giấy thì không gửi bill.
+            plugin.sendAndReply(data, deviceId: deviceId, connectionType: connectionType,
+                                checkPaper: true, result: result)
         }
     }
 

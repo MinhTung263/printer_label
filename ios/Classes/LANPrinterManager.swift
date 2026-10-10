@@ -86,7 +86,8 @@ public final class LANPrinterManager {
         }
     }
 
-    public func send(data: Data, to ip: String, completion: ((_ success: Bool, _ error: Error?) -> Void)? = nil) {
+    public func send(data: Data, to ip: String, checkPaper: Bool = false,
+                     completion: ((_ success: Bool, _ error: Error?) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
             print("[LANPrinterManager] 📤 send() called for IP: \(ip), data size: \(data.count)")
@@ -95,7 +96,7 @@ public final class LANPrinterManager {
             // Nhờ vậy ở đây chỉ cần xếp job và chờ kết quả THẬT.
             let conn = self.connectionFor(ip: ip)
             self.registeredPrinters.insert(ip)
-            conn.send(data: data) { success, error in
+            conn.send(data: data, checkPaper: checkPaper) { success, error in
                 if !success {
                     print("[LANPrinterManager] ❌ send tới \(ip) thất bại: \(error?.localizedDescription ?? "unknown")")
                 }

@@ -179,7 +179,10 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
             bindToLocalNetwork(s, address)
             s.tcpNoDelay = true
             s.keepAlive = true
-            // KHÔNG gọi setSendBufferSize: để kernel tự chọn (SDK ép 512 byte).
+            // Ép bộ đệm gửi 512 byte như SDK: để kernel tự chọn (bộ đệm lớn) thì in ra ký
+            // tự rác trên máy thật — giữ hành vi cũ đã chạy ổn. Đánh đổi: chậm hơn khi
+            // Wi-Fi trễ cao.
+            s.sendBufferSize = 512
             s.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)
             s.soTimeout = 0
             socket = s

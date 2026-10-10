@@ -538,6 +538,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     ///  - BLE: giữ hành vi cũ (báo ngay theo trạng thái kết nối).
     @discardableResult
     func sendToPrinter(_ data: Data, deviceId: String? = nil, connectionType: String? = nil,
+                       checkPaper: Bool = false,
                        completion: ((Bool, Error?) -> Void)? = nil) -> Bool {
         print("[PrinterLabelPlugin] sendToPrinter called: deviceId=\(deviceId ?? "nil"), connectionType=\(connectionType ?? "nil"), data size=\(data.count)")
         let done: (Bool, Error?) -> Void = { ok, err in
@@ -561,7 +562,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             print("[PrinterLabelPlugin] → Route: LAN (deviceId: \(id))")
             if let ip = extractLANIp(from: id) {
                 print("[PrinterLabelPlugin] → Extracted IP: \(ip)")
-                LANPrinterManager.shared.send(data: data, to: ip, completion: { ok, err in
+                LANPrinterManager.shared.send(data: data, to: ip, checkPaper: checkPaper, completion: { ok, err in
                     if !ok {
                         print("[PrinterLabelPlugin] ❌ LAN write failed (\(ip)): \(err?.localizedDescription ?? "unknown")")
                     }
@@ -610,8 +611,9 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     /// Gửi rồi trả kết quả THẬT về Dart: `true`, hoặc FlutterError cùng mã lỗi với Android
     /// (`NO_CONNECTION` khi chưa gửi được byte nào, `PRINT_ERROR` khi đứt giữa chừng).
-    func sendAndReply(_ data: Data, deviceId: String?, connectionType: String?, result: @escaping FlutterResult) {
-        sendToPrinter(data, deviceId: deviceId, connectionType: connectionType) { ok, err in
+    func sendAndReply(_ data: Data, deviceId: String?, connectionType: String?,
+                      checkPaper: Bool = false, result: @escaping FlutterResult) {
+        sendToPrinter(data, deviceId: deviceId, connectionType: connectionType, checkPaper: checkPaper) { ok, err in
             if ok { result(true); return }
             result(PrinterLabelPlugin.flutterError(for: err))
         }
@@ -638,7 +640,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     static func flutterError(for err: Error?) -> FlutterError {
         if let e = err as? LANPrinterConnection.SendError {
-            let code = e.kind == .partiallySent ? "PRINT_ERROR" : "NO_CONNECTION"
+            let code: String
+            switch e.kind {
+            case .partiallySent: code = "PRINT_ERROR"
+            case .paperEnd: code = "PRINTER_OUT_OF_PAPER"
+            case .coverOpen: code = "PRINTER_COVER_OPEN"
+            default: code = "NO_CONNECTION"
+            }
             return FlutterError(code: code, message: e.errorDescription, details: ["reason": e.kind.rawValue])
         }
         return FlutterError(code: "NO_CONNECTION",

@@ -28,6 +28,10 @@ public final class LANPrinterConnection {
         case timeout
         /// Đã gửi được một phần dữ liệu rồi mới lỗi — KHÔNG được gửi lại (xem `send`).
         case partiallySent
+        /// Máy in báo hết giấy (hỏi bằng `DLE EOT` trước khi gửi) — job CHƯA được gửi.
+        case paperEnd
+        /// Máy in báo đang mở nắp — job CHƯA được gửi.
+        case coverOpen
     }
 
     public struct SendError: LocalizedError {
@@ -43,6 +47,10 @@ public final class LANPrinterConnection {
                 return "Không tới được máy in (mạng yếu/mất hoặc máy in đang tắt). Kiểm tra Wi-Fi rồi thử lại."
             case .partiallySent:
                 return "Gửi dữ liệu tới máy in bị ngắt giữa lúc in. Kiểm tra bản in trước khi in lại."
+            case .paperEnd:
+                return "Máy in hết giấy"
+            case .coverOpen:
+                return "Máy in đang mở nắp"
             }
         }
     }
@@ -63,7 +71,21 @@ public final class LANPrinterConnection {
         let completion: ((Bool, Error?) -> Void)?
         /// Số lần đã thử gửi lại job này.
         var attempts: Int = 0
+        /// Hỏi cảm biến giấy/nắp trước khi gửi (chỉ bật cho bill / phiếu bếp).
+        var checkPaper: Bool = false
+        var paperChecked: Bool = false
     }
+
+    /// Trạng thái cảm biến giấy/nắp đọc được bằng `DLE EOT 2` + `DLE EOT 4`.
+    enum PaperStatus { case ok, nearEnd, paperEnd, coverOpen, unknown }
+
+    /// Đang chờ trả lời `DLE EOT`: nhận byte đọc được từ máy in. nil = không hỏi gì,
+    /// byte tới lúc đó bị bỏ qua.
+    private var probeHandler: ((Data) -> Void)?
+    /// Đã có một lệnh `receive` đang chờ trên `connection` hiện tại.
+    private var receiveOutstanding = false
+    /// LAN tính thêm thời gian khứ hồi trên Wi-Fi đông. Máy không trả lời -> vẫn in.
+    private let paperProbeTimeout: TimeInterval = 0.8
 
     // write queue
     private var writeQueue: [Job] = []
@@ -272,6 +294,7 @@ public final class LANPrinterConnection {
 
     /// Đóng socket hiện tại và bỏ tham chiếu. Phải gọi từ trong self.queue.
     private func teardownConnection() {
+        receiveOutstanding = false
         connection?.stateUpdateHandler = nil
         connection?.cancel()
         connection = nil
@@ -316,12 +339,13 @@ public final class LANPrinterConnection {
     }
 
     // MARK: - Sending Data
-    public func send(data: Data, completion: ((_ success: Bool, _ error: Error?) -> Void)? = nil) {
+    public func send(data: Data, checkPaper: Bool = false,
+                     completion: ((_ success: Bool, _ error: Error?) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
             print("[LANPrinterConnection] 📤 Queueing \(data.count) bytes to \(self.ip)")
             self.cancelIdleClose()
-            self.writeQueue.append(Job(data: data, completion: completion))
+            self.writeQueue.append(Job(data: data, completion: completion, checkPaper: checkPaper))
             if self.state == .connected {
                 self.flushQueue()
             } else if self.state != .connecting {
@@ -349,6 +373,36 @@ public final class LANPrinterConnection {
         isWriting = true
         var job = writeQueue.removeFirst()
         job.attempts += 1
+
+        // Hết giấy / mở nắp: KHÔNG gửi job. Nhiều máy vẫn nhận dữ liệu vào bộ nhớ rồi in
+        // khi thay giấy xong -> phiếu ra trễ, nhân viên đã in lại thì ra 2 phiếu.
+        if job.checkPaper && !job.paperChecked {
+            job.paperChecked = true
+            let probing = job
+            probePaperStatus { [weak self] status in
+                guard let self = self else { return }
+                self.isWriting = false
+                if status == .paperEnd || status == .coverOpen {
+                    let kind: FailureKind = status == .paperEnd ? .paperEnd : .coverOpen
+                    print("[LANPrinterConnection] 🧻 Máy in \(self.ip): \(kind.rawValue), không gửi job")
+                    DispatchQueue.main.async {
+                        probing.completion?(false, SendError(kind: kind, underlying: nil))
+                    }
+                    self.flushQueue()
+                    return
+                }
+                // Gửi tiếp: đưa job về đầu hàng đợi (lần thử này chưa tính).
+                var again = probing
+                again.attempts -= 1
+                self.writeQueue.insert(again, at: 0)
+                if self.state == .connected {
+                    self.flushQueue()
+                } else if self.state != .connecting {
+                    self.connect()
+                }
+            }
+            return
+        }
 
         // Job ĐẦU TIÊN trên một socket vừa mở phải bắt đầu bằng `ESC @` (initialize).
         //
@@ -414,6 +468,62 @@ public final class LANPrinterConnection {
                 }
             }
         }))
+    }
+
+    // MARK: - Hỏi trạng thái giấy
+
+    /// Hỏi cảm biến giấy/nắp trên CHÍNH socket sắp dùng để in, bằng lệnh thời gian thực
+    /// `DLE EOT 2` (nguyên nhân offline) + `DLE EOT 4` (cuộn giấy). Máy in trả lời cả khi
+    /// đang dừng vì hết giấy / mở nắp. Không trả lời trong [paperProbeTimeout] ->
+    /// `.unknown` (vẫn in như cũ). Phải gọi từ trong self.queue; [done] chạy trên self.queue.
+    private func probePaperStatus(_ done: @escaping (PaperStatus) -> Void) {
+        guard let conn = connection else { done(.unknown); return }
+        // Hỏi TỪNG câu và chấp nhận trả lời lẻ: nhiều máy giá rẻ chỉ hiểu DLE EOT 4.
+        // Cuộn giấy hỏi trước — không trả lời thì máy không hỗ trợ, khỏi hỏi tiếp.
+        askRealtimeStatus(4, on: conn) { [weak self] roll in
+            guard let self = self else { return }
+            guard let roll = roll else { done(.unknown); return }
+            self.askRealtimeStatus(2, on: conn) { offline in
+                let status: PaperStatus
+                if let o = offline, o & 0x04 != 0 { status = .coverOpen }
+                else if roll & 0x60 != 0 || (offline ?? 0) & 0x20 != 0 { status = .paperEnd }
+                else if roll & 0x0C != 0 { status = .nearEnd }
+                else { status = .ok }
+                done(status)
+            }
+        }
+    }
+
+    /// Gửi `DLE EOT n` và chờ MỘT byte trạng thái hợp lệ (bit 1, bit 4 = 1; bit 0, bit 7 = 0).
+    /// nil nếu hết [paperProbeTimeout]. Gọi và trả kết quả trên self.queue.
+    private func askRealtimeStatus(_ n: UInt8, on conn: NWConnection, _ done: @escaping (UInt8?) -> Void) {
+        var finished = false
+        let finish: (UInt8?) -> Void = { [weak self] value in
+            guard !finished else { return }
+            finished = true
+            self?.probeHandler = nil
+            done(value)
+        }
+        probeHandler = { data in
+            if let b = data.first(where: { $0 & 0x93 == 0x12 }) { finish(b) }
+        }
+        conn.send(content: Data([0x10, 0x04, n]), completion: .contentProcessed({ error in
+            if error != nil { finish(nil) }
+        }))
+        ensureReceive(on: conn)
+        queue.asyncAfter(deadline: .now() + paperProbeTimeout) { finish(nil) }
+    }
+
+    /// Giữ đúng MỘT lệnh `receive` chờ trên [conn] trong lúc đang hỏi trạng thái.
+    private func ensureReceive(on conn: NWConnection) {
+        guard !receiveOutstanding else { return }
+        receiveOutstanding = true
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 64) { [weak self] data, _, isComplete, error in
+            guard let self = self, conn === self.connection else { return }
+            self.receiveOutstanding = false
+            if let data = data, !data.isEmpty { self.probeHandler?(data) }
+            if self.probeHandler != nil, error == nil, !isComplete { self.ensureReceive(on: conn) }
+        }
     }
 
     // MARK: - Retry
