@@ -1,3 +1,15 @@
+## [2.3.0] - 2026-10-11
+
+### 🚀 New Features & Enhancements
+
+- **LAN Paper Status Verification**: Added `checkPaperStatus` before sending print jobs via LAN connections to detect out-of-paper or printer error conditions early.
+- **LAN Socket Lifecycle Optimization**: Automatically releases and closes LAN printer sockets upon print job completion to prevent "printer busy" errors on subsequent prints.
+- **Raw Byte Transmission**: Introduced `sendRawBytes` method across platforms to allow transmitting raw ESC/POS or TSPL byte buffers directly to printers.
+- **USB Permission Management**: Added native USB permission checking and requesting APIs (`requestUsbPermission`, `hasUsbPermission`, `checkUsbPermission`) with improved device discovery and product name mapping on Android.
+- **Network Diagnostics & Quality Check**: Introduced `checkLanQuality` and `LanQuality` model to measure latency, packet loss, and network reliability prior to transmitting print jobs.
+- **Dynamic IP & Vendor Detection**: Enhanced LAN printer discovery with SNMP/NetBIOS MAC extraction, dynamic IP resolution by MAC address (`findPrinterIpByMac`), and vendor detection for Xprinter and PDIT hardware.
+- **Connection Optimization**: Fine-tuned socket connection timeouts and improved error handling for concurrent and multi-printer environments.
+
 ## [2.2.3] - 2026-08-28
 
 ### 🐛 Bug Fixes & Stability Improvements

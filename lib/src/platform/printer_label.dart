@@ -725,8 +725,9 @@ class PrinterLabel {
     for (final entry in _parseSnmpVarBinds(data)) {
       if (entry.key != 0x04 || entry.value.length != 6) continue;
       final bytes = entry.value;
-      if (bytes.every((b) => b == 0x00) || bytes.every((b) => b == 0xFF))
+      if (bytes.every((b) => b == 0x00) || bytes.every((b) => b == 0xFF)) {
         continue;
+      }
       return bytes
           .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
           .join(':');
@@ -1184,8 +1185,9 @@ class PrinterLabel {
 
       if (i + 6 > data.length) return null;
       final macBytes = data.sublist(i, i + 6);
-      if (macBytes.every((b) => b == 0x00) || macBytes.every((b) => b == 0xFF))
+      if (macBytes.every((b) => b == 0x00) || macBytes.every((b) => b == 0xFF)) {
         return null;
+      }
       return macBytes
           .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
           .join(':');
