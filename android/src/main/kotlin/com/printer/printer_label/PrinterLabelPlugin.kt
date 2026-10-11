@@ -525,6 +525,12 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                     // lại socket đã nhả (xem ensureLanConnectedSync).
                     if (connectionTypes[deviceId] == ConnectionType.LAN) {
                         registeredLanPrinters.add(rawId(deviceId))
+                        // Kết nối xong mà không in (VD bước kiểm tra lúc tạo máy in) thì socket
+                        // trước đây giữ mãi tới lần in sau -> thiết bị khác báo "máy in bận".
+                        // Hẹn nhả như sau một lần in; job in ngay sau đó (đã retain) giữ lại socket.
+                        if (releaseLanSocketAfterPrint) {
+                            connections[deviceId]?.let { releaseLanSocket(it) }
+                        }
                     }
                     if (!isBuiltIn) {
                         toast("Kết nối ${pending?.type ?: deviceId} thành công!")
