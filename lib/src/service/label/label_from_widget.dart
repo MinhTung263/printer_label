@@ -32,6 +32,7 @@ class LabelFromWidget {
     required int Function(T item) quantity,
     LabelPerRow labelPerRow = LabelPerRow.doubleLabels,
     double? spacer,
+    Duration captureDelay = const Duration(milliseconds: 20),
     Future<void> Function(List<Uint8List> batch, bool isLast)? onBatch,
   }) async {
     final int itemsPerRow = labelPerRow.count;
@@ -63,6 +64,10 @@ class LabelFromWidget {
         rightPadding;
 
     final double totalWidgetHeight = stampHeightPx;
+    // Keep the logical layout (including the calibrated gaps), but rasterize at
+    // the printer width. Capturing at 3x only to downscale in native wastes CPU
+    // and PNG encoding work without adding dots to the physical print.
+    final capturePixelRatio = (labelPerRow.width ?? 50) * 8 / totalWidgetWidth;
 
     // Duplicate items based on their print quantity
     for (var item in items) {
@@ -139,7 +144,8 @@ class LabelFromWidget {
         batch.map(
           (row) => screenshotController.captureFromWidget(
             buildRowWidget(row),
-            pixelRatio: 3.0,
+            pixelRatio: capturePixelRatio,
+            delay: captureDelay,
             context: context,
             targetSize: Size(totalWidgetWidth, totalWidgetHeight),
           ),

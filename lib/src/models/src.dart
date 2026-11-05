@@ -10,3 +10,4 @@ export 'print_thermal.dart';
 export 'image_model.dart';
 export 'usb_connection_event.dart';
 export 'usb_printer_info.dart';
+export 'printer_capabilities.dart';

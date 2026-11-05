@@ -90,6 +90,50 @@ public final class LANPrinterConnection {
     // write queue
     private var writeQueue: [Job] = []
     private var isWriting: Bool = false
+    public func probeCapabilities(completion: @escaping ([String: Any]) -> Void) {
+        queue.async {
+            let id = "LAN:" + self.ip
+            guard self.state == .connected, !self.isWriting, self.pendingConfirmJob == nil,
+                  self.writeQueue.isEmpty, let conn = self.connection else {
+                DispatchQueue.main.async { completion(PrinterCapabilityResult.value(deviceId: id, reason: "busy_or_offline")) }
+                return
+            }
+            self.cancelIdleClose()
+            self.isWriting = true
+            func ask(_ bytes: Data, valid: @escaping (Data) -> Bool, done: @escaping (Bool) -> Void) {
+                var finished = false
+                func finish(_ value: Bool) {
+                    guard !finished else { return }
+                    finished = true
+                    self.probeHandler = nil
+                    done(value)
+                }
+                self.probeHandler = { data in finish(valid(data)) }
+                conn.send(content: bytes, completion: .contentProcessed { error in
+                    if error != nil { finish(false) }
+                })
+                self.ensureReceive(on: conn)
+                self.queue.asyncAfter(deadline: .now() + 0.7) { finish(false) }
+            }
+            // Require two correctly framed responses per language. Silence and
+            // a connected socket are never treated as protocol support.
+            func twice(_ bytes: Data, valid: @escaping (Data) -> Bool, done: @escaping (Bool) -> Void) {
+                ask(bytes, valid: valid) { first in
+                    if !first { done(false); return }
+                    ask(bytes, valid: valid, done: done)
+                }
+            }
+            twice(PrinterCapabilityResult.esc, valid: PrinterCapabilityResult.validEsc) { esc in
+                twice(PrinterCapabilityResult.tspl, valid: PrinterCapabilityResult.validTspl) { tspl in
+                    self.isWriting = false
+                    let result = PrinterCapabilityResult.value(deviceId: id, esc: esc, tspl: tspl,
+                                                              reason: esc || tspl ? "status_reply" : "no_response")
+                    DispatchQueue.main.async { completion(result) }
+                    self.flushQueue()
+                }
+            }
+        }
+    }
 
     /// true khi chưa gửi job nào trên socket hiện tại — dùng để chèn `ESC @` xóa bộ đệm
     /// còn sót của lần in trước (xem `flushQueue`).
@@ -126,6 +170,10 @@ public final class LANPrinterConnection {
     /// thì tái dùng socket đang mở thay vì đóng/mở lại liên tục.
     private let idleCloseDelay: TimeInterval = 0.6
     private var idleCloseWork: DispatchWorkItem?
+    // Intermediate label batches retain the socket while Dart renders the next.
+    // A watchdog still releases it if rendering fails or the caller disappears.
+    private var holdForNextBatch = false
+    private let batchWatchdogDelay: TimeInterval = 15
     /// true = tự đóng socket khi in xong. Tắt đi nếu muốn giữ kết nối độc quyền.
     public var releaseSocketWhenIdle: Bool = true
 
@@ -339,12 +387,13 @@ public final class LANPrinterConnection {
     }
 
     // MARK: - Sending Data
-    public func send(data: Data, checkPaper: Bool = false,
+    public func send(data: Data, checkPaper: Bool = false, keepOpenAfter: Bool = false,
                      completion: ((_ success: Bool, _ error: Error?) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
             print("[LANPrinterConnection] 📤 Queueing \(data.count) bytes to \(self.ip)")
             self.cancelIdleClose()
+            self.holdForNextBatch = keepOpenAfter
             self.writeQueue.append(Job(data: data, completion: completion, checkPaper: checkPaper))
             if self.state == .connected {
                 self.flushQueue()
@@ -357,7 +406,7 @@ public final class LANPrinterConnection {
 
     // Flush sends queued data sequentially, handling chunking and avoiding concurrent writes
     private func flushQueue() {
-        guard !isWriting else { return }
+        guard !isWriting, pendingConfirmJob == nil else { return }
         guard state == .connected else {
             if !writeQueue.isEmpty {
                 print("[LANPrinterConnection] ⚠️ Queue not empty but connection not ready. State: \(state)")
@@ -424,7 +473,7 @@ public final class LANPrinterConnection {
         }
         print("[LANPrinterConnection] 📨 Sending \(data.count) bytes to \(ip) (lần \(job.attempts))...")
 
-        self.connection?.send(content: data, completion: .contentProcessed({ [weak self] error in
+        self.sendPayload(data) { [weak self] error in
             guard let self = self else { return }
             self.isWriting = false
             if let err = error {
@@ -467,7 +516,17 @@ public final class LANPrinterConnection {
                     self.flushQueue()
                 }
             }
-        }))
+        }
+    }
+
+    /// Gửi nguyên payload xuống socket, để NWConnection tự chia gói.
+    private func sendPayload(_ data: Data, completion: @escaping (Error?) -> Void) {
+        guard let conn = connection, self.state == .connected else {
+            completion(NSError(domain: "LANPrinterConnection", code: -1)); return
+        }
+        conn.send(content: data, completion: .contentProcessed { error in
+            completion(error)
+        })
     }
 
     // MARK: - Hỏi trạng thái giấy
@@ -632,7 +691,7 @@ public final class LANPrinterConnection {
             }))
         }
         idleCloseWork = work
-        queue.asyncAfter(deadline: .now() + idleCloseDelay, execute: work)
+        queue.asyncAfter(deadline: .now() + (holdForNextBatch ? batchWatchdogDelay : idleCloseDelay), execute: work)
     }
 
     private func cancelIdleClose() {
