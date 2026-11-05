@@ -262,6 +262,25 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }.start()
                 }
 
+                "probe_capabilities" -> {
+                    kotlin.concurrent.thread {
+                        val id = call.argument<String>("device_id") ?: ""
+                        var conn = plugin.getConn(call)
+                        if ((conn == null || !conn.isConnect) && id.startsWith("LAN:")) {
+                            conn = plugin.ensureLanConnectedSync(plugin.rawId(id))
+                        }
+                        val target = conn
+                        val capabilities = if (target == null || !target.isConnect) {
+                            PrinterCapabilities.unknown(id, "offline")
+                        } else {
+                            plugin.retainLanSocket(target)
+                            try { PrinterCapabilities.probe(target, id) }
+                            finally { plugin.releaseLanSocket(target) }
+                        }
+                        Handler(Looper.getMainLooper()).post { result.success(capabilities) }
+                    }
+                }
+
                 "check_printer_status" -> {
                     // Hỏi trạng thái thật thì BẮT BUỘC phải có socket. Máy in LAN dùng chung
                     // đã nhả socket sau lần in trước nên phải mở lại, nếu không sẽ báo

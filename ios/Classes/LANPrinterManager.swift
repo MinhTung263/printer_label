@@ -61,6 +61,16 @@ public final class LANPrinterManager {
         return conn
     }
 
+    func probeCapabilities(ip: String, completion: @escaping ([String: Any]) -> Void) {
+        queue.async {
+            let conn = self.connectionFor(ip: ip)
+            conn.connect { ok in
+                if ok { conn.probeCapabilities(completion: completion) }
+                else { completion(PrinterCapabilityResult.value(deviceId: "LAN:" + ip, reason: "offline")) }
+            }
+        }
+    }
+
     public func disconnect(ip: String, completion: ((_ success: Bool) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -86,7 +96,7 @@ public final class LANPrinterManager {
         }
     }
 
-    public func send(data: Data, to ip: String, checkPaper: Bool = false,
+    public func send(data: Data, to ip: String, checkPaper: Bool = false, keepOpenAfter: Bool = false,
                      completion: ((_ success: Bool, _ error: Error?) -> Void)? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -96,7 +106,7 @@ public final class LANPrinterManager {
             // Nhờ vậy ở đây chỉ cần xếp job và chờ kết quả THẬT.
             let conn = self.connectionFor(ip: ip)
             self.registeredPrinters.insert(ip)
-            conn.send(data: data, checkPaper: checkPaper) { success, error in
+            conn.send(data: data, checkPaper: checkPaper, keepOpenAfter: keepOpenAfter) { success, error in
                 if !success {
                     print("[LANPrinterManager] ❌ send tới \(ip) thất bại: \(error?.localizedDescription ?? "unknown")")
                 }

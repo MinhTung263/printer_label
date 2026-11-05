@@ -1532,18 +1532,19 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                         .print(1)
 
                     // Chặn tới khi tem NÀY thực sự ra khỏi hàng đợi gửi của SDK, VẪN
-                    // trong khối khóa. Hai lý do, đều đã quan sát được trên tem in ra:
+                    // trong khối khóa.
                     //
-                    // 1. `bitmap()` chỉ XẾP lệnh vào LinkedBlockingQueue rồi return;
-                    //    luồng consumer mới là chỗ đọc pixel của `shifted`. Recycle ngay
-                    //    sau khối khóa (code cũ) giải phóng bitmap trong khi consumer còn
-                    //    đang encode -> đọc trúng vùng nhớ đã thu hồi, ra nhiễu ngẫu
-                    //    nhiên (VD dòng giá "30 đ" biến thành ký tự rác).
-                    // 2. Consumer gặp lỗi ghi socket sẽ CLEAR sạch queue. Nếu đã nhồi cả
-                    //    lô, một tem hỏng cuốn theo `PRINT 1` của các tem còn lại -> máy
-                    //    không nhả giấy và tem kế in chồng lên tem trước.
+                    // `bitmap()` chỉ XẾP lệnh vào LinkedBlockingQueue rồi return, và
+                    // luồng consumer mới là chỗ đọc pixel của `shifted`.
+                    // Hàng đợi nằm TRƯỚC `sendData` nên thay transport không rút ngắn
+                    // được nó. Bỏ chờ ở đây thì `shifted.recycle()` bên dưới chạy
+                    // trong lúc consumer còn đang encode -> đọc trúng vùng nhớ đã thu
+                    // hồi, tem in ra nhiễu ngẫu nhiên (VD dòng giá "30 đ" thành ký tự
+                    // rác). Ngoài ra consumer gặp lỗi ghi socket sẽ CLEAR sạch queue,
+                    // một tem hỏng cuốn theo `PRINT 1` của các tem còn lại.
                     //
-                    // Giữ hàng đợi luôn chỉ có một tem khiến cả hai không xảy ra được.
+                    // Khi đã gửi đồng bộ thì hàng đợi vốn đã rỗng, nên chờ ở đây gần
+                    // như không tốn gì — đổi lại giữ được cả hai bảo đảm trên.
                     PrinterThermal.awaitLabelSent(conn)
                 }
 

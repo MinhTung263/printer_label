@@ -283,6 +283,17 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 result(hasBleSub || hasLanSub)
             }
 
+        case "probe_capabilities":
+            let args = call.arguments as? [String: Any] ?? [:]
+            let id = args["device_id"] as? String ?? ""
+            if let ip = extractLANIp(from: id) {
+                LANPrinterManager.shared.probeCapabilities(ip: ip) { result($0) }
+            } else if let ble = extractBLEIdentifier(from: id) {
+                BLEManager.shared.probeCapabilities(identifier: ble) { result($0) }
+            } else {
+                result(PrinterCapabilityResult.value(deviceId: id, reason: "unsupported_transport"))
+            }
+
         case "check_printer_status":
             let args = call.arguments as? [String: Any]
             let deviceId = args?["device_id"] as? String
@@ -535,10 +546,10 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     ///  - LAN: sau khi `LANPrinterConnection` gửi xong hoặc bỏ cuộc (hết lượt thử lại).
     ///    Trước đây hàm này "gửi rồi quên": Dart nhận `true` ngay khi bấm in, lỗi chỉ được
     ///    log — mạng mất vài giây thì bill in trễ / in trùng (nhân viên bấm lại) / mất âm thầm.
-    ///  - BLE: giữ hành vi cũ (báo ngay theo trạng thái kết nối).
+    ///  - BLE theo deviceId: sau khi hàng đợi ghi hoàn tất hoặc trả lỗi.
     @discardableResult
     func sendToPrinter(_ data: Data, deviceId: String? = nil, connectionType: String? = nil,
-                       checkPaper: Bool = false,
+                       checkPaper: Bool = false, keepOpenAfter: Bool = false,
                        completion: ((Bool, Error?) -> Void)? = nil) -> Bool {
         print("[PrinterLabelPlugin] sendToPrinter called: deviceId=\(deviceId ?? "nil"), connectionType=\(connectionType ?? "nil"), data size=\(data.count)")
         let done: (Bool, Error?) -> Void = { ok, err in
@@ -548,21 +559,17 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         if connectionType == "Bluetooth" {
             print("[PrinterLabelPlugin] → Route: Bluetooth")
             let bleId = deviceId.flatMap { extractBLEIdentifier(from: $0) }
-            routeToBLE(data, identifier: bleId)
-            let ok = BLEManager.shared.hasAnyConnection()
-            done(ok, nil)
-            return ok
+            routeToBLE(data, identifier: bleId, completion: done)
+            return BLEManager.shared.hasAnyConnection()
         } else if let id = deviceId, let bleId = extractBLEIdentifier(from: id) {
             print("[PrinterLabelPlugin] → Route: BLE (extracted UUID: \(bleId))")
-            routeToBLE(data, identifier: bleId)
-            let ok = BLEManager.shared.hasAnyConnection()
-            done(ok, nil)
-            return ok
+            routeToBLE(data, identifier: bleId, completion: done)
+            return BLEManager.shared.hasAnyConnection()
         } else if let id = deviceId {
             print("[PrinterLabelPlugin] → Route: LAN (deviceId: \(id))")
             if let ip = extractLANIp(from: id) {
                 print("[PrinterLabelPlugin] → Extracted IP: \(ip)")
-                LANPrinterManager.shared.send(data: data, to: ip, checkPaper: checkPaper, completion: { ok, err in
+                LANPrinterManager.shared.send(data: data, to: ip, checkPaper: checkPaper, keepOpenAfter: keepOpenAfter, completion: { ok, err in
                     if !ok {
                         print("[PrinterLabelPlugin] ❌ LAN write failed (\(ip)): \(err?.localizedDescription ?? "unknown")")
                     }
@@ -593,7 +600,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             print("[PrinterLabelPlugin] Found \(ips.count) LAN printers: \(ips)")
             for ip in ips {
                 group.enter()
-                LANPrinterManager.shared.send(data: data, to: ip, completion: { ok, err in
+                LANPrinterManager.shared.send(data: data, to: ip, keepOpenAfter: keepOpenAfter, completion: { ok, err in
                     if !ok {
                         print("[PrinterLabelPlugin] ❌ LAN write failed (\(ip)): \(err?.localizedDescription ?? "unknown")")
                     }
@@ -620,14 +627,15 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     }
 
     /// Gửi nhiều gói nối tiếp (VD nhiều tem) và trả MỘT kết quả khi tất cả xong.
-    func sendAllAndReply(_ items: [Data], deviceId: String?, connectionType: String?, result: @escaping FlutterResult) {
+    func sendAllAndReply(_ items: [Data], deviceId: String?, connectionType: String?, keepOpenAfter: Bool = false, result: @escaping FlutterResult) {
         guard !items.isEmpty else { result(false); return }
         let group = DispatchGroup()
         var firstError: Error?
         var allOk = true
-        for item in items {
+        for (index, item) in items.enumerated() {
             group.enter()
-            sendToPrinter(item, deviceId: deviceId, connectionType: connectionType) { ok, err in
+            sendToPrinter(item, deviceId: deviceId, connectionType: connectionType,
+                          keepOpenAfter: keepOpenAfter || index < items.count - 1) { ok, err in
                 // completion luôn chạy trên main thread nên không cần khóa.
                 if !ok { allOk = false; if firstError == nil { firstError = err } }
                 group.leave()
@@ -654,20 +662,21 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                             details: nil)
     }
 
-    private func routeToBLE(_ data: Data, identifier: String?) {
-        // sendToPrinter là fire-and-forget nên không có FlutterResult để trả lỗi về Dart.
-        // Log lại để chẩn đoán được khi máy in nhận thiếu dữ liệu.
-        let logFailure: (String) -> (Any?) -> Void = { target in
-            return { res in
-                if let error = res as? FlutterError {
-                    print("[PrinterLabelPlugin] ❌ BLE write failed (\(target)): \(error.code) \(error.message ?? "")")
-                }
+    private func routeToBLE(_ data: Data, identifier: String?,
+                            completion: @escaping (Bool, Error?) -> Void) {
+        let reply: FlutterResult = { value in
+            if let error = value as? FlutterError {
+                let nativeError = NSError(domain: "PrinterLabel.BLE", code: 1,
+                                          userInfo: [NSLocalizedDescriptionKey: error.message ?? error.code])
+                completion(false, nativeError)
+            } else {
+                completion((value as? Bool) == true, nil)
             }
         }
         if let id = identifier, !id.isEmpty {
-            BLEManager.shared.writeData(data, toIdentifier: id, result: logFailure(id))
+            BLEManager.shared.writeData(data, toIdentifier: id, result: reply)
         } else {
-            BLEManager.shared.writeDataToFirstConnected(data, result: logFailure("first-connected"))
+            BLEManager.shared.writeDataToFirstConnected(data, result: reply)
         }
     }
 
@@ -768,7 +777,12 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             }
         }
         // Trả kết quả khi TẤT CẢ tem đã gửi xong (hoặc lỗi), không báo thành công sớm.
-        sendAllAndReply(labelPayloads, deviceId: deviceId, connectionType: connectionType, result: result)
+        // Keep complete TSPL rows together. LAN confirms each job for 400ms;
+        // confirming a bounded batch avoids paying that cost for every row.
+        // BLE still applies its existing byte-based backpressure to each batch.
+        sendAllAndReply(LabelPayloadBatcher.batches(labelPayloads), deviceId: deviceId,
+                        connectionType: connectionType,
+                        keepOpenAfter: !(args["is_last_batch"] as? Bool ?? true), result: result)
     }
 
     func printText(args: [String: Any], result: @escaping FlutterResult) {

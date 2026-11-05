@@ -19,6 +19,8 @@ final class BLEManager: NSObject {
     private var discoveredPeripherals: [String: CBPeripheral] = [:]
     private var connectedPeripherals: [String: CBPeripheral] = [:]
     private var writableCharacteristics: [String: (CBCharacteristic, CBCharacteristicWriteType)] = [:]
+    private var readableCharacteristics: [String: CBCharacteristic] = [:]
+    private var capabilityReply: [String: (Data) -> Void] = [:]
     private var pendingServiceCount: [String: Int] = [:]
     private var pendingConnectResults: [String: FlutterResult] = [:]
     private var pendingDisconnectResults: [String: FlutterResult] = [:]
@@ -314,51 +316,9 @@ final class BLEManager: NSObject {
             return
         }
 
-        // Nhịp gửi phụ thuộc kiểu ghi — hai kiểu có cơ chế backpressure KHÁC nhau:
-        //
-        // .withResponse: mỗi gói phải được máy in ack mới gửi gói kế. Bản thân ack ĐÃ LÀ
-        //   backpressure thật, nên KHÔNG cần nghỉ thêm — nghỉ nữa là chồng hai lớp làm
-        //   chậm lên nhau, gây in giật cục. Dùng hết MTU để mỗi round-trip chở được
-        //   nhiều byte nhất (giới hạn 120 byte là của SPP bên Android, không áp cho BLE).
-        //
-        // .withoutResponse: không có phản hồi từ máy in. `canSendWriteWithoutResponse`
-        //   chỉ báo bộ đệm CỦA IOS còn chỗ, không biết bộ đệm MÁY IN đã đầy chưa — nên
-        //   vẫn cần nhịp nghỉ giống Android để firmware kịp in và giải phóng buffer.
-        let maxWriteLen = peripheral.maximumWriteValueLength(for: writeType)
-        let chunkSize: Int
-        let perChunkPause: TimeInterval
-        let blockPause: TimeInterval
-        let blockSize: Int
-        if writeType == .withResponse {
-            chunkSize = max(1, maxWriteLen)
-            perChunkPause = 0
-            blockPause = 0
-            blockSize = .max
-        } else {
-            // Dùng hết MTU: ít gói hơn cho cùng lượng dữ liệu → in nhanh hơn.
-            //
-            // Nhịp nghỉ RẢI ĐỀU thay vì dồn cục: nghỉ 80ms sau mỗi 1500 byte (kiểu
-            // Android) làm máy in trôi một đoạn rồi KHỰNG hẳn 80ms, lặp lại — chính là
-            // cảm giác "giật giật". Chia cùng lượng thời gian đó đều cho từng gói thì
-            // firmware vẫn được nghỉ tương đương nhưng dòng giấy chạy liên tục, êm hơn.
-            //
-            // Ngân sách nghỉ phải tính THEO BYTE, không theo số gói. `canSendWriteWithoutResponse`
-            // chỉ báo bộ đệm CỦA IOS còn chỗ, KHÔNG biết bộ đệm MÁY IN đã đầy chưa; ESC/POS
-            // trên BLE không có đường phản hồi nào để máy in xin dừng. Giới hạn thật là tốc
-            // độ kéo giấy (~50–80mm/s), nên nhịp nghỉ chính là thứ duy nhất giữ ta không gửi
-            // vượt khả năng in. Đơn NGẮN nằm gọn trong bộ đệm máy in nên gửi nhanh vẫn đúng;
-            // đơn DÀI làm bộ đệm đầy, máy in ÂM THẦM loại byte giữa stream → lệch escape
-            // sequence → in ra ký tự rác. Vì vậy phải giữ đúng ngân sách của Android.
-            //
-            // Android: 4ms mỗi 120 byte + 80ms mỗi 1500 byte ≈ 86µs/byte. Chia theo số gói
-            // (1500/chunkSize) vừa bị PHÉP CHIA NGUYÊN CẮT BỚT (MTU 512 → 2 thay vì 2.93,
-            // mất ~32% ngân sách), vừa làm MTU càng lớn thì gửi càng nhanh vượt máy in.
-            chunkSize = max(1, maxWriteLen)
-            let pausePerByte = 0.004 / 120.0 + 0.080 / 1500.0 // ≈ 86µs/byte, khớp Android
-            perChunkPause = pausePerByte * Double(chunkSize)
-            blockPause = 0
-            blockSize = .max
-        }
+        // Gói ghi lớn nhất mà BLE MTU cho phép; flow control thật nằm ở phần chờ
+        // ACK/readiness bên dưới.
+        let chunkSize = max(1, peripheral.maximumWriteValueLength(for: writeType))
 
         resetSignals(for: identifier)
 
@@ -369,7 +329,6 @@ final class BLEManager: NSObject {
             guard let self = self else { return }
 
             var offset = 0
-            var bytesSentInBlock = 0
             var failure: FlutterError?
 
             while offset < data.count {
@@ -406,16 +365,7 @@ final class BLEManager: NSObject {
 
                 offset = end
 
-                // Nhịp nghỉ cho firmware máy in kịp xử lý — CHỈ áp dụng cho
-                // .withoutResponse; với .withResponse các giá trị này bằng 0.
-                if perChunkPause > 0 || blockPause > 0 {
-                    bytesSentInBlock += chunk.count
-                    if perChunkPause > 0 { Thread.sleep(forTimeInterval: perChunkPause) }
-                    if bytesSentInBlock >= blockSize {
-                        Thread.sleep(forTimeInterval: blockPause)
-                        bytesSentInBlock = 0
-                    }
-                }
+
             }
 
             // Trả kết quả về Main Thread cho Flutter
@@ -425,6 +375,51 @@ final class BLEManager: NSObject {
                 } else {
                     result(true)
                 }
+            }
+        }
+    }
+
+    func probeCapabilities(identifier: String, completion: @escaping ([String: Any]) -> Void) {
+        writeQueue(for: identifier).async {
+            let id = "BT:" + identifier
+            let snapshot = self.withState { () -> (CBPeripheral, CBCharacteristic, CBCharacteristicWriteType)? in
+                guard let peripheral = self.connectedPeripherals[identifier],
+                      let (write, type) = self.writableCharacteristics[identifier],
+                      let read = self.readableCharacteristics[identifier], read.isNotifying else { return nil }
+                return (peripheral, write, type)
+            }
+            guard let (peripheral, characteristic, type) = snapshot else {
+                self.onMain { completion(PrinterCapabilityResult.value(deviceId: id, reason: "no_read_channel")) }
+                return
+            }
+            self.resetSignals(for: identifier)
+            func ask(_ bytes: Data, valid: @escaping (Data) -> Bool) -> Bool {
+                let semaphore = DispatchSemaphore(value: 0)
+                let lock = NSLock()
+                var answer = false
+                self.withState {
+                    self.capabilityReply[identifier] = { data in
+                        lock.lock(); answer = valid(data); lock.unlock()
+                        semaphore.signal()
+                    }
+                }
+                defer { _ = self.withState { self.capabilityReply.removeValue(forKey: identifier) } }
+                guard peripheral.state == .connected else { return false }
+                if type == .withoutResponse && !peripheral.canSendWriteWithoutResponse { return false }
+                let ack = self.ackSignal(for: identifier)
+                peripheral.writeValue(bytes, for: characteristic, type: type)
+                if type == .withResponse && ack.wait(timeout: .now() + 0.7) == .timedOut { return false }
+                if semaphore.wait(timeout: .now() + 0.7) == .timedOut { return false }
+                lock.lock(); defer { lock.unlock() }
+                return answer
+            }
+            let esc = ask(PrinterCapabilityResult.esc, valid: PrinterCapabilityResult.validEsc) &&
+                      ask(PrinterCapabilityResult.esc, valid: PrinterCapabilityResult.validEsc)
+            let tspl = ask(PrinterCapabilityResult.tspl, valid: PrinterCapabilityResult.validTspl) &&
+                       ask(PrinterCapabilityResult.tspl, valid: PrinterCapabilityResult.validTspl)
+            self.onMain {
+                completion(PrinterCapabilityResult.value(deviceId: id, esc: esc, tspl: tspl,
+                                                         reason: esc || tspl ? "status_reply" : "no_response"))
             }
         }
     }
@@ -611,6 +606,12 @@ extension BLEManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         let identifier = peripheral.identifier.uuidString
+        // Only subscribe to a return channel on the same discovered UART service.
+        // A printer without notifications remains unknown instead of guessing.
+        if let read = service.characteristics?.first(where: { $0.properties.contains(.notify) || $0.properties.contains(.indicate) }) {
+            withState { readableCharacteristics[identifier] = read }
+            peripheral.setNotifyValue(true, for: read)
+        }
         let outcome: (result: FlutterResult, success: Bool)? = withState {
             // Máy in "yếu nguồn" cần ghi CÓ XÁC NHẬN; các máy khác giữ tốc độ tối đa.
             let needsThrottle = BLEManager.needsSlowWrite(peripheral.name)
@@ -649,6 +650,16 @@ extension BLEManager: CBPeripheralDelegate {
         if let outcome = outcome {
             onMain { outcome.result(outcome.success) } // false giống Android khi không tìm được characteristic
         }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard error == nil, let data = characteristic.value else { return }
+        let callback = withState { () -> ((Data) -> Void)? in
+            let id = peripheral.identifier.uuidString
+            guard readableCharacteristics[id] === characteristic else { return nil }
+            return capabilityReply[id]
+        }
+        callback?(data)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
