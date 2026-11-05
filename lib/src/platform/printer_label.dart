@@ -61,6 +61,12 @@ class PrinterLabel {
     return await _platform.checkPrinterStatus(deviceId: deviceId, type: type);
   }
 
+  /// Probe only while the printer is idle. Silence remains unknown; optional
+  /// features and receive-buffer capacity cannot be inferred from a status byte.
+  static Future<PrinterCapabilities> probeCapabilities(
+          {required String deviceId}) =>
+      _platform.probeCapabilities(deviceId: deviceId);
+
   /// Gets a map of all currently active printer connections (only supported on Android).
   ///
   /// Returns a [Map] containing `deviceId` as keys and their connection states (`true`/`false`) as values.
@@ -1185,7 +1191,8 @@ class PrinterLabel {
 
       if (i + 6 > data.length) return null;
       final macBytes = data.sublist(i, i + 6);
-      if (macBytes.every((b) => b == 0x00) || macBytes.every((b) => b == 0xFF)) {
+      if (macBytes.every((b) => b == 0x00) ||
+          macBytes.every((b) => b == 0xFF)) {
         return null;
       }
       return macBytes
@@ -2515,16 +2522,15 @@ class PrinterLabel {
         (lowerVendor.contains('tsc') || lowerVendor.contains('godex'));
     final isZpl = info == null && lowerVendor.contains('zebra');
 
-    // Chỉ chặn sớm với hãng chắc chắn không hiểu XP0001SAVE (Epson, Star). Các máy
-    // khác (VD PDIT/Xprinter) có thể không trả lời XP0001FIND nhưng vẫn nhận SAVE,
-    // nên vẫn gửi rồi xác minh ở bước 5.
-    final isKnownUnsupported =
-        lowerVendor.contains('epson') || lowerVendor.contains('star');
-    if (info == null && !isTspl && !isZpl && isKnownUnsupported) {
+    // Có MAC nhưng máy không trả lời XP0001FIND và không phải TSC/Zebra (VD Epson,
+    // Star): máy không hiểu XP0001SAVE -> báo ngay thay vì gửi vô ích rồi chờ xác minh.
+    // (Không có MAC thì vẫn để native thử SDK riêng của nền tảng ở bước 4.)
+    if (info == null && !isTspl && !isZpl && printerMac != null) {
       return LanIpChangeResult(
         status: LanIpChangeStatus.notSupported,
         mac: printerMac,
-        message: 'Máy in ${vendor != null ? '$vendor ' : ''}($oldIp) không hỗ trợ '
+        message:
+            'Máy in ${vendor != null ? '$vendor ' : ''}($oldIp) không hỗ trợ '
             'đổi IP từ app. '
             'Hãy đổi IP trên trang cấu hình của máy in (gõ $oldIp vào trình '
             'duyệt; Epson tự chuyển sang https), hoặc đặt DHCP reservation '

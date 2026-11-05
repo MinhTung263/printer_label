@@ -36,3 +36,4 @@ export 'src/service/label/label_printer_service_interface.dart';
 export 'src/service/esc/esc_print_service.dart';
 export 'src/service/esc/esc_print_service_interface.dart';
 
+export 'src/models/printer_capabilities.dart';

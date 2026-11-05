@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -34,6 +35,25 @@ class PrinterThermal {
         // nhau gây in ra ký tự rác. Nhờ vậy in cùng lúc 2 máy không phải đợi nhau.
         @JvmStatic
         val sendLocks = java.util.concurrent.ConcurrentHashMap<IDeviceConnection, Any>()
+
+        /// Máy in có trả lời lệnh hỏi trạng thái thời gian thực hay không.
+        /// Chỉ đọc/ghi bên trong khóa gửi của chính máy đó nên không cần đồng bộ thêm.
+        private class StatusProbe {
+            var misses = 0
+            var skips = 0
+        }
+
+        private const val STATUS_MUTE_AFTER = 2
+        private const val STATUS_RECHECK_EVERY = 20
+
+        private val statusProbeState =
+            java.util.concurrent.ConcurrentHashMap<String, StatusProbe>()
+
+        /// Khóa theo địa chỉ chứ không theo đối tượng connection: máy in LAN nhả
+        /// socket sau mỗi lần in nên lần sau là một `IDeviceConnection` khác, mà
+        /// vẫn là đúng cái máy đó.
+        private fun statusKey(conn: IDeviceConnection) =
+            "${conn.connectType}:${conn.connectInfo}"
 
         // Khóa TOÀN CỤC riêng cho Bluetooth Classic — dùng chung cho MỌI connection
         // loại BT, kể cả máy in tích hợp (Sunmi/iMin/Pax connect qua Bluetooth nội bộ,
@@ -199,10 +219,14 @@ class PrinterThermal {
         }
 
         @JvmStatic
-        fun sendAllSync(conn: IDeviceConnection, data: ByteArray, chunkSize: Int) {
+        fun sendAllSync(
+            conn: IDeviceConnection,
+            data: ByteArray,
+            chunkSize: Int
+        ) {
             var offset = 0
             while (offset < data.size) {
-                val count = Math.min(chunkSize, data.size - offset)
+                val count = minOf(chunkSize, data.size - offset)
                 val chunk = data.copyOfRange(offset, offset + count)
 
                 var sent = conn.sendSync(chunk)
@@ -241,6 +265,24 @@ class PrinterThermal {
         fun queryPaperStatus(conn: IDeviceConnection): PaperStatus {
             val isLan = conn is LanSocketConnection
             if (!isLan && conn.getConnectType() != POSConnect.DEVICE_TYPE_USB) return PaperStatus.UNKNOWN
+
+            // Máy KHÔNG hiểu `DLE EOT` thì phải đợi hết timeout mới bỏ cuộc — 800ms
+            // chết trước MỖI phiếu, lại nằm trong khối khóa nên in nhiều bản/nhiều
+            // máy là cộng dồn. Đó là khoảng chờ trước khi byte đầu tiên đi, tức đúng
+            // phần người dùng thấy là "bấm xong đợi mãi mới in".
+            //
+            // Hỏi hụt 2 lần LIÊN TIẾP mới tắt — một lần hụt có thể chỉ là máy đang
+            // bận, không đủ kết luận là không hỗ trợ. Tắt rồi thì thỉnh thoảng vẫn
+            // hỏi lại, phòng khi cùng địa chỉ nhưng đã thay sang máy khác.
+            val state = statusProbeState.getOrPut(statusKey(conn)) { StatusProbe() }
+            if (state.misses >= STATUS_MUTE_AFTER) {
+                if (state.skips < STATUS_RECHECK_EVERY) {
+                    state.skips++
+                    return PaperStatus.UNKNOWN
+                }
+                state.skips = 0
+            }
+
             // LAN tính thêm thời gian khứ hồi trên Wi-Fi đông; USB trả lời gần như tức thì.
             val timeoutMs = if (isLan) 800 else 300
             return try {
@@ -251,7 +293,12 @@ class PrinterThermal {
                 }
                 // Hỏi TỪNG câu và chấp nhận trả lời lẻ: nhiều máy giá rẻ chỉ hiểu DLE EOT 4.
                 // Cuộn giấy hỏi trước — không trả lời thì máy không hỗ trợ, khỏi hỏi tiếp.
-                val roll = askRealtimeStatus(conn, 4, timeoutMs) ?: return PaperStatus.UNKNOWN
+                val roll = askRealtimeStatus(conn, 4, timeoutMs)
+                if (roll == null) {
+                    state.misses++
+                    return PaperStatus.UNKNOWN
+                }
+                state.misses = 0
                 val offline = askRealtimeStatus(conn, 2, timeoutMs)
                 when {
                     offline != null && (offline and 0x04) != 0 -> PaperStatus.COVER_OPEN
@@ -300,6 +347,21 @@ class PrinterThermal {
         
         // Chạy toàn bộ quá trình in trên luồng nền để tránh khóa UI
         kotlin.concurrent.thread {
+            val totalStartMs = SystemClock.elapsedRealtime()
+            var decodeMs = 0L
+            var rasterMs = 0L
+            var payloadMs = 0L
+            var statusMs = 0L
+            var sendMs = 0L
+            var inputWidth = 0
+            var inputHeight = 0
+            var rasterByteCount = 0
+            var payloadByteCount = 0
+            // "none" = gửi thẳng theo nhịp TCP/driver. Khác "none" nghĩa là đang bị
+            // hãm — dùng để xác nhận LAN đã hết hãm sau khi sửa `settingsFor`.
+            // UNKNOWN kèm statusMs≈0 nghĩa là đã tắt hỏi giấy cho máy này.
+            var paper = "-"
+            var totalMsBeforeSend = 0L
             try {
                 val image: ByteArray? = call.argument<ByteArray>("image")
                 if (image == null) {
@@ -308,13 +370,17 @@ class PrinterThermal {
                     }
                     return@thread
                 }
+                val decodeStartMs = SystemClock.elapsedRealtime()
                 val bitmap = BitmapFactory.decodeByteArray(image, 0, image.size)
+                decodeMs = SystemClock.elapsedRealtime() - decodeStartMs
                 if (bitmap == null) {
                     Handler(Looper.getMainLooper()).post {
                         result.error("PRINT_ERROR", "Failed to decode bitmap image", null)
                     }
                     return@thread
                 }
+                inputWidth = bitmap.width
+                inputHeight = bitmap.height
                 val isBluetooth = curConnect.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH
 
                 // USB từng đi qua `printBitmap` của SDK (để SDK tự dựng + gửi lệnh ảnh, tự
@@ -333,9 +399,13 @@ class PrinterThermal {
                 // toàn qua đường này.
 
                 // Dựng dữ liệu ảnh thô (GS v 0) sử dụng bộ nhị phân hóa chất lượng cao (threshold 200) để giữ nguyên chất lượng ảnh gốc của Flutter
+                val rasterStartMs = SystemClock.elapsedRealtime()
                 val rasterBytes = getEscPosRasterBytes(bitmap)
+                rasterMs = SystemClock.elapsedRealtime() - rasterStartMs
+                rasterByteCount = rasterBytes.size
                 bitmap.recycle()
 
+                val payloadStartMs = SystemClock.elapsedRealtime()
                 val stream = java.io.ByteArrayOutputStream()
                 
                 // 1. Initialize printer (ESC @)
@@ -372,6 +442,8 @@ class PrinterThermal {
                     repeat(copies) { buf.write(oneCopy) }
                     buf.toByteArray()
                 }
+                payloadMs = SystemClock.elapsedRealtime() - payloadStartMs
+                payloadByteCount = allBytes.size
 
                 // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection).
                 // Các máy khác dùng khóa khác nên vẫn in song song, không đợi nhau.
@@ -395,7 +467,11 @@ class PrinterThermal {
                             else -> Unit
                         }
                     }
-                    when (queryPaperStatus(curConnect)) {
+                    val statusStartMs = SystemClock.elapsedRealtime()
+                    val paperStatus = queryPaperStatus(curConnect)
+                    statusMs = SystemClock.elapsedRealtime() - statusStartMs
+                    paper = paperStatus.name
+                    when (paperStatus) {
                         PaperStatus.PAPER_END -> throw PrinterStatusException(
                             "PRINTER_OUT_OF_PAPER", "Máy in hết giấy"
                         )
@@ -404,6 +480,8 @@ class PrinterThermal {
                         )
                         else -> Unit
                     }
+                    val sendStartMs = SystemClock.elapsedRealtime()
+                    totalMsBeforeSend = sendStartMs - totalStartMs
                     if (isBluetooth && !isTargetBuiltIn) {
                         // Máy in Bluetooth ngoài: gửi ĐỀU theo tốc độ mục tiêu (bản cũ: gói
                         // 120B, nghỉ 4ms mỗi gói + 80ms mỗi 1500B ≈ 11KB/s nhưng dồn cục).
@@ -446,12 +524,44 @@ class PrinterThermal {
                         // Gói 4KB lớn hơn Bluetooth nhiều nên vẫn nhanh, không cần sleep.
                         sendAllSync(curConnect, allBytes, 4096)
                     }
+                    sendMs = SystemClock.elapsedRealtime() - sendStartMs
                 }
+
+                val route = when (curConnect.getConnectType()) {
+                    POSConnect.DEVICE_TYPE_BLUETOOTH -> "bluetooth"
+                    POSConnect.DEVICE_TYPE_ETHERNET -> "lan"
+                    POSConnect.DEVICE_TYPE_USB -> "usb"
+                    else -> "other"
+                }
+                // Tốc độ gửi thực tế của một job, để soi khi máy in chạy chậm.
+                val throughput = if (sendMs > 0) payloadByteCount * 1000L / sendMs else -1L
+                // Khoảng CHỜ CHẾT: từ lúc native nhận lệnh tới lúc byte đầu tiên đi.
+                // Giấy bắt đầu chạy ngay khi máy nhận đủ dải `GS v 0` đầu tiên, nên
+                // phần `sendMs` còn lại chạy chồng lên lúc máy đang in — chỉ số này
+                // mới là thứ người dùng cảm nhận là "bấm xong đợi mãi mới in".
+                val firstByteMs = totalMsBeforeSend
+                Log.i(
+                    "PRINTER_PERF",
+                    "route=$route image=${inputWidth}x$inputHeight " +
+                        "inputBytes=${image.size} " +
+                        "decodeMs=$decodeMs rasterMs=$rasterMs rasterBytes=$rasterByteCount " +
+                        "payloadMs=$payloadMs payloadBytes=$payloadByteCount " +
+                        "statusMs=$statusMs paper=$paper firstByteMs=$firstByteMs " +
+                        "sendMs=$sendMs throughputBps=$throughput " +
+                        "totalMs=${SystemClock.elapsedRealtime() - totalStartMs}"
+                )
 
                 Handler(Looper.getMainLooper()).post {
                     result.success(true)
                 }
             } catch (e: Exception) {
+                Log.e(
+                    "PRINTER_PERF",
+                    "print failed after ${SystemClock.elapsedRealtime() - totalStartMs}ms " +
+                        "decodeMs=$decodeMs rasterMs=$rasterMs payloadMs=$payloadMs " +
+                        "payloadBytes=$payloadByteCount statusMs=$statusMs sendMs=$sendMs",
+                    e
+                )
                 val code = (e as? PrinterStatusException)?.code ?: "PRINT_ERROR"
                 Handler(Looper.getMainLooper()).post {
                     result.error(code, e.message, null)
