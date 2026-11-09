@@ -1,3 +1,18 @@
+## [2.4.0] - 2026-11-09
+
+### 🚀 Performance
+
+- **Faster ESC/POS raster encoding**: Integer grayscale threshold on pre-binarized rows (Android & iOS); iOS skips redrawing images that already match the printer width.
+- **Faster LAN sending**: Socket send buffer raised from 512 B to 16 KB — long bills are sent about 20x faster.
+- **Stable Bluetooth printing**: Data is rate-paced (120 B chunks at ~11 KB/s) so low-cost handheld printers no longer overflow and print garbage characters.
+- **Quicker LAN printer names**: `getLanPrinterName` returns on the first valid answer instead of waiting for every source to time out; the ARP/OUI lookup runs in parallel. `discoverLanDevices` emits the name before the MAC, remembers names per IP for later scans, and no longer drops names of printers found at the end of the scan.
+
+### 🛡️ Reliability
+
+- **Sunmi built-in printer status**: Checks paper, cover and temperature through InnerPrinterService before printing and fails fast with `PRINTER_OUT_OF_PAPER`, `PRINTER_COVER_OPEN` or `PRINTER_OVERHEATED`.
+- **Label commands on receipt printers**: `printLabel` refuses to send TSPL to receipt-only printers (built-in, or LAN/USB printers that answer ESC/POS but not TSPL) and returns `PRINTER_NOT_LABEL`, instead of printing garbage and feeding the whole roll. Print the label as an image instead.
+- **iOS Bluetooth**: Briefly scans for peripherals with an unknown UUID before connecting.
+
 ## [2.3.0] - 2026-10-11
 
 ### 🚀 New Features & Enhancements
