@@ -135,6 +135,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         usbEventChannel.setStreamHandler(usbEventStreamHandler)
         isDetached = false
         mContext = flutterPluginBinding.applicationContext
+        SunmiPrinterStatus.init(mContext)
         POSConnect.init(mContext)
         usbReceiver = UsbConnectionReceiver(channel, this)
         val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)
@@ -1473,6 +1474,18 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             val images: List<ByteArray>? = call.argument<List<ByteArray>>("images")
             if (images.isNullOrEmpty()) {
                 result.success(false); return
+            }
+
+            // Máy in hoá đơn (ESC/POS) mà nhận TSPL sẽ in ra rác + chạy hết giấy -> chặn,
+            // trả mã riêng để Dart in tem dạng ảnh ESC/POS thay thế.
+            val deviceKey = call.argument<String>("device_id") ?: conn.toString()
+            if (PrinterLanguageGuard.isReceiptOnly(this, conn, deviceKey)) {
+                result.error(
+                    "PRINTER_NOT_LABEL",
+                    "Máy in hoá đơn không in được lệnh tem (TSPL)",
+                    mapOf("deviceId" to deviceKey)
+                )
+                return
             }
 
             val printer = TSPLPrinter(conn)

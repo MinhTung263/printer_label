@@ -27,6 +27,15 @@ final class BLEManager: NSObject {
     private var connectTimeouts: [String: DispatchWorkItem] = [:]
     private let connectTimeoutInterval: TimeInterval = 5.0 // 5 giây
 
+    /// Kết nối tới máy in mà iOS chưa biết (app vừa mở lại -> `retrievePeripherals`
+    /// không trả về): tự quét tối đa ngần này để tìm đúng máy rồi kết nối, thay vì
+    /// báo lỗi ngay (trước đây phải vào màn cài đặt quét lại mới kết nối được).
+    private let discoveryConnectTimeout: TimeInterval = 6.0
+    /// Lệnh connect đang chờ quét thấy máy (theo identifier).
+    private var pendingDiscoveryConnects: [String: FlutterResult] = [:]
+    /// Lượt quét do chính cơ chế trên bật (không phải người dùng bấm quét).
+    private var discoveryScanOwned = false
+
     /// Thực thi [body] khi đang giữ stateLock.
     private func withState<T>(_ body: () -> T) -> T {
         stateLock.lock()
@@ -196,8 +205,44 @@ final class BLEManager: NSObject {
                 return
             }
         }
-        // 4. Thất bại → false (giống Android)
+        // 4. iOS chưa biết máy (vừa mở lại app) -> quét ngắn tìm đúng máy rồi kết nối.
+        if UUID(uuidString: identifier) != nil, centralManager.state == .poweredOn {
+            connectAfterDiscovery(identifier: identifier, result: result)
+            return
+        }
+        // 5. Thất bại → false (giống Android)
         result(false)
+    }
+
+    private func connectAfterDiscovery(identifier: String, result: @escaping FlutterResult) {
+        let alreadyWaiting = withState { pendingDiscoveryConnects[identifier] != nil }
+        if alreadyWaiting {
+            result(false)
+            return
+        }
+        withState { pendingDiscoveryConnects[identifier] = result }
+        if !isScanning && !discoveryScanOwned {
+            discoveryScanOwned = true
+            centralManager.scanForPeripherals(
+                withServices: nil,
+                options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+            )
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + discoveryConnectTimeout) { [weak self] in
+            guard let self = self else { return }
+            let pending = self.withState { self.pendingDiscoveryConnects.removeValue(forKey: identifier) }
+            self.stopOwnedDiscoveryScanIfIdle()
+            pending?(false)
+        }
+    }
+
+    /// Tắt lượt quét do cơ chế kết nối-sau-quét bật khi không còn ai chờ (không đụng
+    /// lượt quét người dùng tự bấm ở màn cài đặt).
+    private func stopOwnedDiscoveryScanIfIdle() {
+        let idle = withState { pendingDiscoveryConnects.isEmpty }
+        guard discoveryScanOwned, idle, !isScanning else { return }
+        discoveryScanOwned = false
+        centralManager.stopScan()
     }
 
     private func _connect(_ peripheral: CBPeripheral, identifier: String, result: @escaping FlutterResult) {
@@ -512,8 +557,15 @@ extension BLEManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        guard RSSI.intValue >= minScanRSSI else { return }
         let identifier = peripheral.identifier.uuidString
+        // Đang chờ kết nối tới đúng máy này (xem connectAfterDiscovery) -> kết nối ngay,
+        // bỏ qua bộ lọc tên/RSSI vì identifier đã khớp chính xác.
+        if let pending = withState({ pendingDiscoveryConnects.removeValue(forKey: identifier) }) {
+            withState { discoveredPeripherals[identifier] = peripheral }
+            stopOwnedDiscoveryScanIfIdle()
+            _connect(peripheral, identifier: identifier, result: pending)
+        }
+        guard RSSI.intValue >= minScanRSSI else { return }
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? ""
         
         guard !name.isEmpty else { return }
