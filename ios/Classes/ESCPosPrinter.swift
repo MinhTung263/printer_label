@@ -114,18 +114,25 @@ final class ESCPosPrinter {
         default:  targetWidth = 576
         }
 
-        let scale = targetWidth / image.size.width
-        let targetHeight = image.size.height * scale
+        // Ảnh đã đúng số chấm khổ giấy (app render thẳng 384/576 px) -> dùng luôn,
+        // khỏi vẽ lại cả ảnh.
+        let resizedCG: CGImage?
+        if let cg = image.cgImage, CGFloat(cg.width) == targetWidth {
+            resizedCG = cg
+        } else {
+            let scale = targetWidth / image.size.width
+            let targetHeight = image.size.height * scale
 
-        UIGraphicsBeginImageContextWithOptions(
-            CGSize(width: targetWidth, height: targetHeight),
-            false, 1.0
-        )
-        image.draw(in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
-        let resized = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
+            UIGraphicsBeginImageContextWithOptions(
+                CGSize(width: targetWidth, height: targetHeight),
+                false, 1.0
+            )
+            image.draw(in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+            resizedCG = UIGraphicsGetImageFromCurrentImageContext()?.cgImage
+            UIGraphicsEndImageContext()
+        }
 
-        guard let cgImage = resized?.cgImage else {
+        guard let cgImage = resizedCG else {
             completion(nil)
             return
         }
@@ -224,57 +231,92 @@ final class ESCPosPrinter {
         ) else { return nil }
         ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
-        // Một dải không được cao quá 65535 dòng, vì yL/yH chỉ có 2 byte. `UInt8(...)`
-        // trong Swift là khởi tạo CHẶT: giá trị vượt 255 sẽ crash chứ không cắt bit âm
-        // thầm như `.toByte()` bên Kotlin — nên phải kẹp trước khi dựng header.
-        let rows = max(1, min(bandHeight, 65535))
+        // 1) Nhị phân hoá toàn ảnh MỘT lần bằng số nguyên vào bộ đệm cấp phát sẵn (trước
+        //    đây tính xám bằng Double + append từng byte vào Data). Kết quả giống hệt:
+        //    cháy khi alpha > 50 và xám < 200, xám = 0.299R + 0.587G + 0.114B (nhân 1000
+        //    để giữ số nguyên). Giữ khớp với Android (PrinterThermal.kt) và
+        //    `binarized(threshold:)` — đều dùng 200.
+        //
+        //    Ngưỡng 200 — KHÔNG hạ về 128: đầu in nhiệt chỉ có cháy/trắng; chữ
+        //    anti-alias gồm lõi đậm + viền xám, ngưỡng 128 chỉ còn bộ xương mảnh -> in
+        //    RẤT MỜ (đã ghi nhận trên máy BLE ở cả iOS và Android).
+        let bitCount = widthBytes * height
+        let bits = UnsafeMutablePointer<UInt8>.allocate(capacity: bitCount)
+        bits.initialize(repeating: 0, count: bitCount)
+        defer { bits.deallocate() }
+        var blankRow = [Bool](repeating: true, count: height)
+        for y in 0..<height {
+            let rowPixel = y * width * 4
+            let rowByte = y * widthBytes
+            var any: UInt8 = 0
+            for xByte in 0..<widthBytes {
+                var byteVal: UInt8 = 0
+                let x0 = xByte * 8
+                let xEnd = min(x0 + 8, width)
+                var x = x0
+                while x < xEnd {
+                    let idx = rowPixel + x * 4
+                    if pixels[idx + 3] > 50 {
+                        let gray1000 = 299 * Int(pixels[idx]) +
+                            587 * Int(pixels[idx + 1]) +
+                            114 * Int(pixels[idx + 2])
+                        if gray1000 < 200_000 { byteVal |= UInt8(0x80 >> (x - x0)) }
+                    }
+                    x += 1
+                }
+                bits[rowByte + xByte] = byteVal
+                any |= byteVal
+            }
+            blankRow[y] = any == 0
+        }
 
-        var data = Data(capacity: 8 + widthBytes * height)
-
-        var y0 = 0
-        while y0 < height {
-            let bandRows = min(rows, height - y0)
-
-            // GS v 0 m xL xH yL yH — yL/yH là chiều cao của DẢI này.
+        // 2) Dựng lệnh. Mỗi dải `GS v 0` tối đa [bandHeight] dòng (nhồi cả bill vào một
+        //    lệnh vượt giới hạn chiều cao raster -> máy in ra ký tự rác). `UInt8(...)` là
+        //    khởi tạo CHẶT (vượt 255 sẽ crash) nên phải kẹp trước khi dựng header.
+        //
+        //    Đoạn dòng TRẮNG dài (>= blankFeedMinRows) gửi bằng `ESC J n` (in & đẩy giấy
+        //    n chấm) thay vì raster toàn số 0: dữ liệu nhỏ hơn -> BLE gửi xong sớm hơn,
+        //    và đẩy giấy nhanh hơn in raster trắng. Khoảng trắng ngắn giữa các dòng chữ
+        //    vẫn để trong raster để giữ nguyên bố cục. Khớp với Android.
+        let maxBand = max(1, min(bandHeight, 65535))
+        // ĐANG TẮT (Int.max): máy in cầm tay BT 58mm KHÔNG đẩy giấy đúng theo `ESC J`
+        // -> mất khoảng trắng giữa các dòng, chữ in đè lên nhau. Khớp Android.
+        let blankFeedMinRows = Int.max
+        var data = Data(capacity: bitCount + (height / maxBand + 2) * 8)
+        var y = 0
+        while y < height {
+            if blankRow[y] {
+                var run = 0
+                while y + run < height && blankRow[y + run] { run += 1 }
+                if run >= blankFeedMinRows {
+                    var left = run
+                    while left > 0 {
+                        let n = min(255, left)
+                        data.append(contentsOf: [0x1B, 0x4A, UInt8(n)])
+                        left -= n
+                    }
+                    y += run
+                    continue
+                }
+            }
+            var rows = 0
+            while y + rows < height && rows < maxBand {
+                if blankRow[y + rows] {
+                    var run = 0
+                    while y + rows + run < height && blankRow[y + rows + run] { run += 1 }
+                    if run >= blankFeedMinRows { break }
+                    rows += min(run, maxBand - rows)
+                } else {
+                    rows += 1
+                }
+            }
             data.append(contentsOf: [
                 0x1D, 0x76, 0x30, 0x00,
                 UInt8(widthBytes % 256), UInt8(widthBytes / 256),
-                UInt8(bandRows % 256), UInt8(bandRows / 256)
+                UInt8(rows % 256), UInt8(rows / 256)
             ])
-
-            for y in y0..<(y0 + bandRows) {
-                for xByte in 0..<widthBytes {
-                    var byteVal: UInt8 = 0
-                    for bit in 0..<8 {
-                        let x = xByte * 8 + bit
-                        guard x < width else { continue }
-                        let idx = (y * width + x) * 4
-                        let alpha = Int(pixels[idx + 3])
-                        guard alpha > 50 else { continue }
-                        let red = Double(pixels[idx])
-                        let green = Double(pixels[idx + 1])
-                        let blue = Double(pixels[idx + 2])
-                        let gray = Int(0.299 * red + 0.587 * green + 0.114 * blue)
-                        // Ngưỡng 200 — KHÔNG hạ về 128 (xem lịch sử: 128 gây in mờ).
-                        //
-                        // Đầu in nhiệt chỉ có 1 bit: cháy hoặc trắng, không có mức xám. Chữ do
-                        // Flutter render là anti-alias nên mỗi nét gồm lõi đậm bọc bởi dải xám.
-                        // Ngưỡng 200 cho cháy tới xám 199 -> nét đủ dày. Ngưỡng 128 loại sạch
-                        // dải 129-199; với cỡ chữ nhỏ dải này chiếm phần lớn nét nên chỉ còn bộ
-                        // xương mảnh -> bản in RẤT MỜ (đã ghi nhận trên máy BLE ở cả iOS và
-                        // Android).
-                        //
-                        // Giữ khớp với Android (PrinterThermal.kt) và với `binarized(threshold:)`
-                        // trong PrinterLabelPlugin.swift — cả hai đều dùng 200.
-                        if gray < 200 {
-                            byteVal |= (1 << (7 - bit))
-                        }
-                    }
-                    data.append(byteVal)
-                }
-            }
-
-            y0 += bandRows
+            data.append(bits + y * widthBytes, count: rows * widthBytes)
+            y += rows
         }
 
         return data

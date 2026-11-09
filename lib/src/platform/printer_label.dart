@@ -1447,6 +1447,10 @@ class PrinterLabel {
     return null;
   }
 
+  /// Đã có tên hợp lệ từ nguồn ưu tiên thấp thì chờ thêm tối đa ngần này cho
+  /// nguồn ưu tiên cao hơn (SNMP) trước khi chốt — xem [getLanPrinterName].
+  static const Duration _nameGrace = Duration(milliseconds: 150);
+
   /// Queries a LAN printer to retrieve its true hardware model and brand name.
   ///
   /// Combines safe, read-only network queries in parallel:
@@ -1466,8 +1470,10 @@ class PrinterLabel {
     int port = 9100,
     Duration timeout = const Duration(milliseconds: 800),
   }) async {
-    // Chạy song song tất cả các phương thức an toàn (HOÀN TOÀN KHÔNG GỬI DỮ LIỆU TỚI PORT 9100)
-    final results = await Future.wait([
+    // Chạy song song tất cả các phương thức an toàn (HOÀN TOÀN KHÔNG GỬI DỮ LIỆU
+    // TỚI PORT 9100), xếp theo thứ tự ưu tiên: SNMP trả đúng tên model ghi trên
+    // nhãn máy -> HPRT UDP -> SSDP/UPnP -> mDNS -> NetBIOS -> HTTP -> DNS ngược.
+    final sources = <Future<String?>>[
       querySnmpPrinterName(ip,
           timeout: const Duration(milliseconds: 700)), // [0] SNMP
       queryHprtUdpPrinterName(ip,
@@ -1483,79 +1489,86 @@ class PrinterLabel {
       InternetAddress(ip)
           .reverse()
           .timeout(const Duration(milliseconds: 300))
-          .then((addr) => addr.host != ip ? addr.host : null)
-          .catchError((_) => null), // [6] DNS
-    ]);
+          .then((addr) => addr.host != ip ? addr.host : null), // [6] DNS
+      // [7] Native (Android): bảng ARP + tra hãng theo MAC — chỉ đọc bảng của
+      // hệ điều hành, trả lời ngay. Trước đây chỉ chạy SAU KHI 7 nguồn trên hết
+      // timeout -> máy không trả lời SNMP/mDNS/HTTP (VD PDIT) luôn chờ ~0.8s.
+      _platform.getLanPrinterInfo(ip: ip, port: port).then((info) {
+        final rawName = info?['rawName'] as String?;
+        if (rawName != null && rawName.isNotEmpty) return rawName;
+        return info?['vendor'] as String?;
+      }),
+    ];
+    const dnsIndex = 6;
+    const nativeIndex = 7;
 
-    final snmpName = results[0];
-    final hprtUdpName = results[1];
-    final ssdpName = results[2];
-    final mdnsName = results[3];
-    final netBiosName = results[4];
-    final httpName = results[5];
-    final dnsName = results[6];
+    // KHÔNG chờ cả 7 nguồn xong: nguồn không trả lời luôn phải chờ hết timeout
+    // (SNMP 700ms) trong khi máy in cùng LAN trả lời trong vài chục ms. Trước
+    // đây Future.wait làm tên luôn hiện sau ~0.5–1s dù đã có câu trả lời sớm.
+    // Quy tắc chọn: lấy nguồn ưu tiên cao nhất ĐÃ có tên hợp lệ, khi mọi nguồn
+    // ưu tiên cao hơn nó đã xong; hoặc khi đã có tên hợp lệ được [_nameGrace]
+    // mà nguồn cao hơn vẫn im (thường là máy không bật SNMP) -> lấy tên tốt
+    // nhất đang có, không chờ hết timeout.
+    final formatted = List<String?>.filled(sources.length, null);
+    final done = List<bool>.filled(sources.length, false);
+    final completer = Completer<String?>();
+    Timer? graceTimer;
 
-    // Ưu tiên 1: SNMP — trả về đúng tên model ghi trên nhãn máy
-    if (snmpName != null && snmpName.isNotEmpty) {
-      final formatted = formatPrinterName(snmpName);
-      if (formatted != 'Máy in LAN') return formatted;
-    }
-
-    // Ưu tiên 2: HPRT UDP discovery chuyên dụng
-    if (hprtUdpName != null && hprtUdpName.isNotEmpty) {
-      final formatted = formatPrinterName(hprtUdpName);
-      if (formatted != 'Máy in LAN') return formatted;
-    }
-
-    // Ưu tiên 3: SSDP / UPnP
-    if (ssdpName != null && ssdpName.isNotEmpty) {
-      final formatted = formatPrinterName(ssdpName);
-      if (formatted != 'Máy in LAN') return formatted;
-    }
-
-    // Ưu tiên 4: mDNS / Bonjour
-    if (mdnsName != null && mdnsName.isNotEmpty) {
-      final formatted = formatPrinterName(mdnsName);
-      if (formatted != 'Máy in LAN') return formatted;
-    }
-
-    // Ưu tiên 5: Tên từ NetBIOS
-    if (netBiosName != null && netBiosName.isNotEmpty) {
-      final formatted = formatPrinterName(netBiosName);
-      if (formatted != 'Máy in LAN') return formatted;
-    }
-
-    // Ưu tiên 6: Tên từ HTTP web config
-    if (httpName != null && httpName.isNotEmpty) {
-      final formatted = formatPrinterName(httpName);
-      if (formatted != 'Máy in LAN') return formatted;
-    }
-
-    // Ưu tiên 7: Tên từ Reverse DNS
-    if (dnsName != null && dnsName.isNotEmpty) {
-      final cleanDns = dnsName.replaceFirst(
-          RegExp(r'\.(local|lan|home|internal)$', caseSensitive: false), '');
-      final formatted = formatPrinterName(cleanDns);
-      if (formatted != 'Máy in LAN') return formatted;
-    }
-
-    // Ưu tiên 8: Native Android ARP cache & `ip neigh` table
-    try {
-      final nativeInfo = await _platform.getLanPrinterInfo(ip: ip, port: port);
-      if (nativeInfo != null) {
-        final rawName = nativeInfo['rawName'] as String?;
-        final vendor = nativeInfo['vendor'] as String?;
-        if (rawName != null && rawName.isNotEmpty) {
-          final formatted = formatPrinterName(rawName);
-          if (formatted != 'Máy in LAN') return formatted;
-        }
-        if (vendor != null && vendor.isNotEmpty) {
-          return vendor;
-        }
+    String? bestReady({required bool requireHigherDone}) {
+      for (var i = 0; i < sources.length; i++) {
+        if (formatted[i] != null) return formatted[i];
+        if (requireHigherDone && !done[i]) return null;
       }
-    } catch (_) {}
+      return null;
+    }
 
-    return null;
+    void decide() {
+      if (completer.isCompleted) return;
+      final strict = bestReady(requireHigherDone: true);
+      if (strict != null) {
+        graceTimer?.cancel();
+        completer.complete(strict);
+        return;
+      }
+      if (done.every((d) => d)) {
+        graceTimer?.cancel();
+        completer.complete(null);
+        return;
+      }
+      if (graceTimer == null && formatted.any((n) => n != null)) {
+        graceTimer = Timer(_nameGrace, () {
+          if (!completer.isCompleted) {
+            completer.complete(bestReady(requireHigherDone: false));
+          }
+        });
+      }
+    }
+
+    for (var i = 0; i < sources.length; i++) {
+      final index = i;
+      sources[i]
+          .then((raw) {
+            if (raw != null && raw.isNotEmpty) {
+              final cleaned = index == dnsIndex
+                  ? raw.replaceFirst(
+                      RegExp(r'\.(local|lan|home|internal)$',
+                          caseSensitive: false),
+                      '')
+                  : raw;
+              // Hãng tra theo MAC (native) giữ nguyên, không qua formatPrinterName.
+              final name =
+                  index == nativeIndex ? cleaned : formatPrinterName(cleaned);
+              if (name != 'Máy in LAN') formatted[index] = name;
+            }
+          })
+          .catchError((_) {})
+          .whenComplete(() {
+            done[index] = true;
+            decide();
+          });
+    }
+
+    return completer.future;
   }
 
   /// Đo chất lượng mạng từ thiết bị này tới máy in LAN [ip] (🟢 tốt / 🟡 yếu / 🟠 rất yếu /
@@ -1571,6 +1584,10 @@ class PrinterLabel {
     Duration cacheFor = const Duration(seconds: 10),
   }) =>
       LanQuality.measure(ip, port: port, samples: samples, cacheFor: cacheFor);
+
+  /// Tên/hãng/MAC đã nhận diện theo IP trong phiên chạy app: quét lại (mở lại
+  /// màn thêm máy in) hiện tên ngay thay vì chờ hỏi lại máy in.
+  static final Map<String, LanDeviceModel> _lanDeviceCache = {};
 
   /// Discovers LAN printers on the local network and queries their hardware/model names.
   static Stream<LanDeviceModel> discoverLanDevices({
@@ -1595,50 +1612,84 @@ class PrinterLabel {
       }
     }).catchError((_) {});
 
+    // Truy vấn tên/MAC còn đang chạy: quét IP xong vẫn phải chờ chúng rồi mới
+    // đóng stream, không thì máy tìm thấy cuối dải (VD .254) mất tên.
+    final pending = <Future<void>>[];
+
+    Future<void> resolveDetails(String ip) async {
+      String? modelName;
+      String? mac;
+      LanDeviceModel? last = _lanDeviceCache[ip];
+
+      // Phát lại mỗi khi có thêm thông tin (tên trước, MAC sau) — UI cập nhật
+      // theo IP nên hiện tên ngay khi có, không chờ MAC / bản quét SDK.
+      void emit() {
+        // Không đoán được hãng từ tên model (hoặc không có tên) -> tra theo MAC.
+        // Trên iOS đây là đường DUY NHẤT nhận ra các máy không trả tên qua
+        // SNMP/mDNS/HTTP (VD PDIT), vì iOS không có bảng OUI native như Android.
+        final vendor = (modelName != null ? detectVendor(modelName!) : null) ??
+            vendorFromMac(mac);
+        final displayName =
+            (vendor != null && vendor.isNotEmpty) ? vendor : modelName;
+        if (controller.isClosed || (displayName == null && mac == null)) return;
+        final device = LanDeviceModel.fromIp(
+          ip,
+          // Chưa nhận ra tên lần này thì giữ tên đã nhớ từ lần quét trước.
+          name: displayName ?? last?.name,
+          vendor: vendor ?? last?.vendor,
+          port: port,
+          mac: mac ?? last?.mac,
+        );
+        final prev = last;
+        if (prev != null &&
+            prev.name == device.name &&
+            prev.vendor == device.vendor &&
+            prev.mac == device.mac) {
+          return;
+        }
+        last = device;
+        _lanDeviceCache[ip] = device;
+        controller.add(device);
+      }
+
+      try {
+        await Future.wait([
+          getLanPrinterName(ip, port: port).then((v) {
+            modelName = v;
+            emit();
+          }),
+          Future.wait([
+            resolveLanPrinterMac(ip).then((v) => mac = v),
+            sdkScanDone,
+          ]).then((_) {
+            mac ??= sdkMacByIp[ip];
+            emit();
+          }),
+        ]);
+      } catch (_) {}
+    }
+
     discoverLanPrinters(port: port, timeout: timeout).listen(
-      (ip) async {
+      (ip) {
         if (!emitted.add(ip) || controller.isClosed) return;
 
-        // 1. Phát ra ngay lập tức với IP để UI hiển thị máy in ngay trong < 100ms
-        controller.add(LanDeviceModel.fromIp(ip, port: port));
+        // 1. Phát ra ngay với IP để UI hiện máy in trong < 100ms. Máy đã gặp ở
+        // lần quét trước (trong phiên chạy app) thì hiện luôn tên đã nhớ, vẫn
+        // hỏi lại bên dưới để cập nhật nếu đổi máy.
+        controller
+            .add(_lanDeviceCache[ip] ?? LanDeviceModel.fromIp(ip, port: port));
 
         if (!queryDeviceName) return;
 
         // 2. Tự động truy vấn tên model, hãng và MAC ở chế độ nền
-        try {
-          String? modelName;
-          String? mac;
-          await Future.wait([
-            getLanPrinterName(ip, port: port).then((v) => modelName = v),
-            resolveLanPrinterMac(ip).then((v) => mac = v),
-            sdkScanDone,
-          ]);
-          mac ??= sdkMacByIp[ip];
-
-          // Không đoán được hãng từ tên model (hoặc không có tên) -> tra theo MAC.
-          // Trên iOS đây là đường DUY NHẤT nhận ra các máy không trả tên qua
-          // SNMP/mDNS/HTTP (VD PDIT), vì iOS không có bảng OUI native như Android.
-          final vendor =
-              (modelName != null ? detectVendor(modelName!) : null) ??
-                  vendorFromMac(mac);
-          final displayName =
-              (vendor != null && vendor.isNotEmpty) ? vendor : modelName;
-          if (!controller.isClosed && (displayName != null || mac != null)) {
-            controller.add(LanDeviceModel.fromIp(
-              ip,
-              name: displayName,
-              vendor: vendor,
-              port: port,
-              mac: mac,
-            ));
-          }
-        } catch (_) {}
+        pending.add(resolveDetails(ip));
       },
       onError: (err) {
         if (!controller.isClosed) controller.addError(err);
       },
-      onDone: () {
-        if (!controller.isClosed) controller.close();
+      onDone: () async {
+        await Future.wait(pending);
+        if (!controller.isClosed) await controller.close();
       },
     );
 

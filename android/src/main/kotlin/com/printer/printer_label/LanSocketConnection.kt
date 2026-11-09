@@ -179,10 +179,14 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
             bindToLocalNetwork(s, address)
             s.tcpNoDelay = true
             s.keepAlive = true
-            // Ép bộ đệm gửi 512 byte như SDK: để kernel tự chọn (bộ đệm lớn) thì in ra ký
-            // tự rác trên máy thật — giữ hành vi cũ đã chạy ổn. Đánh đổi: chậm hơn khi
-            // Wi-Fi trễ cao.
-            s.sendBufferSize = 512
+            // Bộ đệm gửi 16KB. Trước đây ép 512 byte (như SDK) vì bộ đệm lớn từng in ra ký
+            // tự rác — nguyên nhân thật là ảnh bill dồn vào MỘT lệnh `GS v 0` vượt giới
+            // hạn chiều cao raster (nay đã chia dải 128 dòng, xem getEscPosRasterBytes).
+            // 512 byte buộc mỗi lần ghi chờ ACK: chỉ ~60KB/s qua Wi-Fi, máy in 80mm cần
+            // ~140KB/s nên in giật, ra giấy chậm (bill dài 97KB mất 1,65s chỉ để gửi).
+            // 16KB: gửi xong ~65ms; TCP tự điều tiết theo bộ đệm máy in. Đã kiểm tra trên
+            // Epson LAN: in đủ, không ký tự rác.
+            s.sendBufferSize = 16 * 1024
             s.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)
             s.soTimeout = 0
             socket = s

@@ -16,6 +16,17 @@ import net.posprinter.POSPrinter
 /// build và gửi lệnh ESC/POS
 class PrinterThermal {
     companion object {
+        /**
+         * Đoạn dòng trắng từ ngần này dòng trở lên thì đẩy giấy bằng `ESC J` thay vì
+         * gửi raster trắng. ĐANG TẮT (Int.MAX_VALUE): máy in cầm tay BT 58mm thực tế
+         * KHÔNG đẩy giấy đúng theo `ESC J` -> mất khoảng trắng giữa các dòng, chữ in
+         * đè lên nhau. Chỉ bật lại khi có cơ chế bật theo từng máy in đã kiểm chứng.
+         */
+        private const val BLANK_FEED_MIN_ROWS = Int.MAX_VALUE
+        /** Máy in Bluetooth ngoài: kích thước mỗi gói gửi. */
+        private const val BT_CHUNK_SIZE = 120
+        /** Máy in Bluetooth ngoài: tốc độ gửi tối đa (byte/giây) — xem vòng gửi BT. */
+        private const val BT_TARGET_BYTES_PER_SEC = 11_000L
         // Khóa gửi RIÊNG cho TỪNG máy in (theo đối tượng IDeviceConnection).
         // SDK POSConnect có hàng đợi + luồng gửi riêng cho mỗi connection, nên 2 máy
         // KHÁC nhau in được song song. Chỉ cần tuần tự hóa các lần gửi trên CÙNG một
@@ -368,6 +379,22 @@ class PrinterThermal {
                     // Hết giấy / mở nắp: KHÔNG gửi phiếu. Nhiều máy vẫn nhận dữ liệu vào bộ
                     // nhớ rồi in khi thay giấy xong -> phiếu ra trễ, nhân viên đã in lại
                     // thì ra 2 phiếu. Báo lỗi ngay để người dùng xử lý rồi in lại.
+                    // Máy in tích hợp (Sunmi): Bluetooth ảo không trả lời lệnh hỏi trạng
+                    // thái ESC/POS -> hỏi qua dịch vụ máy in của Sunmi.
+                    if (isTargetBuiltIn) {
+                        when (SunmiPrinterStatus.query()) {
+                            SunmiPrinterStatus.OUT_OF_PAPER -> throw PrinterStatusException(
+                                "PRINTER_OUT_OF_PAPER", "Máy in hết giấy"
+                            )
+                            SunmiPrinterStatus.COVER_OPEN -> throw PrinterStatusException(
+                                "PRINTER_COVER_OPEN", "Máy in đang mở nắp"
+                            )
+                            SunmiPrinterStatus.OVERHEATED -> throw PrinterStatusException(
+                                "PRINTER_OVERHEATED", "Máy in quá nóng, chờ nguội rồi in lại"
+                            )
+                            else -> Unit
+                        }
+                    }
                     when (queryPaperStatus(curConnect)) {
                         PaperStatus.PAPER_END -> throw PrinterStatusException(
                             "PRINTER_OUT_OF_PAPER", "Máy in hết giấy"
@@ -378,16 +405,16 @@ class PrinterThermal {
                         else -> Unit
                     }
                     if (isBluetooth && !isTargetBuiltIn) {
-                        // Cấu hình vừa tầm cân bằng cho máy in Bluetooth ngoài: Gói 120 bytes, delay 4ms, nghỉ 80ms mỗi 1500 bytes
-                        // chunkSize, Thread.sleep và khoảng nghỉ giữa các gói quyết định: tốc độ in, độ ổn định (lỗi hay không - mất byte), 
-                        // độ mượt (có bị giật hay không). 
-                        //Thử nhiều lần với các máy in khác nhau, 120/4/1500/80 là cấu hình vừa đủ nhanh vừa ổn định. 
-                        //- các máy có bộ đệm cao có thể chậm - đánh đổi độ ổn định cho máy in có bộ đệm thấp
-                        val chunkSize = 120
+                        // Máy in Bluetooth ngoài: gửi ĐỀU theo tốc độ mục tiêu (bản cũ: gói
+                        // 120B, nghỉ 4ms mỗi gói + 80ms mỗi 1500B ≈ 11KB/s nhưng dồn cục).
+                        // KHÔNG nâng tốc độ mặc định: máy in cầm tay 58mm giá rẻ (bộ đệm nhỏ,
+                        // in ~50mm/s, chậm hơn nữa khi pin yếu) đã thử ở 20–30KB/s đều TRÀN
+                        // bộ đệm -> mất byte -> lệnh ảnh lệch, in ra ký tự lạ giữa bill.
+                        // ~11KB/s là mức an toàn đã kiểm chứng trên nhiều máy.
+                        val startedAt = android.os.SystemClock.elapsedRealtime()
                         var offset = 0
-                        var bytesSentInBlock = 0
                         while (offset < allBytes.size) {
-                            val count = Math.min(chunkSize, allBytes.size - offset)
+                            val count = Math.min(BT_CHUNK_SIZE, allBytes.size - offset)
                             val chunk = allBytes.copyOfRange(offset, offset + count)
 
                             var sent = curConnect.sendSync(chunk)
@@ -405,13 +432,10 @@ class PrinterThermal {
                             }
                             // Tiến theo số byte THẬT SỰ gửi được, không phải số muốn gửi.
                             offset += sent
-                            bytesSentInBlock += sent
 
-                            Thread.sleep(4)
-                            if (bytesSentInBlock >= 1500) {
-                                Thread.sleep(80)
-                                bytesSentInBlock = 0
-                            }
+                            val dueMs = offset * 1000L / BT_TARGET_BYTES_PER_SEC
+                            val aheadMs = dueMs - (android.os.SystemClock.elapsedRealtime() - startedAt)
+                            if (aheadMs > 0) Thread.sleep(aheadMs)
                         }
                     } else {
                         // USB/LAN/máy in tích hợp: cũng phải chia gói. Gửi cả cục cho đơn
@@ -441,76 +465,91 @@ class PrinterThermal {
         val height = bitmap.height
         val widthBytes = (width + 7) / 8
 
-        val stream = java.io.ByteArrayOutputStream()
-
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        // Chia ảnh thành nhiều DẢI, mỗi dải là MỘT lệnh `GS v 0` riêng.
+        // 1) Nhị phân hoá toàn ảnh MỘT lần bằng số nguyên (trước đây tính xám bằng
+        //    Double cho từng điểm + ghi từng byte qua ByteArrayOutputStream — chậm trên
+        //    máy POS yếu). Kết quả giống hệt: cháy khi alpha > 50 và xám < 200, với
+        //    xám = 0.299R + 0.587G + 0.114B (nhân 1000 để giữ số nguyên, không sai lệch).
         //
-        // Trước đây cả bill dài được nhồi vào một lệnh `GS v 0` duy nhất. Đơn ngắn thì
-        // chạy tốt, nhưng đơn dài sinh ảnh cao hàng nghìn dòng — vượt giới hạn chiều cao
-        // mỗi lệnh raster của máy in (máy Epson thường chỉ nhận vài trăm dòng/lệnh). Khi
-        // vượt, máy in hủy chế độ raster và diễn giải các byte ảnh còn lại thành VĂN BẢN,
-        // nên giấy ra đầy ký tự rác và không cắt.
-        //
-        // 128 dòng/dải nằm an toàn dưới giới hạn của mọi model phổ biến; các dải in liền
-        // nhau nên ảnh vẫn liền mạch, không có khoảng trắng chen vào.
-        val bandHeight = 128
-
-        var y0 = 0
-        while (y0 < height) {
-            val bandRows = Math.min(bandHeight, height - y0)
-
-            // GS v 0 m xL xH yL yH — yL/yH là chiều cao của DẢI này, luôn <= 128 nên
-            // không bao giờ tràn 2 byte.
-            stream.write(
-                byteArrayOf(
-                    0x1D, 0x76, 0x30, 0x00,
-                    (widthBytes % 256).toByte(), (widthBytes / 256).toByte(),
-                    (bandRows % 256).toByte(), (bandRows / 256).toByte()
-                )
-            )
-
-            for (y in y0 until y0 + bandRows) {
-                for (xByte in 0 until widthBytes) {
-                    var byteVal = 0
-                    for (bit in 0 until 8) {
-                        val x = xByte * 8 + bit
-                        if (x < width) {
-                            val pixel = pixels[y * width + x]
-                            val alpha = (pixel shr 24) and 0xff
-                            if (alpha > 50) {
-                                val red = (pixel shr 16) and 0xff
-                                val green = (pixel shr 8) and 0xff
-                                val blue = pixel and 0xff
-                                val gray = (0.299 * red + 0.587 * green + 0.114 * blue).toInt()
-                                // Ngưỡng 200 — KHÔNG hạ về 128 (xem lịch sử: 128 gây in mờ).
-                                //
-                                // Đầu in nhiệt chỉ có 1 bit: cháy hoặc trắng, không có mức xám.
-                                // Chữ do Flutter render là anti-alias nên mỗi nét gồm lõi đậm
-                                // bọc bởi dải xám. Ngưỡng 200 cho cháy tới xám 199 -> nét đủ dày.
-                                // Ngưỡng 128 loại sạch dải 129-199; với cỡ chữ nhỏ dải này chiếm
-                                // phần lớn nét nên chỉ còn bộ xương mảnh -> bản in RẤT MỜ (đã
-                                // ghi nhận trên máy BLE ở cả iOS và Android).
-                                //
-                                // Đường raster thủ công này dùng chung cho MỌI loại kết nối
-                                // (BLE, USB, LAN, máy in tích hợp), nên đổi ngưỡng ở đây ảnh
-                                // hưởng tới bản in trên cả 4 loại.
-                                if (gray < 200) {
-                                    byteVal = byteVal or (1 shl (7 - bit))
-                                }
-                            }
-                        }
+        //    Ngưỡng 200 — KHÔNG hạ về 128: đầu in nhiệt chỉ có cháy/trắng; chữ anti-alias
+        //    gồm lõi đậm + viền xám, ngưỡng 128 chỉ còn bộ xương mảnh -> in RẤT MỜ (đã
+        //    ghi nhận trên máy BLE ở cả iOS và Android). Dùng chung cho mọi kết nối.
+        val bits = ByteArray(widthBytes * height)
+        val blankRow = BooleanArray(height)
+        for (y in 0 until height) {
+            val rowPixel = y * width
+            val rowByte = y * widthBytes
+            var any = 0
+            for (xByte in 0 until widthBytes) {
+                var byteVal = 0
+                val x0 = xByte * 8
+                val xEnd = Math.min(x0 + 8, width)
+                var x = x0
+                while (x < xEnd) {
+                    val pixel = pixels[rowPixel + x]
+                    if (((pixel ushr 24) and 0xff) > 50) {
+                        val gray1000 = 299 * ((pixel shr 16) and 0xff) +
+                            587 * ((pixel shr 8) and 0xff) +
+                            114 * (pixel and 0xff)
+                        if (gray1000 < 200_000) byteVal = byteVal or (0x80 ushr (x - x0))
                     }
-                    stream.write(byteVal)
+                    x++
                 }
+                bits[rowByte + xByte] = byteVal.toByte()
+                any = any or byteVal
             }
-
-            y0 += bandRows
+            blankRow[y] = any == 0
         }
 
-        return stream.toByteArray()
+        // 2) Dựng lệnh. Chia ảnh thành nhiều DẢI `GS v 0` tối đa 128 dòng: nhồi cả bill
+        //    dài vào một lệnh sẽ vượt giới hạn chiều cao raster của máy in (Epson chỉ
+        //    nhận vài trăm dòng/lệnh) -> máy in ra ký tự rác, không cắt.
+        //
+        //    Đoạn dòng TRẮNG dài (>= BLANK_FEED_MIN_ROWS) gửi bằng `ESC J n` (in & đẩy
+        //    giấy n chấm) thay vì raster toàn số 0: bill có nhiều khoảng trắng; đẩy giấy
+        //    nhanh hơn in raster trắng, và dữ liệu nhỏ hơn hẳn -> máy in Bluetooth (gửi
+        //    theo gói nhỏ có nghỉ) nhận xong sớm hơn. Khoảng trắng ngắn (giữa các dòng
+        //    chữ) vẫn để trong raster để giữ nguyên bố cục.
+        val out = java.io.ByteArrayOutputStream(bits.size + (height / 128 + 2) * 8)
+        var y = 0
+        while (y < height) {
+            if (blankRow[y]) {
+                var run = 0
+                while (y + run < height && blankRow[y + run]) run++
+                if (run >= BLANK_FEED_MIN_ROWS) {
+                    var left = run
+                    while (left > 0) {
+                        val n = Math.min(255, left)
+                        out.write(0x1B); out.write(0x4A); out.write(n)
+                        left -= n
+                    }
+                    y += run
+                    continue
+                }
+            }
+            // Gom các dòng tới khi gặp đoạn trắng dài hoặc đủ 128 dòng.
+            var rows = 0
+            while (y + rows < height && rows < 128) {
+                if (blankRow[y + rows]) {
+                    var run = 0
+                    while (y + rows + run < height && blankRow[y + rows + run]) run++
+                    if (run >= BLANK_FEED_MIN_ROWS) break
+                    rows += Math.min(run, 128 - rows)
+                } else {
+                    rows++
+                }
+            }
+            out.write(byteArrayOf(
+                0x1D, 0x76, 0x30, 0x00,
+                (widthBytes % 256).toByte(), (widthBytes / 256).toByte(),
+                (rows % 256).toByte(), (rows / 256).toByte()
+            ))
+            out.write(bits, y * widthBytes, rows * widthBytes)
+            y += rows
+        }
+        return out.toByteArray()
     }
 
     fun printTextESC(
