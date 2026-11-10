@@ -1,3 +1,10 @@
+## [2.4.1] - 2026-11-10
+
+### 🛡️ Reliability
+
+- **Label guard on busy printers (Android)**: When a LAN/USB printer does not answer the language probe (often because it is still busy with the previous job), the guard waits 400 ms and asks again instead of treating it as "unknown" forever. An unknown result is now only cached for 60 s, so a single missed answer no longer lets every later TSPL label job print garbage on a receipt printer.
+- **Receipt-only vendors**: LAN printers from vendors that only make ESC/POS receipt printers (Epson, detected by MAC) are blocked from TSPL label commands even when they do not answer the probe.
+
 ## [2.4.0] - 2026-11-09
 
 ### 🚀 Performance
