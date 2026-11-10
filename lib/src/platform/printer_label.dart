@@ -142,9 +142,14 @@ class PrinterLabel {
   /// [timeout] is the per-IP TCP connect timeout. Printers on the same LAN normally
   /// answer well under 100ms, so the short default keeps a full /24 sweep fast.
   /// Raise it only for congested networks or printers behind a slow AP.
+  ///
+  /// [priorityIps] are probed before the rest of the sweep (e.g. saved printers,
+  /// printers found last time): they usually answer within tens of ms, so known
+  /// printers show up almost immediately instead of waiting for their turn.
   static Stream<String> discoverLanPrinters({
     int port = 9100,
     Duration? timeout,
+    Iterable<String> priorityIps = const [],
   }) {
     // ignore: close_sinks
     final controller = StreamController<String>();
@@ -179,13 +184,25 @@ class PrinterLabel {
 
       final Set<String> ownIps = validIps.toSet();
 
-      // Hàng đợi phẳng tất cả IP cần quét (mọi subnet gộp chung).
+      // Hàng đợi phẳng tất cả IP cần quét (mọi subnet gộp chung). IP ưu tiên
+      // (máy đã lưu / đã thấy lần trước) đứng đầu để hiện gần như tức thì.
+      final Set<String> queued = <String>{};
       final List<String> targets = <String>[];
+      for (final ip in priorityIps) {
+        final trimmed = ip.trim();
+        if (InternetAddress.tryParse(trimmed)?.type !=
+            InternetAddressType.IPv4) {
+          continue;
+        }
+        if (ownIps.contains(trimmed) || !queued.add(trimmed)) continue;
+        targets.add(trimmed);
+      }
       for (var subnet in subnets) {
         for (int j = 1; j < 255; j++) {
           final targetIp = '$subnet.$j';
           // IP của chính thiết bị — bỏ qua, không tự quét mình.
           if (ownIps.contains(targetIp)) continue;
+          if (!queued.add(targetIp)) continue;
           targets.add(targetIp);
         }
       }
@@ -198,14 +215,13 @@ class PrinterLabel {
       // dù mạng hoàn toàn khoẻ. Ở đây mỗi worker xong 1 IP là bốc IP kế tiếp ngay,
       // nên tổng thời gian ~ (số IP / số worker) x RTT thực, không x timeout.
       final bool isIOS = Platform.isIOS;
-      final int concurrency = isIOS ? 24 : 48;
+      // iOS: 40 (trước 24) — vẫn dưới trần file descriptor mặc định (256).
+      final int concurrency = isIOS ? 40 : 48;
       // IP không tồn tại thường bị firewall drop (không có RST) -> luôn phải chờ hết
       // timeout. Giữ ngắn vì máy in trong cùng LAN gần như luôn trả lời dưới 100ms;
       // các IP chậm bất thường đã được lần quét 2 (auto retry) bọc lót.
       final connectTimeout = timeout ??
-          (isIOS
-              ? const Duration(milliseconds: 600)
-              : const Duration(milliseconds: 400));
+          const Duration(milliseconds: 400);
 
       int next = 0;
       Future<void> worker() async {
@@ -1597,10 +1613,19 @@ class PrinterLabel {
   static final Map<String, LanDeviceModel> _lanDeviceCache = {};
 
   /// Discovers LAN printers on the local network and queries their hardware/model names.
+  ///
+  /// [priorityIps] are probed first (see [discoverLanPrinters]); IPs found
+  /// earlier in this app session are always added to them.
+  ///
+  /// [onIpScanDone] fires as soon as the IP sweep finishes, before the stream
+  /// closes: name/MAC lookups may still update rows after that, so a UI can
+  /// stop its "searching" spinner here instead of waiting for them.
   static Stream<LanDeviceModel> discoverLanDevices({
     int port = 9100,
     Duration? timeout,
     bool queryDeviceName = true,
+    Iterable<String> priorityIps = const [],
+    void Function()? onIpScanDone,
   }) {
     // ignore: close_sinks
     final controller = StreamController<LanDeviceModel>();
@@ -1676,7 +1701,11 @@ class PrinterLabel {
       } catch (_) {}
     }
 
-    discoverLanPrinters(port: port, timeout: timeout).listen(
+    discoverLanPrinters(
+      port: port,
+      timeout: timeout,
+      priorityIps: [...priorityIps, ..._lanDeviceCache.keys],
+    ).listen(
       (ip) {
         if (!emitted.add(ip) || controller.isClosed) return;
 
@@ -1695,6 +1724,9 @@ class PrinterLabel {
         if (!controller.isClosed) controller.addError(err);
       },
       onDone: () async {
+        try {
+          onIpScanDone?.call();
+        } catch (_) {}
         await Future.wait(pending);
         if (!controller.isClosed) await controller.close();
       },
