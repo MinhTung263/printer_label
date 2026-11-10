@@ -167,7 +167,12 @@ final class ESCPosPrinter {
         out.append(contentsOf: [0x1B, 0x61, 0x01])        // ESC a 1 — căn giữa
         out.append(rasterBytes)                            // GS v 0 — ảnh raster (một lệnh duy nhất)
         out.append(contentsOf: [0x0A, 0x0A, 0x0A, 0x0A, 0x0A]) // feed 5 dòng
-        out.append(contentsOf: [0x1D, 0x56, 0x42, 0x01])  // GS V 66 1 — cắt giấy
+        // GS V 66 1 — cắt giấy. KHÔNG gửi cho máy BLE: máy cầm tay không có dao cắt vẫn
+        // đẩy giấy tới "vị trí cắt" -> thừa trắng cuối bill này và đầu bill sau (xé ở
+        // răng cưa). Máy LAN có dao nên giữ nguyên. Khớp Android (PrinterThermal).
+        if !isBluetooth {
+            out.append(contentsOf: [0x1D, 0x56, 0x42, 0x01])
+        }
 
         completion(out)
     }

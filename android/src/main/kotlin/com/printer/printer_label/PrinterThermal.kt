@@ -350,8 +350,15 @@ class PrinterThermal {
                 // 4. Feed 5 lines (LF)
                 stream.write(byteArrayOf(0x0A, 0x0A, 0x0A, 0x0A, 0x0A))
                 
-                // 5. Cut paper (GS V 66 1)
-                stream.write(byteArrayOf(0x1D, 0x56, 0x42, 0x01))
+                // 5. Cut paper (GS V 66 1) — KHÔNG gửi cho máy in Bluetooth ngoài.
+                // Theo ESC/POS, `GS V 66 n` đẩy giấy tới "vị trí cắt + n" rồi mới cắt.
+                // Máy BT cầm tay không có dao cắt vẫn thực hiện phần đẩy giấy đó, nên sau
+                // 5 dòng LF giấy còn chạy thêm một đoạn trắng: người dùng xé ở răng cưa thì
+                // đoạn thừa nằm ở CUỐI bill này và phần còn lại trên cuộn thành khoảng trắng
+                // ĐẦU bill sau. Máy LAN/USB có dao nên đoạn đó bị cắt đúng chỗ, không lộ.
+                if (!(isBluetooth && !isTargetBuiltIn)) {
+                    stream.write(byteArrayOf(0x1D, 0x56, 0x42, 0x01))
+                }
                 
                 val oneCopy = stream.toByteArray()
 
