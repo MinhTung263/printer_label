@@ -75,9 +75,9 @@ class BarcodeView<T> extends StatelessWidget {
 
   String formatVND(double price) {
     final formatted = price.toInt().toString().replaceAllMapped(
-          RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-          (m) => '${m[1]}.',
-        );
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (m) => '${m[1]}.',
+    );
     return '$formatted VNĐ';
   }
 

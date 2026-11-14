@@ -31,5 +31,5 @@ enum PrinterMethod {
   has_built_in_printer,
   get_built_in_printer_paper_size,
   send_raw_bytes,
-  open_drawer;
+  open_drawer,
 }

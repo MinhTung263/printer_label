@@ -14,4 +14,36 @@
          Wi-Fi không ngủ trong lúc in (WifiLock). Đều là quyền thường, không hỏi người dùng. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Chạy nền khi tắt màn hình (PrintKeepAliveService): foreground service kiểu
+         connectedDevice (Android 14+ cần thêm CHANGE_NETWORK_STATE làm điều kiện),
+         thông báo cố định (Android 13+ cần POST_NOTIFICATIONS) và giữ Wi-Fi thức. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Nối tạm Wi-Fi của máy in khi in (Android 6–9: chuyển Wi-Fi bằng WifiManager). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Máy Agent tự khởi động lại khi bật máy (AgentBootReceiver). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android 10+: được mở lại app từ nền (máy Agent tự khởi động lại). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application>
+        <receiver
+            android:name="com.printer.printer_label.AgentBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.printer.printer_label.PrintKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+    </application>
 </manifest>

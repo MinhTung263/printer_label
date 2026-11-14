@@ -46,15 +46,13 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
     // Lỗi mở két không chặn in. Xem PrinterLabel.printESC.
     if (openDrawer) {
       await Future.wait(
-        deviceIds.whereType<String>().map(
-          (id) async {
-            try {
-              await PrinterLabel.openDrawer(deviceId: id);
-            } catch (_) {
-              // Nuốt lỗi có chủ đích.
-            }
-          },
-        ),
+        deviceIds.whereType<String>().map((id) async {
+          try {
+            await PrinterLabel.openDrawer(deviceId: id);
+          } catch (_) {
+            // Nuốt lỗi có chủ đích.
+          }
+        }),
       );
     }
 
@@ -73,10 +71,7 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
     // connection nên các máy khác nhau không phải đợi nhau.
     await Future.wait(
       deviceIds.map(
-        (id) => PrinterLabel.printESC(
-          deviceId: id,
-          printThermalModel: model,
-        ),
+        (id) => PrinterLabel.printESC(deviceId: id, printThermalModel: model),
       ),
     );
   }
@@ -93,15 +88,9 @@ class ESCPrintServiceImpl extends ESCPrintServicePlatform {
   }
 
   @override
-  Future<void> openDrawerMultiDevices({
-    required List<String> deviceIds,
-  }) async {
+  Future<void> openDrawerMultiDevices({required List<String> deviceIds}) async {
     await Future.wait(
-      deviceIds.map(
-        (id) => PrinterLabel.openDrawer(
-          deviceId: id,
-        ),
-      ),
+      deviceIds.map((id) => PrinterLabel.openDrawer(deviceId: id)),
     );
   }
 

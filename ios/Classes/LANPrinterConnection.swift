@@ -172,6 +172,28 @@ public final class LANPrinterConnection {
     }
 
     // MARK: - Connect / Disconnect
+    /// TCP tới máy in trong mạng nội bộ: IP nội bộ (10.x, 172.16-31.x, 192.168.x,
+    /// 169.254.x) thì cấm đi qua 4G. Khi Wi-Fi của quán không có internet, iOS có
+    /// thể ưu tiên 4G và gửi nhầm lệnh in ra mạng di động (không bao giờ tới máy
+    /// in). Không ép hẳn `.wifi` để iPad cắm mạng dây (Ethernet) vẫn in được.
+    static func lanTcpParameters(for ip: String) -> NWParameters {
+        let params = NWParameters.tcp
+        if isPrivateIPv4(ip) {
+            params.prohibitedInterfaceTypes = [.cellular]
+        }
+        return params
+    }
+
+    static func isPrivateIPv4(_ ip: String) -> Bool {
+        let parts = ip.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        switch (parts[0], parts[1]) {
+        case (10, _), (192, 168), (169, 254): return true
+        case (172, let b) where (16...31).contains(b): return true
+        default: return false
+        }
+    }
+
     public func connect() {
         connect(completion: nil)
     }
@@ -198,7 +220,7 @@ public final class LANPrinterConnection {
 
             let host = NWEndpoint.Host(self.ip)
             let nwPort = NWEndpoint.Port(rawValue: self.port) ?? .init(integerLiteral: 9100)
-            let params = NWParameters.tcp
+            let params = LANPrinterConnection.lanTcpParameters(for: self.ip)
             params.allowLocalEndpointReuse = true
 
             let connection = NWConnection(host: host, port: nwPort, using: params)

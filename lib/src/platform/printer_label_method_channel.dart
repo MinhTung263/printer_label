@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -18,16 +19,18 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Future<bool> bluetoothEnabled() async {
-    return await _channel
-            .invokeMethod<bool>(PrinterMethod.bluetooth_enabled.name) ??
+    return await _channel.invokeMethod<bool>(
+          PrinterMethod.bluetooth_enabled.name,
+        ) ??
         false;
   }
 
   @override
   Future<bool> requestBluetoothEnable() async {
     if (!Platform.isAndroid) return false;
-    return await _channel
-            .invokeMethod<bool>(PrinterMethod.request_bluetooth_enable.name) ??
+    return await _channel.invokeMethod<bool>(
+          PrinterMethod.request_bluetooth_enable.name,
+        ) ??
         false;
   }
 
@@ -42,15 +45,16 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Future<PrinterStatus> checkPrinterStatus({String? deviceId, String? type}) async {
+  Future<PrinterStatus> checkPrinterStatus({
+    String? deviceId,
+    String? type,
+  }) async {
     final targetId = deviceId?.trim();
-    final String? statusStr = await _channel.invokeMethod<String>(
-      PrinterMethod.check_printer_status.name,
-      {
-        if (targetId != null && targetId.isNotEmpty) "device_id": targetId,
-        if (type != null && type.isNotEmpty) "type": type,
-      },
-    );
+    final String? statusStr = await _channel
+        .invokeMethod<String>(PrinterMethod.check_printer_status.name, {
+          if (targetId != null && targetId.isNotEmpty) "device_id": targetId,
+          if (type != null && type.isNotEmpty) "type": type,
+        });
     return PrinterStatus.fromValue(statusStr);
   }
 
@@ -159,8 +163,9 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Future<String?> get platformVersion async {
-    final String? version = await _channel
-        .invokeMethod<String>(PrinterMethod.getPlatformVersion.name);
+    final String? version = await _channel.invokeMethod<String>(
+      PrinterMethod.getPlatformVersion.name,
+    );
     return version;
   }
 
@@ -207,7 +212,9 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     };
     try {
       await _channel.invokeMethod<void>(
-          PrinterMethod.print_image_esc.name, data);
+        PrinterMethod.print_image_esc.name,
+        data,
+      );
     } catch (e, stack) {
       debugPrint("Error printing ESC: $e\n$stack");
       rethrow;
@@ -220,13 +227,11 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     PrinterConnectionType? connectionType,
   }) async {
     try {
-      final res = await _channel.invokeMethod<bool>(
-        PrinterMethod.open_drawer.name,
-        {
-          if (deviceId != null) 'device_id': deviceId,
-          if (connectionType != null) 'connection_type': connectionType.name,
-        },
-      );
+      final res = await _channel
+          .invokeMethod<bool>(PrinterMethod.open_drawer.name, {
+            if (deviceId != null) 'device_id': deviceId,
+            if (connectionType != null) 'connection_type': connectionType.name,
+          });
       return res ?? false;
     } catch (e, stack) {
       debugPrint("Error opening drawer: $e\n$stack");
@@ -246,7 +251,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
 
   @override
   Future<bool> autoConnectBuiltIn() async {
-    return await _channel.invokeMethod<bool>(PrinterMethod.auto_connect_built_in.name) ?? false;
+    return await _channel.invokeMethod<bool>(
+          PrinterMethod.auto_connect_built_in.name,
+        ) ??
+        false;
   }
 
   @override
@@ -254,20 +262,26 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     return await disconnectPrinter(deviceId: 'BUILT_IN');
   }
 
-
-
   @override
   Future<bool> hasBuiltInPrinter() async {
-    return await _channel.invokeMethod<bool>(PrinterMethod.has_built_in_printer.name) ?? false;
+    return await _channel.invokeMethod<bool>(
+          PrinterMethod.has_built_in_printer.name,
+        ) ??
+        false;
   }
 
   @override
   Future<int> getBuiltInPrinterPaperSize() async {
-    return await _channel.invokeMethod<int>(PrinterMethod.get_built_in_printer_paper_size.name) ?? 0;
+    return await _channel.invokeMethod<int>(
+          PrinterMethod.get_built_in_printer_paper_size.name,
+        ) ??
+        0;
   }
 
   @override
-  Future<List<BluetoothDeviceModel>> getBluetoothDevices({bool filterPrinterOnly = true}) async {
+  Future<List<BluetoothDeviceModel>> getBluetoothDevices({
+    bool filterPrinterOnly = true,
+  }) async {
     final result = await _channel.invokeMethod<List>(
       PrinterMethod.get_bluetooth_devices.name,
       {'filter_printer_only': filterPrinterOnly},
@@ -284,20 +298,23 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
-  Stream<BluetoothDeviceModel> bluetoothScanStream({bool filterPrinterOnly = true}) {
+  Stream<BluetoothDeviceModel> bluetoothScanStream({
+    bool filterPrinterOnly = true,
+  }) {
     // Nếu filterPrinterOnly thay đổi → tạo lại stream mới với arguments mới
-    if (_bluetoothScanStream == null || _currentScanFilterPrinterOnly != filterPrinterOnly) {
+    if (_bluetoothScanStream == null ||
+        _currentScanFilterPrinterOnly != filterPrinterOnly) {
       _currentScanFilterPrinterOnly = filterPrinterOnly;
       _bluetoothScanStream = _scanChannel
           .receiveBroadcastStream({'filter_printer_only': filterPrinterOnly})
           .map((e) {
-        final map = Map<Object?, Object?>.from(e as Map);
-        return BluetoothDeviceModel.fromMap({
-          'name': map['name']?.toString() ?? 'Unknown',
-          'identifier': map['identifier']?.toString(),
-          'mac': map['mac']?.toString(),
-        });
-      });
+            final map = Map<Object?, Object?>.from(e as Map);
+            return BluetoothDeviceModel.fromMap({
+              'name': map['name']?.toString() ?? 'Unknown',
+              'identifier': map['identifier']?.toString(),
+              'mac': map['mac']?.toString(),
+            });
+          });
     }
     return _bluetoothScanStream!;
   }
@@ -429,7 +446,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.print_barcode_esc.name, data);
+    await _channel.invokeMethod<void>(
+      PrinterMethod.print_barcode_esc.name,
+      data,
+    );
   }
 
   @override
@@ -445,7 +465,10 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
       if (deviceId != null) "device_id": deviceId,
       if (connectionType != null) "connection_type": connectionType.value,
     };
-    await _channel.invokeMethod<void>(PrinterMethod.print_qrcode_esc.name, data);
+    await _channel.invokeMethod<void>(
+      PrinterMethod.print_qrcode_esc.name,
+      data,
+    );
   }
 
   @override
@@ -493,10 +516,7 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>(
         'get_lan_printer_info',
-        {
-          'ip': ip,
-          'port': port,
-        },
+        {'ip': ip, 'port': port},
       );
       return result;
     } catch (_) {
@@ -529,15 +549,202 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
     int port = 9100,
   }) async {
     try {
-      final result = await _channel.invokeMethod<bool>(
-        'identify_lan_printer',
-        {
-          'ip_address': ipAddress,
-          'port': port,
-          'bytes': Uint8List.fromList(bytes),
-        },
-      );
+      final result = await _channel.invokeMethod<bool>('identify_lan_printer', {
+        'ip_address': ipAddress,
+        'port': port,
+        'bytes': Uint8List.fromList(bytes),
+      });
       return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  final StreamController<void> _keepAliveStopped =
+      StreamController<void>.broadcast();
+  bool _callHandlerSet = false;
+
+  /// Nhận lệnh native gọi ngược lên Dart (hiện chỉ có báo dừng chạy nền).
+  void _ensureCallHandler() {
+    if (_callHandlerSet) return;
+    _callHandlerSet = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'keep_alive_stopped_by_user') {
+        _keepAliveStopped.add(null);
+      }
+      return null;
+    });
+  }
+
+  @override
+  Future<bool> startKeepAlive({
+    required String title,
+    required String text,
+    required String channelName,
+    String? stopLabel,
+    bool requestPermission = false,
+  }) async {
+    if (!Platform.isAndroid) return false;
+    _ensureCallHandler();
+    try {
+      final result = await _channel.invokeMethod<bool>('start_keep_alive', {
+        'title': title,
+        'text': text,
+        'channel_name': channelName,
+        'stop_label': stopLabel,
+        'request_permission': requestPermission,
+      });
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> stopKeepAlive() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<bool>('stop_keep_alive');
+    } catch (_) {}
+  }
+
+  @override
+  Future<bool> isKeepAliveRunning() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('is_keep_alive_running') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Stream<void> get keepAliveStoppedByUser {
+    _ensureCallHandler();
+    return _keepAliveStopped.stream;
+  }
+
+  @override
+  Future<bool> isUsbAttached(String deviceId) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('is_usb_attached', {
+            'device_id': deviceId,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<Map<String, Object?>?> currentWifi() async {
+    try {
+      final r = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'current_wifi',
+      );
+      return r?.map((k, v) => MapEntry(k.toString(), v));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> nearbyWifiNetworks() async {
+    if (!Platform.isAndroid) return const [];
+    try {
+      final r = await _channel.invokeMethod<List<Object?>>(
+        'nearby_wifi_networks',
+      );
+      return [
+        for (final e in r ?? const [])
+          if (e is Map) e.map((k, v) => MapEntry(k.toString(), v)),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<List<String>> nearbyWifi() async {
+    if (!Platform.isAndroid) return const [];
+    try {
+      final r = await _channel.invokeMethod<List<Object?>>('nearby_wifi');
+      return [
+        for (final s in r ?? const [])
+          if (s is String) s,
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<bool> openWifiSettings() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('open_wifi_settings') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> joinPrinterWifi({
+    required String ssid,
+    required String password,
+    required Duration timeout,
+    bool stay = false,
+  }) async {
+    try {
+      return await _channel
+              .invokeMethod<bool>('join_printer_wifi', {
+                'ssid': ssid,
+                'password': password,
+                'timeout_ms': timeout.inMilliseconds,
+                'stay': stay,
+              })
+              .timeout(timeout + const Duration(seconds: 10)) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> leavePrinterWifi() async {
+    try {
+      await _channel.invokeMethod<bool>('leave_printer_wifi');
+    } catch (_) {}
+  }
+
+  @override
+  Future<String?> deviceName() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final name = await _channel.invokeMethod<String>('device_name');
+      return (name?.trim().isEmpty ?? true) ? null : name!.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<bool> canAutoRestart() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('can_auto_restart') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> requestAutoRestart() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('request_auto_restart') ?? false;
     } catch (_) {
       return false;
     }

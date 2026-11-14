@@ -57,22 +57,23 @@ class LanQuality {
   bool get shouldWarn => level != LanQualityLevel.good;
 
   String get emoji => switch (level) {
-        LanQualityLevel.good => '🟢',
-        LanQualityLevel.weak => '🟡',
-        LanQualityLevel.veryWeak => '🟠',
-        LanQualityLevel.offline => '🔴',
-      };
+    LanQualityLevel.good => '🟢',
+    LanQualityLevel.weak => '🟡',
+    LanQualityLevel.veryWeak => '🟠',
+    LanQualityLevel.offline => '🔴',
+  };
 
   /// Câu thông báo ngắn cho nhân viên quán.
   String get message => switch (level) {
-        LanQualityLevel.good => 'Mạng tới máy in tốt',
-        LanQualityLevel.weak => 'Mạng tới máy in hơi yếu, in có thể chậm',
-        LanQualityLevel.veryWeak =>
-          'Mạng tới máy in rất yếu, có thể in lỗi. Kiểm tra Wi-Fi',
-        LanQualityLevel.offline => refused
-            ? 'Máy in đang bận hoặc từ chối kết nối. Thử lại sau ít giây'
-            : 'Không tới được máy in. Kiểm tra Wi-Fi và máy in đã bật',
-      };
+    LanQualityLevel.good => 'Mạng tới máy in tốt',
+    LanQualityLevel.weak => 'Mạng tới máy in hơi yếu, in có thể chậm',
+    LanQualityLevel.veryWeak =>
+      'Mạng tới máy in rất yếu, có thể in lỗi. Kiểm tra Wi-Fi',
+    LanQualityLevel.offline =>
+      refused
+          ? 'Máy in đang bận hoặc từ chối kết nối. Thử lại sau ít giây'
+          : 'Không tới được máy in. Kiểm tra Wi-Fi và máy in đã bật',
+  };
 
   @override
   String toString() =>
@@ -105,15 +106,16 @@ class LanQuality {
         DateTime.now().difference(cached.measuredAt) < cacheFor) {
       return Future.value(cached);
     }
-    return _inFlight[key] ??=
-        _measure(ip, port, samples, timeout, gap).then((q) {
-      _cache[key] = q;
-      return q;
-    }).whenComplete(() {
-      // KHÔNG viết `() => _inFlight.remove(key)`: remove() trả về chính Future này, và
-      // whenComplete sẽ CHỜ Future được trả về -> tự chờ chính nó, không bao giờ xong.
-      _inFlight.remove(key);
-    });
+    return _inFlight[key] ??= _measure(ip, port, samples, timeout, gap)
+        .then((q) {
+          _cache[key] = q;
+          return q;
+        })
+        .whenComplete(() {
+          // KHÔNG viết `() => _inFlight.remove(key)`: remove() trả về chính Future này, và
+          // whenComplete sẽ CHỜ Future được trả về -> tự chờ chính nó, không bao giờ xong.
+          _inFlight.remove(key);
+        });
   }
 
   static Future<LanQuality> _measure(

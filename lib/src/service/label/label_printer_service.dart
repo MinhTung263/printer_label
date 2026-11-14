@@ -6,12 +6,12 @@ import 'label_printer_service_interface.dart';
 /// A high-level helper service for printing labels from Flutter widgets.
 class LabelPrintService {
   LabelPrintService._();
-  
+
   /// The singleton instance of the [LabelPrintService].
   static final LabelPrintService instance = LabelPrintService._();
 
   /// Captures and prints a list of [items] onto paper labels.
-  /// 
+  ///
   /// Uses [itemBuilder] to define the widget layout for each item,
   /// resolves quantities for each, packs them according to [labelPerRow],
   /// and forwards the print job to [LabelPrintServicePlatform].

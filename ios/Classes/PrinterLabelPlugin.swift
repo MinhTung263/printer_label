@@ -3,6 +3,7 @@ import PrinterSDK
 import UIKit
 import CoreBluetooth
 import Network
+import NetworkExtension
 
 // MARK: - EmptyStreamHandler
 // Stub cho các EventChannel không có sự kiện trên iOS (vd: USB events)
@@ -89,8 +90,71 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
 
     // MARK: - Method Handler
 
+    /// Wi-Fi máy in đang nối tạm (xem "join_printer_wifi").
+    private var joinedPrinterSsid: String?
+
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
+
+        // MARK: Wi-Fi (gợi ý chuyển đúng Wi-Fi của máy in)
+        // Đọc SSID cần entitlement "Access WiFi Information" + quyền vị trí; thiếu
+        // thì trả nil. iOS không cho app quét Wi-Fi xung quanh hay mở màn chọn Wi-Fi.
+        case "current_wifi":
+            if #available(iOS 14.0, *) {
+                NEHotspotNetwork.fetchCurrent { network in
+                    DispatchQueue.main.async {
+                        guard let network = network, !network.ssid.isEmpty else {
+                            result(nil)
+                            return
+                        }
+                        result(["ssid": network.ssid, "bssid": network.bssid])
+                    }
+                }
+            } else {
+                result(nil)
+            }
+        case "nearby_wifi":
+            result([String]())
+        case "open_wifi_settings":
+            result(false)
+        // Nối TẠM Wi-Fi của máy in để in (cần entitlement "Hotspot Configuration";
+        // lần đầu iOS hỏi người dùng). joinOnce: rời app thì iOS tự bỏ mạng này.
+        case "join_printer_wifi":
+            guard let args = call.arguments as? [String: Any],
+                  let ssid = args["ssid"] as? String, !ssid.isEmpty else {
+                result(false)
+                return
+            }
+            let password = (args["password"] as? String) ?? ""
+            let config = password.isEmpty
+                ? NEHotspotConfiguration(ssid: ssid)
+                : NEHotspotConfiguration(ssid: ssid, passphrase: password, isWEP: false)
+            // stay: giữ máy ở Wi-Fi máy in (iOS lưu mạng, không tự bỏ khi rời app).
+            let stay = (args["stay"] as? Bool) ?? false
+            config.joinOnce = !stay
+            NEHotspotConfigurationManager.shared.apply(config) { error in
+                var ok = error == nil
+                if let e = error as NSError?,
+                   e.domain == NEHotspotConfigurationErrorDomain,
+                   e.code == NEHotspotConfigurationError.alreadyAssociated.rawValue {
+                    ok = true
+                }
+                if !ok { print("[PrinterWifi] Không nối được \(ssid): \(String(describing: error))") }
+                // Chờ iOS gán IP / định tuyến xong trước khi mở socket tới máy in.
+                DispatchQueue.main.asyncAfter(deadline: .now() + (ok ? 1.5 : 0)) { result(ok) }
+            }
+            self.joinedPrinterSsid = stay ? nil : ssid
+        case "leave_printer_wifi":
+            guard let ssid = self.joinedPrinterSsid else {
+                result(true)
+                return
+            }
+            self.joinedPrinterSsid = nil
+            // Chờ máy in nhận hết dữ liệu (socket LAN gửi xong) rồi mới trả Wi-Fi.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
+                result(true)
+            }
 
         // MARK: BLE Scan
         case "scan_bt":
@@ -458,7 +522,9 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
         let queue = DispatchQueue(label: "com.printerlabel.netconfig.\(ip)")
         let host = NWEndpoint.Host(ip)
         let nwPort = NWEndpoint.Port(rawValue: port) ?? 9100
-        let connection = NWConnection(host: host, port: nwPort, using: .tcp)
+        let connection = NWConnection(
+            host: host, port: nwPort, using: LANPrinterConnection.lanTcpParameters(for: ip)
+        )
 
         var finished = false
         func finish(_ resultCode: Int?, _ sendOk: Bool) {

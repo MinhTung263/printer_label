@@ -3,9 +3,9 @@ class UsbPrinterInfo {
   const UsbPrinterInfo({required this.deviceId, required this.name});
 
   factory UsbPrinterInfo.fromMap(Map<dynamic, dynamic> map) => UsbPrinterInfo(
-        deviceId: map['device_id'] as String? ?? '',
-        name: map['name'] as String? ?? '',
-      );
+    deviceId: map['device_id'] as String? ?? '',
+    name: map['name'] as String? ?? '',
+  );
 
   /// Id without serial (`USB:v{vid}_p{pid}`): Android hides the serial
   /// number until permission is granted.

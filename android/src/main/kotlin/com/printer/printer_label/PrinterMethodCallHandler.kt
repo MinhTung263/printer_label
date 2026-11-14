@@ -350,6 +350,131 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                 }
 
+                // Chạy nền giữ app in được khi tắt màn hình (xem PrintKeepAliveService).
+                "start_keep_alive" -> {
+                    val ctx = plugin.mContext
+                    if (ctx == null) {
+                        result.success(false)
+                    } else {
+                        val start = {
+                            try {
+                                PrintKeepAliveService.start(
+                                    ctx,
+                                    title = call.argument<String>("title") ?: "",
+                                    text = call.argument<String>("text") ?: "",
+                                    channelName = call.argument<String>("channel_name") ?: "",
+                                    stopLabel = call.argument<String>("stop_label"),
+                                )
+                                result.success(true)
+                            } catch (e: Exception) {
+                                // Android 12+: không cho bật foreground service khi app ở nền.
+                                result.success(false)
+                            }
+                        }
+                        // Android 13+: thông báo chạy nền chỉ hiện khi có quyền thông báo.
+                        // Từ chối vẫn bật dịch vụ (vẫn chạy nền, chỉ không thấy thông báo).
+                        if (call.argument<Boolean>("request_permission") == true) {
+                            plugin.requestNotificationPermission { start() }
+                        } else {
+                            start()
+                        }
+                    }
+                }
+
+                "device_name" -> {
+                    val ctx = plugin.mContext
+                    result.success(ctx?.let { DeviceNameHelper.read(it) })
+                }
+
+                "can_auto_restart" -> {
+                    val ctx = plugin.mContext
+                    result.success(ctx != null && AgentAutoStart.canLaunchFromBackground(ctx))
+                }
+
+                "request_auto_restart" -> {
+                    val ctx: android.content.Context? = plugin.activity ?: plugin.mContext
+                    result.success(ctx?.let { AgentAutoStart.requestPermission(it) } ?: false)
+                }
+
+                "stop_keep_alive" -> {
+                    plugin.mContext?.let { PrintKeepAliveService.stop(it) }
+                    result.success(true)
+                }
+
+                "is_keep_alive_running" -> result.success(PrintKeepAliveService.isRunning)
+
+                // Wi-Fi hiện tại / xung quanh để gợi ý chuyển đúng Wi-Fi của máy in.
+                "current_wifi" -> {
+                    val ctx = plugin.mContext
+                    result.success(ctx?.let { WifiHelper.current(it) })
+                }
+
+                "nearby_wifi" -> {
+                    val ctx = plugin.mContext
+                    if (ctx == null) {
+                        result.success(emptyList<String>())
+                    } else {
+                        kotlin.concurrent.thread {
+                            val list = WifiHelper.nearby(ctx)
+                            Handler(Looper.getMainLooper()).post { result.success(list) }
+                        }
+                    }
+                }
+
+                "nearby_wifi_networks" -> {
+                    val ctx = plugin.mContext
+                    if (ctx == null) {
+                        result.success(emptyList<Map<String, Any?>>())
+                    } else {
+                        kotlin.concurrent.thread {
+                            val list = WifiHelper.nearbyNetworks(ctx)
+                            Handler(Looper.getMainLooper()).post { result.success(list) }
+                        }
+                    }
+                }
+
+                "join_printer_wifi" -> {
+                    val ctx = plugin.mContext
+                    val ssid = call.argument<String>("ssid").orEmpty()
+                    if (ctx == null || ssid.isEmpty()) {
+                        result.success(false)
+                    } else {
+                        PrinterWifiJoiner.join(
+                            ctx,
+                            ssid,
+                            call.argument<String>("password").orEmpty(),
+                            call.argument<Int>("timeout_ms") ?: 15000,
+                            call.argument<Boolean>("stay") ?: false,
+                        ) { ok, _ -> result.success(ok) }
+                    }
+                }
+
+                "leave_printer_wifi" -> {
+                    val ctx = plugin.mContext
+                    kotlin.concurrent.thread {
+                        // Chờ mọi lệnh in LAN gửi xong rồi mới trả Wi-Fi — rút mạng
+                        // giữa chừng thì máy in nhận thiếu dữ liệu, không in ra.
+                        plugin.connections.values
+                            .filterIsInstance<LanSocketConnection>()
+                            .forEach { runCatching { it.awaitIdle(10_000) } }
+                        Thread.sleep(800) // máy in đọc nốt bộ đệm socket
+                        Handler(Looper.getMainLooper()).post {
+                            ctx?.let { PrinterWifiJoiner.leave(it) }
+                            result.success(true)
+                        }
+                    }
+                }
+
+                "open_wifi_settings" -> {
+                    val ctx: android.content.Context? = plugin.activity ?: plugin.mContext
+                    result.success(ctx?.let { WifiHelper.openSettings(it) } ?: false)
+                }
+
+                "is_usb_attached" -> {
+                    val deviceId = call.argument<String>("device_id")
+                    result.success(!deviceId.isNullOrEmpty() && plugin.isUsbAttached(deviceId))
+                }
+
                 "scan_net_printers" -> {
                     // Callback của SDK chạy trên thread khác, main thread đọc sau 1.5s.
                     val devices = java.util.Collections.synchronizedList(mutableListOf<Map<String, Any>>())

@@ -8,6 +8,9 @@ export 'src/models/bluetooth_device_model.dart';
 export 'src/models/lan_device_model.dart';
 export 'src/models/lan_quality.dart';
 export 'src/models/lan_ip_change_result.dart';
+export 'src/models/lan_printer_net_issue.dart';
+export 'src/models/lan_self_test_info.dart';
+export 'src/models/wifi_network_info.dart';
 export 'src/models/device_id.dart';
 export 'src/models/image_model.dart';
 export 'src/models/label_model.dart';
@@ -27,6 +30,9 @@ export 'src/enums/printer_status.dart';
 export 'src/component/barcode_view.dart';
 export 'src/component/cup_sticker_view.dart';
 
+// Export in qua trạm in (relay)
+export 'src/relay/relay.src.dart';
+
 // Export services
 export 'src/service/cup_sticker/cup_sticker_printer.dart';
 export 'src/service/cup_sticker/cup_sticker_printer_interface.dart';
@@ -35,4 +41,3 @@ export 'src/service/label/label_printer_service.dart';
 export 'src/service/label/label_printer_service_interface.dart';
 export 'src/service/esc/esc_print_service.dart';
 export 'src/service/esc/esc_print_service_interface.dart';
-

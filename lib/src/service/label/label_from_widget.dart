@@ -26,9 +26,7 @@ class LabelFromWidget {
   static Future<List<Uint8List>> captureImages<T>(
     List<T> items,
     BuildContext context, {
-    required Widget Function(
-      T item,
-    ) itemBuilder,
+    required Widget Function(T item) itemBuilder,
     required int Function(T item) quantity,
     LabelPerRow labelPerRow = LabelPerRow.doubleLabels,
     double? spacer,
@@ -49,7 +47,8 @@ class LabelFromWidget {
         ? 10.0
         : (labelPerRow.name.startsWith('triple') ? 8.0 : 0.0);
     final double rightPadding = leftPadding;
-    final double effectiveSpacer = spacer ??
+    final double effectiveSpacer =
+        spacer ??
         (labelPerRow.name.startsWith('double')
             ? 10.0 // 10.0 logical pixels scales exactly to the physical 1.5mm gap
             : (labelPerRow.name.startsWith('triple') ? 12.0 : 0.0));
@@ -57,7 +56,8 @@ class LabelFromWidget {
     final double stampWidthPx = labelPerRow.stampWidth * 6.57;
     final double stampHeightPx = labelPerRow.stampHeight * 6.57;
 
-    final double totalWidgetWidth = leftPadding +
+    final double totalWidgetWidth =
+        leftPadding +
         (stampWidthPx * itemsPerRow) +
         (effectiveSpacer * (itemsPerRow - 1)) +
         rightPadding;
@@ -93,9 +93,7 @@ class LabelFromWidget {
       }
       final itemsToAdd = itemsPerRow - row.length;
       for (int i = 0; i < itemsToAdd; i++) {
-        productWidgets.add(SizedBox(
-          width: stampWidthPx + effectiveSpacer,
-        ));
+        productWidgets.add(SizedBox(width: stampWidthPx + effectiveSpacer));
       }
       if (rightPadding > 0) {
         productWidgets.add(SizedBox(width: rightPadding));
@@ -111,9 +109,9 @@ class LabelFromWidget {
           viewPadding: EdgeInsets.zero,
         ),
         child: Theme(
-          data: Theme.of(context).copyWith(
-            visualDensity: VisualDensity.standard,
-          ),
+          data: Theme.of(
+            context,
+          ).copyWith(visualDensity: VisualDensity.standard),
           child: Material(
             color: Colors.white,
             child: Row(

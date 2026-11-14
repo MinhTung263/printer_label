@@ -6,16 +6,9 @@ class PrintThermalModel {
   final Uint8List image;
   final TicketSize size;
 
-  PrintThermalModel({
-    required this.image,
-    this.size = TicketSize.mm80,
-  });
+  PrintThermalModel({required this.image, this.size = TicketSize.mm80});
 
   Map<String, dynamic> toJson() {
-    return {
-      'image': image,
-      'size': size.value,
-      'type': 'ESC',
-    };
+    return {'image': image, 'size': size.value, 'type': 'ESC'};
   }
 }

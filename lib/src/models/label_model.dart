@@ -32,14 +32,8 @@ class LabelModel {
       'type': 'TSPL',
       'quantity': quantity,
       'label_count': label.count,
-      'size': {
-        'width': label.width,
-        'height': label.height,
-      },
-      'gap': {
-        'width': label.gap,
-        'height': 0,
-      },
+      'size': {'width': label.width, 'height': label.height},
+      'gap': {'width': label.gap, 'height': 0},
       'use_home': label.useHome,
       'is_last_batch': isLastBatch,
     };

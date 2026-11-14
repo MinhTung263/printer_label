@@ -20,10 +20,14 @@ Future<Uint8List> resizeImage({
   final int paddingPx = mmToPx(paddingMm ?? 2, dpi: dpi);
 
   /// Dimensions of the inner content area (excluding padding)
-  final int contentWidthPx =
-      (targetWidthPx - paddingPx * 2).clamp(1, targetWidthPx);
-  final int contentHeightPx =
-      (targetHeightPx - paddingPx * 2).clamp(1, targetHeightPx);
+  final int contentWidthPx = (targetWidthPx - paddingPx * 2).clamp(
+    1,
+    targetWidthPx,
+  );
+  final int contentHeightPx = (targetHeightPx - paddingPx * 2).clamp(
+    1,
+    targetHeightPx,
+  );
 
   /// Resizes the original image to fit within the content area
   final codec = await ui.instantiateImageCodec(
@@ -42,12 +46,7 @@ Future<Uint8List> resizeImage({
   /// Draws a white background
   final paint = ui.Paint()..color = const ui.Color(0xFFFFFFFF);
   canvas.drawRect(
-    ui.Rect.fromLTWH(
-      0,
-      0,
-      targetWidthPx.toDouble(),
-      targetHeightPx.toDouble(),
-    ),
+    ui.Rect.fromLTWH(0, 0, targetWidthPx.toDouble(), targetHeightPx.toDouble()),
     paint,
   );
 
@@ -93,7 +92,7 @@ Future<Uint8List> resizeThermalImage({
   final recorder = ui.PictureRecorder();
   final canvas = ui.Canvas(recorder);
   final paint = ui.Paint()..color = const ui.Color(0xFFFFFFFF);
-  
+
   canvas.drawRect(
     ui.Rect.fromLTWH(
       0,

@@ -35,20 +35,16 @@ class WidgetCaptureHelper {
       Directionality(
         textDirection: TextDirection.ltr,
         child: MediaQuery(
-          data: const MediaQueryData(
-            textScaler: TextScaler.noScaling,
-          ),
-          child: Material(
-            color: Colors.blue,
-            child: widget,
-          ),
+          data: const MediaQueryData(textScaler: TextScaler.noScaling),
+          child: Material(color: Colors.blue, child: widget),
         ),
       ),
       context: context,
       pixelRatio: pixelRatio ?? 3.0,
       constraints: constraints,
       delay: const Duration(
-          milliseconds: 200), // Short delay to ensure widget is fully rendered
+        milliseconds: 200,
+      ), // Short delay to ensure widget is fully rendered
     );
     return imageBytes;
   }

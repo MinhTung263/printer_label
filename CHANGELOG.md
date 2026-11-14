@@ -1,3 +1,59 @@
+## Unreleased (dự kiến 2.5.0)
+
+* **Chạy nền (Android):** `startKeepAlive` / `stopKeepAlive` / `isKeepAliveRunning` /
+  `keepAliveStoppedByUser` — `startKeepAlive(requestPermission: true)` tự xin quyền
+  thông báo (Android 13+); foreground service kiểu `connectedDevice` với thông báo cố
+  định (có nút dừng), giữ CPU và Wi-Fi thức để vẫn in được khi tắt màn hình. Manifest
+  plugin thêm `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `CHANGE_NETWORK_STATE`,
+  `ACCESS_WIFI_STATE`, `POST_NOTIFICATIONS`.
+* **`isUsbAttached(deviceId)` (Android):** biết máy in USB có đang cắm mà không kết nối /
+  không hỏi quyền; nhận cả id kiểu cũ `USB:<vendor>_<product>`.
+* **Quét LAN:** `discoverLanPrinters` / `discoverLanDevices` nhận `extraSubnets` để quét
+  thêm dải khác; bỏ qua interface VPN (tun, ppp, ipsec, utun, wg, tap).
+* **Nhận diện tên:** `discoverLanDevices(nameWait:)` chờ có tên rồi mới phát máy mới;
+  `knownLanDevices` / `rememberLanDevices` để app lưu tên qua các lần mở.
+* **`findLanPrinterIssues()`:** máy in lệch dải (`otherSubnet`) và IP tĩnh sai gateway
+  (`wrongGateway`, kèm `suggestedGateway`). `scanNetPrinters` dùng chung kết quả
+  broadcast trong 5 giây.
+* **`shrinkLabelImage`:** thu ảnh hàng tem về đúng số chấm máy in (8 chấm/mm).
+* **iOS — socket tới máy in không đi qua 4G:** IP nội bộ (10.x, 172.16–31.x, 192.168.x,
+  169.254.x) cấm interface cellular (`prohibitedInterfaceTypes`), để Wi-Fi quán không có
+  internet vẫn in được khi máy đang dùng 4G. Không ép `.wifi` để iPad cắm mạng dây vẫn in.
+* **Tìm máy in Epson / Star (`scanVendorBroadcast`):** broadcast ENPC (UDP 3289) và StarIO
+  (UDP 22222) và gói chung `FIND_POS_PRINTER` (UDP 3000/4000/1460/5000), gộp vào `scanNetPrinters` nên `discoverLanDevices` / `findLanPrinterIpByMac`
+  dùng được cho cả hai hãng. Chưa thử trên máy thật.
+* **`LanSelfTestInfo.parse`:** đọc IP / mask / gateway / MAC / DHCP từ chữ trên tờ self-test
+  (VD kết quả OCR), chịu lỗi OCR thường gặp.
+* **In qua trạm in (relay):** in tới máy in LAN khác mạng / máy in USB cắm ở máy khác.
+  - `PrintRelay`: gói sẵn cho app — bật/tắt trạm (`setStation`, `restore`, `isStation`),
+    tự chạy nền + cập nhật thông báo + nút "Dừng" (Android), phía gửi `willRelay` /
+    `relay`. App chỉ cung cấp hàng đợi, cách in một lệnh và chữ trên thông báo.
+  - `PrintRelayPrinter`: máy in đích (LAN/USB, `usbDeviceId`).
+  - `PrintRelayJob`: lệnh in hoá đơn / tem và định dạng lưu trên hàng đợi.
+  - `PrintRelayTransport`: interface kênh trao đổi; app tự cài với dịch vụ của mình
+    (Firebase, server riêng...).
+  - `PrintRelayStation`: nghe hàng đợi, giành lệnh (một lệnh chỉ một trạm in), bỏ lệnh
+    quá hạn, bỏ qua lệnh trạm không in được (`canHandle`), đếm số lệnh đã in.
+  - `PrintRelayClient`: `canPrintDirectly` (cùng dải /24, USB đang cắm), theo dõi trạm
+    trực tuyến, `send` lệnh và chờ kết quả (`PrintRelayResult`).
+  - `PrintRelayLanServer` / `PrintRelayLanClient`: đường nội bộ nhanh — trạm mở cổng TCP
+    9101 có token ngẫu nhiên (báo qua hàng đợi), máy gửi cùng LAN gửi thẳng, không được
+    thì đi hàng đợi. `PrintRelay.relay(force: true)` gửi qua trạm sau khi in thẳng lỗi.
+  - `PrintRelayTransport.watchStations()` (thay `watchStationsOnline`) trả thông tin trạm.
+  - `MqttPrintRelayTransport`: kênh MQTT không cần backend (mặc định `broker.emqx.io`,
+    topic `easypos/print_relay/{băm}`), nội dung mã hoá AES-256-GCM, Last Will xoá trạm
+    khi rớt mạng, giành lệnh theo gói `claims` đầu tiên. Đã thử thật với broker.emqx.io.
+  - `PrintRelay` nhận nhiều kênh (`queues`): trạm nghe mọi kênh, máy gửi dùng kênh đầu
+    tiên có trạm, lỗi thì sang kênh kế. `relayEnabled` / `setRelayEnabled` /
+    `hasOnlineStation` cho nút "In qua máy trạm".
+  - Máy in tích hợp của trạm: `PrintRelayPrinter.stationBuiltIn(stationId)` — lệnh mang
+    `targetStation`, chỉ đúng trạm đó in (trạm khác bỏ qua, kể cả qua mạng nội bộ).
+    `PrintRelay(stationId:)` + `onlineStations()` để app liệt kê trạm có máy in tích hợp.
+  - Chống in trùng khi nhiều trạm: MQTT nghe gói giành lệnh ngay từ lúc lên mạng, không
+    xác định được trạm thắng thì không in; đường nội bộ đã gửi lệnh thì không gửi lại
+    qua hàng đợi. Đã thử 2 trạm trên broker thật: mỗi lệnh in đúng 1 lần.
+* **Phụ thuộc mới:** `mqtt_client`, `encrypt`, `crypto`; Dart SDK tối thiểu 3.8.
+
 ## [2.4.1] - 2026-11-10
 
 ### 🛡️ Reliability

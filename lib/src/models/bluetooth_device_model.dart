@@ -20,5 +20,6 @@ class BluetoothDeviceModel {
   }
 
   @override
-  String toString() => 'BluetoothDeviceModel(name: $name, identifier: $identifier)';
+  String toString() =>
+      'BluetoothDeviceModel(name: $name, identifier: $identifier)';
 }

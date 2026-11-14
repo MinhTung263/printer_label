@@ -59,11 +59,7 @@ abstract class ESCPrintServicePlatform extends PlatformInterface {
   });
 
   /// Opens the cash drawer on multiple specified printer devices concurrently.
-  Future<void> openDrawerMultiDevices({
-    required List<String> deviceIds,
-  });
-
-
+  Future<void> openDrawerMultiDevices({required List<String> deviceIds});
 
   Future<void> printText({
     String? deviceId,

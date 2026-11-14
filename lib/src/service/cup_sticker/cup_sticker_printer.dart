@@ -25,7 +25,7 @@ class CupStickerPrinter {
   }
 
   /// Builds sticker images from a list of Flutter [widgets] and prints them.
-  /// 
+  ///
   /// Renders widgets, resizes the output according to the [size] and optional [widthOffsetMm]
   /// or [paddingMm], and prints.
   static Future<void> printWithWidgets({

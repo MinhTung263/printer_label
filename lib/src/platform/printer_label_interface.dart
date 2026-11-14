@@ -22,7 +22,7 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   /// Gets the platform operating system version string (Android/iOS).
   Future<String?> get platformVersion;
-  
+
   /// Checks if Bluetooth is currently enabled on the device.
   Future<bool> bluetoothEnabled();
 
@@ -56,7 +56,8 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   /// [Deprecated] Use [disconnectPrinter] instead.
   @Deprecated('Use disconnectPrinter instead')
-  Future<bool> disconectPrinter({String? deviceId}) => disconnectPrinter(deviceId: deviceId);
+  Future<bool> disconectPrinter({String? deviceId}) =>
+      disconnectPrinter(deviceId: deviceId);
 
   /// Connects to a network LAN printer using the specified [ipAddress].
   Future<bool> connectLan({required String ipAddress});
@@ -123,7 +124,6 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
     required ImageModel imageModel,
   });
 
-
   /// Prints a thermal receipt using ESC/POS commands from [printThermalModel].
   /// [quantity] số bản in — được gửi xuống native để in HẾT trong một lời gọi.
   /// Xem [PrinterLabel.printESC] để biết vì sao không lặp ở tầng Dart.
@@ -155,8 +155,6 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Disconnects the built-in printer (only supported on Android).
   Future<bool> disconnectBuiltIn();
 
-
-
   /// Checks if the current Android device has a built-in thermal printer.
   /// Always returns `false` on iOS.
   Future<bool> hasBuiltInPrinter();
@@ -168,13 +166,17 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
 
   /// Retrieves a list of previously paired (bonded) Bluetooth devices.
   /// If [filterPrinterOnly] is true (default), only devices recognized as printers are returned.
-  Future<List<BluetoothDeviceModel>> getBluetoothDevices({bool filterPrinterOnly = true});
+  Future<List<BluetoothDeviceModel>> getBluetoothDevices({
+    bool filterPrinterOnly = true,
+  });
 
   /// Stream emitting discovered Bluetooth devices during active scans.
   ///
   /// If [filterPrinterOnly] is true (default), only devices recognized as printers are emitted.
   /// Call [startBluetoothScan] before listening to this stream on iOS.
-  Stream<BluetoothDeviceModel> bluetoothScanStream({bool filterPrinterOnly = true});
+  Stream<BluetoothDeviceModel> bluetoothScanStream({
+    bool filterPrinterOnly = true,
+  });
 
   /// Stream emitting USB connection events (attach/detach) for USB printers (Android only).
   Stream<UsbConnectionEvent> get usbDeviceStream;
@@ -284,4 +286,59 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   }) {
     throw UnimplementedError('identifyLanPrinter() has not been implemented.');
   }
+
+  /// Android only. Bật (hoặc cập nhật nội dung) dịch vụ chạy nền giữ app in được
+  /// khi tắt màn hình: thông báo cố định [title] / [text], giữ CPU và Wi-Fi thức.
+  /// [stopLabel] khác rỗng thì thông báo có nút dừng. Trả `false` khi không bật
+  /// được (không phải Android, hoặc app đang ở nền trên Android 12+).
+  Future<bool> startKeepAlive({
+    required String title,
+    required String text,
+    required String channelName,
+    String? stopLabel,
+    bool requestPermission = false,
+  }) async => false;
+
+  /// Android only. Dừng dịch vụ chạy nền.
+  Future<void> stopKeepAlive() async {}
+
+  /// Android only. Dịch vụ chạy nền đang chạy không.
+  Future<bool> isKeepAliveRunning() async => false;
+
+  /// Phát khi người dùng bấm nút dừng trên thông báo chạy nền (dịch vụ đã dừng).
+  Stream<void> get keepAliveStoppedByUser => const Stream.empty();
+
+  /// Android only. Máy in USB [deviceId] có đang cắm vào máy này không.
+  Future<bool> isUsbAttached(String deviceId) async => false;
+
+  /// Wi-Fi đang kết nối; `null` khi không có Wi-Fi.
+  Future<Map<String, Object?>?> currentWifi() async => null;
+
+  /// Android only. Tên Wi-Fi xung quanh (cần quyền vị trí).
+  Future<List<String>> nearbyWifi() async => const [];
+
+  Future<List<Map<String, Object?>>> nearbyWifiNetworks() async => const [];
+
+  /// Android only. Mở bảng chọn Wi-Fi.
+  Future<bool> openWifiSettings() async => false;
+
+  /// Nối tạm Wi-Fi của máy in.
+  Future<bool> joinPrinterWifi({
+    required String ssid,
+    required String password,
+    required Duration timeout,
+    bool stay = false,
+  }) async => false;
+
+  /// Trả Wi-Fi đã nối tạm.
+  Future<void> leavePrinterWifi() async {}
+
+  /// Android only. Tên máy người dùng đặt trong Cài đặt; `null` khi không đọc được.
+  Future<String?> deviceName() async => null;
+
+  /// Android only. App được tự mở lại từ nền (máy Agent tự khởi động lại).
+  Future<bool> canAutoRestart() async => false;
+
+  /// Android only. Mở màn cấp quyền "Hiển thị trên ứng dụng khác".
+  Future<bool> requestAutoRestart() async => false;
 }

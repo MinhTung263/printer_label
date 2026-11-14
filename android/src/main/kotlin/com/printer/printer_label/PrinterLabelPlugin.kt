@@ -143,6 +143,12 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         flutterPluginBinding.applicationContext.registerReceiver(usbReceiver, filter)
         registerUsbPermissionReceiver()
         synchronized(Companion) { if (usbOwner == null) usbOwner = this }
+        // Người dùng bấm "dừng" trên thông báo chạy nền -> báo Dart để app tắt chế độ trạm.
+        PrintKeepAliveService.onStoppedByUser = {
+            Handler(Looper.getMainLooper()).post {
+                if (!isDetached) runCatching { channel.invokeMethod("keep_alive_stopped_by_user", null) }
+            }
+        }
     }
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
@@ -234,6 +240,24 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             return true
         }
         return false
+    }
+
+    /** Xin quyền thông báo (Android 13+) rồi gọi [then]; đã có / không cần xin thì gọi ngay. */
+    internal fun requestNotificationPermission(then: () -> Unit) {
+        val act = activity
+        if (Build.VERSION.SDK_INT < 33 || act == null ||
+            act.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED ||
+            permissionCallback != null
+        ) {
+            then()
+            return
+        }
+        permissionCallback = { then() }
+        act.requestPermissions(
+            arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_PERMISSIONS_CODE,
+        )
     }
 
     override fun onRequestPermissionsResult(
@@ -689,6 +713,19 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
      * [deviceId] đã lưu có thể thuộc về [device] không? Khớp chính xác, hoặc — khi
      * chưa có quyền nên chưa đọc được serial — cùng vendor/product id.
      */
+    /// Máy in USB [deviceId] có đang cắm vào máy này không (không kết nối, không hỏi
+    /// quyền). Khớp id ổn định (`USB:v_p[_s]`), id lúc chưa có quyền, id kiểu cũ
+    /// `USB:<vendor>_<product>` và đường dẫn thiết bị.
+    internal fun isUsbAttached(deviceId: String): Boolean {
+        if (isConnectionActive(deviceId)) return true
+        val raw = deviceId.substringAfter("USB:")
+        return usbManager.deviceList.values.any { device ->
+            usbMayMatch(device, deviceId) ||
+                raw == "${device.vendorId}_${device.productId}" ||
+                raw == device.deviceName
+        }
+    }
+
     private fun usbMayMatch(device: UsbDevice, deviceId: String): Boolean {
         val id = stableUsbId(device)
         if (id == deviceId) return true

@@ -15,9 +15,7 @@ class PreviewCupSticker extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _buildText(data.code),
-              _buildText(
-                "#${data.labelIndex}/${data.totalLabels}",
-              ),
+              _buildText("#${data.labelIndex}/${data.totalLabels}"),
             ],
           ),
           const Divider(),
@@ -30,28 +28,15 @@ class PreviewCupSticker extends StatelessWidget {
           if (data.toppings.isNotEmpty) ...[
             ...data.toppings.map(
               (topping) => Padding(
-                padding: const EdgeInsets.only(
-                  left: 8,
-                ),
-                child: _buildText(
-                  "+ $topping",
-                  textAlign: TextAlign.left,
-                ),
+                padding: const EdgeInsets.only(left: 8),
+                child: _buildText("+ $topping", textAlign: TextAlign.left),
               ),
             ),
           ],
           if (data.note.isNotEmpty) ...[
-            _buildLabelRow(
-              "Test",
-              data.note,
-              fontStyle: FontStyle.italic,
-            ),
+            _buildLabelRow("Test", data.note, fontStyle: FontStyle.italic),
           ],
-          _buildLabelRow(
-            "Price",
-            data.price,
-            fontWeight: FontWeight.bold,
-          ),
+          _buildLabelRow("Price", data.price, fontWeight: FontWeight.bold),
           const Divider(),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -80,10 +65,7 @@ class PreviewCupSticker extends StatelessWidget {
   }
 
   Widget _buildTextDivider() {
-    return Text(
-      "-" * 100,
-      maxLines: 1,
-    );
+    return Text("-" * 100, maxLines: 1);
   }
 
   Widget _buildText(
@@ -104,22 +86,17 @@ class PreviewCupSticker extends StatelessWidget {
     );
   }
 
-  Widget _buildLabelRow(String title, String value,
-      {FontStyle? fontStyle, FontWeight? fontWeight}) {
+  Widget _buildLabelRow(
+    String title,
+    String value, {
+    FontStyle? fontStyle,
+    FontWeight? fontWeight,
+  }) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Flexible(
-          child: _buildText(
-            title,
-            fontStyle: fontStyle,
-          ),
-        ),
-        _buildText(
-          value,
-          fontStyle: fontStyle,
-          fontWeight: fontWeight,
-        ),
+        Flexible(child: _buildText(title, fontStyle: fontStyle)),
+        _buildText(value, fontStyle: fontStyle, fontWeight: fontWeight),
       ],
     );
   }
