@@ -25,6 +25,29 @@ object DeviceNameHelper {
         return candidates.firstOrNull { !it.isNullOrBlank() }?.trim()
     }
 
+    /**
+     * Mã phần cứng ổn định của máy — giống nhau giữa các bản build / app trên cùng
+     * máy (để một máy chỉ là MỘT Agent):
+     * - Android 7.1 trở xuống (VD Sunmi T1-G Android 6): số serial phần cứng.
+     * - Android 8+: ANDROID_ID (chung cho các app cùng khoá ký trên máy).
+     * `null` khi không đọc được.
+     */
+    @Suppress("DEPRECATION")
+    fun deviceId(ctx: Context): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            val serial = safe { Build.SERIAL }
+            if (!serial.isNullOrBlank() && !serial.equals(Build.UNKNOWN, ignoreCase = true)) {
+                return "serial:$serial"
+            }
+        }
+        val androidId = safe {
+            Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID)
+        }
+        // Mã lỗi của một số máy Android 2.2 đời đầu — coi như không có.
+        if (androidId.isNullOrBlank() || androidId == "9774d56d682e549c") return null
+        return "android:$androidId"
+    }
+
     private inline fun safe(block: () -> String?): String? =
         try {
             block()

@@ -720,6 +720,17 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<String?> deviceId() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final id = await _channel.invokeMethod<String>('device_id');
+      return (id?.trim().isEmpty ?? true) ? null : id!.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<String?> deviceName() async {
     if (!Platform.isAndroid) return null;
     try {

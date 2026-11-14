@@ -2329,6 +2329,11 @@ class PrinterLabel {
     requestPermission: requestPermission,
   );
 
+  /// Android only. Mã phần cứng ổn định của máy — giống nhau giữa các bản build /
+  /// app trên cùng máy (Android ≤ 7.1: số serial; 8+: ANDROID_ID). `null` khi
+  /// không đọc được. App băm ra trước khi dùng, không gửi mã gốc đi.
+  static Future<String?> deviceId() => _platform.deviceId();
+
   /// Android only. Tên máy người dùng đặt trong Cài đặt (Android 7.1+: tên thiết
   /// bị; máy cũ như Android 6: tên Bluetooth). `null` khi không đọc được.
   static Future<String?> deviceName() => _platform.deviceName();

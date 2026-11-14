@@ -381,6 +381,11 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                 }
 
+                "device_id" -> {
+                    val ctx = plugin.mContext
+                    result.success(ctx?.let { DeviceNameHelper.deviceId(it) })
+                }
+
                 "device_name" -> {
                     val ctx = plugin.mContext
                     result.success(ctx?.let { DeviceNameHelper.read(it) })

@@ -333,6 +333,10 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Trả Wi-Fi đã nối tạm.
   Future<void> leavePrinterWifi() async {}
 
+  /// Android only. Mã phần cứng ổn định (giống nhau giữa các app trên máy);
+  /// `null` khi không đọc được.
+  Future<String?> deviceId() async => null;
+
   /// Android only. Tên máy người dùng đặt trong Cài đặt; `null` khi không đọc được.
   Future<String?> deviceName() async => null;
 
