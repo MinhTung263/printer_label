@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'escpos_commands.dart';
+import 'lan_printer_scanner.dart';
 import 'paper_status.dart';
 import 'port_queue.dart';
 import 'printer_port.dart';
@@ -35,13 +36,47 @@ class TcpPrinterPort implements PrinterPort {
   @override
   String get id => 'tcp://$host:$port';
 
+  /// Máy in bận (từ chối kết nối — đang phục vụ máy khác): CHƯA gửi byte nào
+  /// nên thử lại an toàn sau các khoảng nghỉ này.
+  static List<Duration> busyRetries = const [
+    Duration(milliseconds: 300),
+    Duration(milliseconds: 600),
+    Duration(milliseconds: 1200),
+  ];
+
+  /// Máy in không trả lời hỏi trạng thái (nhiều máy giá rẻ): khỏi hỏi lại trong
+  /// [noStatusFor] — mỗi phiếu đỡ chờ [statusTimeout].
+  static Duration noStatusFor = const Duration(seconds: 60);
+  static final Map<String, DateTime> _noStatusUntil = {};
+
+  bool get _statusUnsupported {
+    final until = _noStatusUntil[id];
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  Future<_TcpConn> _open() async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await _TcpConn.open(host, port, connectTimeout);
+      } on SocketException catch (e) {
+        if (!LanPrinterScanner.isRefused(e) || attempt >= busyRetries.length) {
+          rethrow;
+        }
+        await Future<void>.delayed(busyRetries[attempt]);
+      }
+    }
+  }
+
   @override
   Future<void> send(Uint8List data, {bool checkStatus = true}) =>
       PortQueue.run(id, () async {
-        final conn = await _TcpConn.open(host, port, connectTimeout);
+        final conn = await _open();
         try {
-          if (checkStatus) {
+          if (checkStatus && !_statusUnsupported) {
             final status = await _queryOn(conn);
+            if (status == PaperStatus.unknown) {
+              _noStatusUntil[id] = DateTime.now().add(noStatusFor);
+            }
             if (status.blocksPrinting) throw PrinterStatusException(status);
           }
           for (var off = 0; off < data.length; off += chunkSize) {
@@ -58,7 +93,7 @@ class TcpPrinterPort implements PrinterPort {
 
   @override
   Future<PaperStatus> queryStatus() => PortQueue.run(id, () async {
-    final conn = await _TcpConn.open(host, port, connectTimeout);
+    final conn = await _open();
     try {
       return await _queryOn(conn);
     } finally {

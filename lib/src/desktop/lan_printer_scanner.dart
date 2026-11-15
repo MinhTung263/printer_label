@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'arp_table.dart';
+
 /// Một máy in LAN tìm thấy (mở cổng RAW 9100).
 class LanPrinterFound {
   const LanPrinterFound(this.host, this.port);
@@ -76,6 +78,50 @@ abstract final class LanPrinterScanner {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Máy in ở [host] còn BẬT không: mở được cổng in, hoặc bị TỪ CHỐI (máy in
+  /// đang phục vụ máy khác — vẫn đang bật, đừng báo mất kết nối nhầm).
+  static Future<bool> isAlive(
+    String host, {
+    int port = 9100,
+    Duration timeout = const Duration(milliseconds: 1500),
+  }) async {
+    try {
+      final s = await Socket.connect(host, port, timeout: timeout);
+      s.destroy();
+      return true;
+    } on SocketException catch (e) {
+      return isRefused(e);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Bị từ chối kết nối (ECONNREFUSED: Linux 111, macOS 61, Windows 10061).
+  static bool isRefused(SocketException e) {
+    final code = e.osError?.errorCode;
+    return code == 111 || code == 61 || code == 10061;
+  }
+
+  /// Tìm lại máy in theo [mac] (máy in bật lại được router cấp IP mới): quét
+  /// cổng in trên các dải mạng của máy này rồi đối chiếu bảng ARP. Trả `ip`
+  /// (hoặc `ip:cổng`) mới, `null` khi không thấy.
+  static Future<String?> findByMac(String mac, {int port = 9100}) async {
+    final want = ArpTable.normalize(mac);
+    if (want == null) return null;
+    // Đã có trong bảng ARP (vừa liên lạc) và còn mở cổng in: khỏi quét.
+    for (final e in (await ArpTable.read()).entries) {
+      if (e.value == want && await isAlive(e.key, port: port)) {
+        return LanPrinterFound(e.key, port).address;
+      }
+    }
+    final found = await scan(port: port);
+    final table = await ArpTable.read();
+    for (final f in found) {
+      if (table[f.host] == want) return f.address;
+    }
+    return null;
   }
 
   static int _ipKey(String ip) =>
