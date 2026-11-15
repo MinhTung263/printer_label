@@ -333,7 +333,9 @@ class PrinterThermal {
                 // toàn qua đường này.
 
                 // Dựng dữ liệu ảnh thô (GS v 0) sử dụng bộ nhị phân hóa chất lượng cao (threshold 200) để giữ nguyên chất lượng ảnh gốc của Flutter
-                val rasterBytes = getEscPosRasterBytes(bitmap)
+                // Máy in tích hợp: làm rõ nét mảnh 1 chấm (xem ThinStrokeBooster). Máy in
+                // ngoài (LAN/USB/Bluetooth) giữ nguyên ảnh như trước.
+                val rasterBytes = getEscPosRasterBytes(bitmap, boostThinStrokes = isTargetBuiltIn)
                 bitmap.recycle()
 
                 val stream = java.io.ByteArrayOutputStream()
@@ -460,7 +462,7 @@ class PrinterThermal {
         }
     }
 
-    private fun getEscPosRasterBytes(bitmap: Bitmap): ByteArray {
+    private fun getEscPosRasterBytes(bitmap: Bitmap, boostThinStrokes: Boolean = false): ByteArray {
         val width = bitmap.width
         val height = bitmap.height
         val widthBytes = (width + 7) / 8
@@ -476,7 +478,7 @@ class PrinterThermal {
         //    Ngưỡng 200 — KHÔNG hạ về 128: đầu in nhiệt chỉ có cháy/trắng; chữ anti-alias
         //    gồm lõi đậm + viền xám, ngưỡng 128 chỉ còn bộ xương mảnh -> in RẤT MỜ (đã
         //    ghi nhận trên máy BLE ở cả iOS và Android). Dùng chung cho mọi kết nối.
-        val bits = ByteArray(widthBytes * height)
+        var bits = ByteArray(widthBytes * height)
         val blankRow = BooleanArray(height)
         for (y in 0 until height) {
             val rowPixel = y * width
@@ -502,6 +504,8 @@ class PrinterThermal {
             }
             blankRow[y] = any == 0
         }
+        // Chỉ thêm chấm trên dòng đã có chấm đen nên [blankRow] không đổi.
+        if (boostThinStrokes) bits = ThinStrokeBooster.boost(bits, widthBytes, width, height)
 
         // 2) Dựng lệnh. Chia ảnh thành nhiều DẢI `GS v 0` tối đa 128 dòng: nhồi cả bill
         //    dài vào một lệnh sẽ vượt giới hạn chiều cao raster của máy in (Epson chỉ
