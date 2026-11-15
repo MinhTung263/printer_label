@@ -1,6 +1,7 @@
 /// In ESC/POS trên máy tính (Windows / Linux / macOS) bằng Dart, KHÔNG cần driver:
 /// ảnh hoá đơn → raster `GS v 0` (khớp từng byte bản native Android), gửi qua
-/// TCP 9100 (máy in LAN), `/dev/usb/lp*` (Linux) hoặc hàng in RAW (Windows).
+/// TCP 9100 (máy in LAN), `/dev/usb/lp*` (Linux) hoặc hàng in RAW (Windows,
+/// CUPS trên macOS).
 ///
 /// Thư viện riêng (không nằm trong `printer_label.dart`) để app di động không
 /// kéo theo `win32`.
@@ -15,6 +16,7 @@ export 'src/desktop/paper_status.dart';
 export 'src/desktop/port_queue.dart';
 export 'src/desktop/printer_port.dart';
 export 'src/desktop/tcp_printer_port.dart';
+export 'src/desktop/usb/mac_cups_printers.dart';
 export 'src/desktop/usb/usb_printer_info.dart';
 export 'src/desktop/usb/usb_printers.dart';
 export 'src/desktop/usb/windows_raw_printers.dart';
