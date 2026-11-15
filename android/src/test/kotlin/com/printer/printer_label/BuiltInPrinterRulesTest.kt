@@ -34,13 +34,21 @@ class BuiltInPrinterRulesTest {
 
     @Test
     fun mucThietBi() {
-        fun tier(vararg f: String, rom: String = "", pk: List<String> = emptyList()) =
-            BuiltInPrinterRules.tierOf(f.toList(), rom, pk)
+        fun tier(
+            man: String,
+            model: String,
+            vararg others: String,
+            rom: String = "",
+            pk: List<String> = emptyList(),
+        ) = BuiltInPrinterRules.tierOf(man, model, others.toList(), rom, pk)
         assertEquals(Tier.VERIFIED, tier("SUNMI", "V2s"))
         assertEquals(Tier.VERIFIED, tier("BLESSX", "T4SMODELX"))
         // Máy B68 trắng nhãn: chỉ mã ROM lộ dòng máy.
         assertEquals(Tier.VERIFIED, tier("ACME", "X1", rom = "B68_V1.1.1_B230721"))
-        assertEquals(Tier.VERIFIED, tier("ACME", "X1", pk = listOf("com.zcs.printer")))
+        // Gói dịch vụ in chỉ là dấu hiệu — KHÔNG tự nhận (máy cũ như Landi in
+        // bằng SDK riêng, giữ nguyên cách xử lý trước đây).
+        assertEquals(Tier.LIKELY, tier("ACME", "X1", pk = listOf("com.zcs.printer")))
+        assertEquals(Tier.LIKELY, tier("Landi", "A8", pk = listOf("com.landicorp.android.pinpadservice")))
         assertEquals(Tier.LIKELY, tier("ACME", "Q2", pk = listOf("com.iposprinter.iposprinterservice")))
         assertEquals(Tier.LIKELY, tier("ACME", "Android POS"))
         assertEquals(Tier.LIKELY, tier("ACME", "SmartPOS-5"))
@@ -48,6 +56,19 @@ class BuiltInPrinterRulesTest {
         assertEquals(Tier.UNKNOWN, tier("samsung", "SM-A546E"))
         assertEquals(Tier.UNKNOWN, tier("OPPO", "CPH2591"))
         assertEquals(Tier.UNKNOWN, tier("acme", "Poseidon"))
+    }
+
+    /**
+     * Máy cũ KHÔNG đổi: chỉ hãng / model mới nhận là "đã biết" — thương hiệu,
+     * tên sản phẩm, tên thiết bị trùng từ khoá không làm điện thoại thường
+     * thành máy in tích hợp.
+     */
+    @Test
+    fun khongNhanNhamDienThoaiThuong() {
+        val t = BuiltInPrinterRules.tierOf(
+            "samsung", "SM-G991B", listOf("samsung", "o1sxxx", "paxton_device"), "TP1A.2208", emptyList(),
+        )
+        assertEquals(Tier.UNKNOWN, t)
     }
 
     /** Đúng tình huống máy BLESSX T4SMODELX: máy in ảo + một máy in ngoài đã ghép đôi. */

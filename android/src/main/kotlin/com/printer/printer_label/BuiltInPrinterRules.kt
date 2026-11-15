@@ -37,22 +37,31 @@ internal object BuiltInPrinterRules {
 
     // ---- Lớp 1: thiết bị -------------------------------------------------
 
-    /** Hãng / dòng máy đã biết in được (khớp trong hãng, thương hiệu, model). */
-    private val VERIFIED_VENDORS = listOf(
-        "sunmi", "imin", "pax", "urovo", "smartpeak", "kozen",
-        // Dòng B68 (dịch vụ in ZCS) bán dưới hãng khác — đã kiểm tra trên máy
-        // BLESSX T4SMODELX (ROM B68_V1.1.1).
-        "blessx",
+    /**
+     * Hãng / dòng máy ĐÃ BIẾT in được — đúng danh sách cũ của plugin (chỉ xét
+     * hãng sản xuất và model, KHÔNG xét thương hiệu / tên sản phẩm để không
+     * nhận nhầm máy cũ) + dòng B68 bán dưới hãng khác (BLESSX T4SMODELX, đã
+     * kiểm tra: ROM B68_V1.1.1, dịch vụ in ZCS).
+     */
+    private val VERIFIED_MANUFACTURERS = listOf(
+        "sunmi", "imin", "pax", "urovo", "smartpeak", "kozen", "blessx",
     )
 
-    /** Từ khoá model của dòng máy đã biết. */
-    private val VERIFIED_MODELS = listOf("b68", "p068", "t4smodel")
+    /** Từ khoá model của dòng máy đã biết (kể cả máy cũ: sunmi, imin, pax, urovo). */
+    private val VERIFIED_MODELS = listOf(
+        "sunmi", "imin", "pax", "urovo", "b68", "p068", "t4smodel",
+    )
 
     /** Tiền tố mã ROM (`Build.DISPLAY`) của dòng máy đã biết. */
     private val VERIFIED_ROM_PREFIXES = listOf("b68_", "p068_")
 
-    /** Gói dịch vụ in của dòng máy đã biết in được. */
-    val VERIFIED_PACKAGES = listOf(
+    /**
+     * Gói dịch vụ in của máy POS. Chỉ là DẤU HIỆU ([Tier.LIKELY]) — KHÔNG đủ để
+     * nhận là có máy in tích hợp (nhiều máy POS có gói này nhưng in bằng SDK
+     * riêng, không có máy in Bluetooth): phải thấy máy in ảo mới nhận. Giữ
+     * nguyên cách xử lý máy cũ.
+     */
+    val HINT_PACKAGES = listOf(
         "com.sunmi.printerservice",            // Sunmi
         "woyou.aidl.service",                  // Sunmi / iMin AIDL
         "woyou.aidlservice.jiuiv5",            // Sunmi (dịch vụ in gốc) + máy nhái
@@ -64,13 +73,6 @@ internal object BuiltInPrinterRules {
         "android.printservice.urovoprint",     // Urovo
         "com.zcs.printer",                     // ZCS (dòng B68 / BLESSX)
         "com.szzcs.smartpos",                  // ZCS SmartPOS
-    )
-
-    /**
-     * Gói dịch vụ in của máy POS CHƯA xác minh (theo tài liệu hãng): chỉ coi là
-     * "có thể có" — phải thấy máy in ảo trong Bluetooth mới nhận.
-     */
-    val LIKELY_PACKAGES = listOf(
         "com.iposprinter.iposprinterservice",  // iPos (Q1 / Q2 / Z91...)
         "recieptservice.com.recieptservice",   // Senraise (H10...)
     )
@@ -78,22 +80,30 @@ internal object BuiltInPrinterRules {
     private val POS_WORD = Regex("(^|[^a-z])(m|smart|android)?pos([^a-z]|$)")
 
     /**
-     * Mức nhận diện của THIẾT BỊ. [fields]: hãng, thương hiệu, model, tên sản
-     * phẩm, tên thiết bị; [display]: mã ROM; [packages]: gói dịch vụ in có trên
-     * máy (trong [VERIFIED_PACKAGES] / [LIKELY_PACKAGES]).
+     * Mức nhận diện của THIẾT BỊ. [manufacturer] / [model]: dùng cho danh sách
+     * ĐÃ BIẾT; [others] (thương hiệu, tên sản phẩm, tên thiết bị) chỉ dùng cho
+     * dấu hiệu "máy POS"; [display]: mã ROM; [packages]: gói dịch vụ in có trên
+     * máy.
      */
-    fun tierOf(fields: List<String>, display: String, packages: Collection<String>): Tier {
-        val low = fields.map { it.lowercase() }
+    fun tierOf(
+        manufacturer: String,
+        model: String,
+        others: List<String>,
+        display: String,
+        packages: Collection<String>,
+    ): Tier {
+        val man = manufacturer.lowercase()
+        val mod = model.lowercase()
         val rom = display.lowercase()
-        if (low.any { f -> VERIFIED_VENDORS.any { f.contains(it) } } ||
-            low.any { f -> VERIFIED_MODELS.any { f.contains(it) } } ||
-            VERIFIED_ROM_PREFIXES.any { rom.startsWith(it) } ||
-            packages.any { it in VERIFIED_PACKAGES }
+        if (VERIFIED_MANUFACTURERS.any { man.contains(it) } ||
+            VERIFIED_MODELS.any { mod.contains(it) } ||
+            VERIFIED_ROM_PREFIXES.any { rom.startsWith(it) }
         ) {
             return Tier.VERIFIED
         }
-        if (packages.any { it in LIKELY_PACKAGES } ||
-            low.any { POS_WORD.containsMatchIn(it) } ||
+        val hints = listOf(man, mod) + others.map { it.lowercase() }
+        if (packages.any { it in HINT_PACKAGES } ||
+            hints.any { POS_WORD.containsMatchIn(it) } ||
             POS_WORD.containsMatchIn(rom)
         ) {
             return Tier.LIKELY

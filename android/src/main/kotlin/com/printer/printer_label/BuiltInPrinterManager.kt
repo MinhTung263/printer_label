@@ -33,7 +33,7 @@ internal fun markBuiltInPrinterConfirmed() {
 private fun installedPrinterPackages(context: Context?): List<String> {
     cachedPackages?.let { return it }
     val pm = context?.packageManager ?: return emptyList()
-    val found = (BuiltInPrinterRules.VERIFIED_PACKAGES + BuiltInPrinterRules.LIKELY_PACKAGES)
+    val found = BuiltInPrinterRules.HINT_PACKAGES
         .filter { pkg -> runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess }
     cachedPackages = found
     return found
@@ -42,13 +42,9 @@ private fun installedPrinterPackages(context: Context?): List<String> {
 /** Mức nhận diện của thiết bị (hãng, model, mã ROM, gói dịch vụ in). */
 internal fun builtInTier(context: Context? = null): BuiltInPrinterRules.Tier =
     BuiltInPrinterRules.tierOf(
-        fields = listOf(
-            Build.MANUFACTURER ?: "",
-            Build.BRAND ?: "",
-            Build.MODEL ?: "",
-            Build.PRODUCT ?: "",
-            Build.DEVICE ?: "",
-        ),
+        manufacturer = Build.MANUFACTURER ?: "",
+        model = Build.MODEL ?: "",
+        others = listOf(Build.BRAND ?: "", Build.PRODUCT ?: "", Build.DEVICE ?: ""),
         display = Build.DISPLAY ?: "",
         // Chưa có context: dùng danh sách gói đã đọc lần trước (nếu có).
         packages = if (context != null) installedPrinterPackages(context) else (cachedPackages ?: emptyList()),
