@@ -7,4 +7,3 @@ export 'platform/printer_label.dart';
 export 'utils/image_resize.dart';
 export 'utils/widget_capture_helper.dart';
 export 'service/service.src.dart';
-export 'relay/relay.src.dart';

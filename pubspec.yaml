@@ -16,10 +16,10 @@ dependencies:
   barcode_widget: ^2.0.4
   screenshot: ^3.0.0
   plugin_platform_interface: ^2.1.8
-  # Kênh trạm in qua MQTT (MqttPrintRelayTransport): broker + mã hoá AES-GCM.
-  mqtt_client: ^10.11.0
-  encrypt: ^5.0.3
-  crypto: ^3.0.3
+  # In ESC/POS trên máy tính (package:printer_label/desktop.dart): giải mã ảnh
+  # hoá đơn, gọi spooler Windows qua FFI.
+  image: ^4.5.0
+  ffi: ^2.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

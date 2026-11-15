@@ -30,9 +30,6 @@ export 'src/enums/printer_status.dart';
 export 'src/component/barcode_view.dart';
 export 'src/component/cup_sticker_view.dart';
 
-// Export in qua trạm in (relay)
-export 'src/relay/relay.src.dart';
-
 // Export services
 export 'src/service/cup_sticker/cup_sticker_printer.dart';
 export 'src/service/cup_sticker/cup_sticker_printer_interface.dart';
