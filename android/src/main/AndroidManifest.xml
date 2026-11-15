@@ -8,6 +8,13 @@
         <package android:name="com.landicorp.android.pinpadservice" />
         <package android:name="com.urovo.printerservice" />
         <package android:name="android.printservice.urovoprint" />
+        <!-- Nhận diện máy in tích hợp (BuiltInPrinterRules): iMin bản mới, dòng
+             B68 / ZCS (BLESSX...), iPos, Senraise. -->
+        <package android:name="com.imin.printer" />
+        <package android:name="com.zcs.printer" />
+        <package android:name="com.szzcs.smartpos" />
+        <package android:name="com.iposprinter.iposprinterservice" />
+        <package android:name="recieptservice.com.recieptservice" />
     </queries>
     <uses-permission android:name="smartpos.deviceservice.permission.Printer" />
     <!-- In LAN: gắn socket vào đúng mạng Wi-Fi chứa máy in (ConnectivityManager) và giữ
