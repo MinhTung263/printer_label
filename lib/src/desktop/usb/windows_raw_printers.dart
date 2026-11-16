@@ -20,38 +20,37 @@ abstract final class WindowsRawPrinters {
   static const prefix = 'queue:';
   static const genericDriver = 'Generic / Text Only';
 
-  /// Mọi hàng in (máy in USB lên đầu) + cổng USB có máy in mà chưa có hàng in.
+  /// Các máy in USB đang cắm của Windows (hàng in trên cổng `USB…`). KHÔNG liệt kê máy in
+  /// ảo / hệ thống (Microsoft Print to PDF, XPS Document Writer, Fax, OneNote...), máy in
+  /// mạng và hàng in của máy USB đã rút cáp — chúng không in được ESC/POS / tem và làm sơ
+  /// đồ rối. Cổng `USB…` chưa có hàng in cũng KHÔNG liệt kê: Windows tạo sẵn các cổng
+  /// "Virtual printer port for USB" cả khi chưa cắm máy in nào, không phân biệt được máy
+  /// thật; máy in USB cắm vào Windows thường tự có hàng in.
   static Future<List<UsbPrinterInfo>> list() async {
     final printers = await _psJson(
-      'Get-Printer | Select-Object Name,PortName,DriverName',
+      'Get-Printer | Select-Object Name,PortName,DriverName,WorkOffline',
     );
-    final ports = await _psJson(
-      "Get-PrinterPort | Where-Object Name -like 'USB*' | "
-      'Select-Object Name,Description',
-    );
-    final used = {for (final p in printers) '${p['PortName']}'};
-    final queues = [
-      for (final p in printers)
-        UsbPrinterInfo(
-          address: '$prefix${p['Name']}',
-          name: '${p['Name']}',
-          detail: '${p['PortName']} · ${p['DriverName']}',
-        ),
-    ]..sort((a, b) => _usbFirst(a).compareTo(_usbFirst(b)));
-    return [
-      ...queues,
-      for (final port in ports)
-        if (!used.contains('${port['Name']}'))
-          UsbPrinterInfo(
-            address: '',
-            name: '${port['Description'] ?? 'Máy in USB'}'.trim(),
-            detail: '${port['Name']} · chưa có hàng in',
-            setupPort: '${port['Name']}',
-          ),
-    ];
+    return usbQueues(printers);
   }
 
-  static int _usbFirst(UsbPrinterInfo p) => p.detail.startsWith('USB') ? 0 : 1;
+  /// Lọc kết quả `Get-Printer` (các trường `Name`, `PortName`, `DriverName`,
+  /// `WorkOffline`) còn lại máy in USB đang cắm.
+  static List<UsbPrinterInfo> usbQueues(List<Map<String, Object?>> printers) =>
+      [
+        for (final p in printers)
+          if (_isUsbQueue(p))
+            UsbPrinterInfo(
+              address: '$prefix${p['Name']}',
+              name: '${p['Name']}',
+              detail: '${p['PortName']} · ${p['DriverName']}',
+            ),
+      ];
+
+  static bool _isUsbQueue(Map<String, Object?> p) {
+    if (p['WorkOffline'] == true) return false;
+    final port = '${p['PortName']}'.trim().toUpperCase();
+    return RegExp(r'^USB\d+').hasMatch(port);
+  }
 
   /// Tạo hàng in RAW `EasyPOS <cổng>` trên cổng USB [port] bằng driver có sẵn
   /// [genericDriver]. Cần quyền quản trị → Windows hỏi (UAC). Trả địa chỉ hàng
