@@ -1,0 +1,79 @@
+import 'dart:typed_data';
+
+import 'paper_status.dart';
+import 'tcp_printer_port.dart';
+
+/// Máy in nói ngôn ngữ nào.
+enum PrinterLanguage {
+  /// Chỉ trả lời lệnh ESC/POS — máy in hoá đơn.
+  receipt,
+
+  /// Chỉ trả lời lệnh TSPL — máy in tem.
+  label,
+
+  /// Trả lời cả hai (máy in hai chế độ): người dùng chọn.
+  both,
+
+  /// Không trả lời lệnh nào (máy tắt, khác mạng, hoặc không hỗ trợ hỏi trạng thái).
+  unknown,
+}
+
+/// Dò máy in LAN là máy in hoá đơn (ESC/POS) hay máy in tem (TSPL) bằng hai câu hỏi
+/// trạng thái:
+///
+/// - ESC/POS: `DLE EOT 4` → byte trạng thái dạng `0b0xx1xx10`.
+/// - TSPL: `ESC ! ?` → máy in tem trả MỘT byte trạng thái (0x00 sẵn sàng, 0x01 mở nắp...).
+///
+/// Máy in hoá đơn không hiểu `ESC ! ?` (nó đổi kiểu chữ rồi im lặng) nên sau câu hỏi
+/// gửi `ESC @` để đưa về trạng thái ban đầu.
+abstract final class PrinterLanguageProbe {
+  static final Uint8List _askEscPos = Uint8List.fromList([0x10, 0x04, 0x04]);
+  static final Uint8List _askTspl = Uint8List.fromList([0x1B, 0x21, 0x3F]);
+  static final Uint8List _reset = Uint8List.fromList([0x1B, 0x40]);
+
+  static Future<PrinterLanguage> probeLan(
+    String host, {
+    int port = 9100,
+    Duration timeout = const Duration(milliseconds: 700),
+  }) async {
+    final p = TcpPrinterPort(host, port: port);
+    final escpos = classifyEscPos(
+      await p.exchange(_askEscPos, timeout: timeout),
+    );
+    final tspl = classifyTspl(await p.exchange(_askTspl, timeout: timeout));
+    // Đưa máy in hoá đơn về lại kiểu chữ ban đầu (câu hỏi TSPL đổi kiểu chữ của nó).
+    await p.send(_reset, checkStatus: false);
+    return decide(escpos: escpos, tspl: tspl);
+  }
+
+  /// Trả lời `DLE EOT 4` hợp lệ: có byte trạng thái ESC/POS.
+  static bool classifyEscPos(Uint8List? reply) =>
+      reply != null && reply.any(PaperStatus.isStatusByte);
+
+  /// Trả lời `ESC ! ?` hợp lệ: đúng MỘT byte trạng thái (< 0x80 và không phải khung
+  /// trạng thái ESC/POS) — máy in hoá đơn không trả lời câu này.
+  static bool classifyTspl(Uint8List? reply) =>
+      reply != null && reply.length == 1 && reply.first < 0x80;
+
+  /// Tên model có vẻ là máy in TEM (nhãn / mã vạch) — dùng khi hai câu hỏi trạng thái
+  /// không đủ kết luận (máy không trả lời, hoặc trả lời cả hai kiểu).
+  static bool looksLikeLabelModel(String? model) {
+    final m = (model ?? '').toLowerCase();
+    if (m.isEmpty) return false;
+    return _labelModel.hasMatch(m);
+  }
+
+  static final RegExp _labelModel = RegExp(
+    r'label|barcode|tem\b|tspl|tsc\b|ttp-?\d|tdp-?\d|zebra|argox|'
+    r'xp-?(3[0-9]{2}|4[0-9]{2})b?\b|xp-?(dt|h)\d|gk-?\d{3}|'
+    r'gp-?(1124|1134|1324|1524|2120|3120|3150)|ht-?(300|330)|dl-?(8|7)\d{2}',
+  );
+
+  static PrinterLanguage decide({required bool escpos, required bool tspl}) =>
+      switch ((escpos, tspl)) {
+        (true, true) => PrinterLanguage.both,
+        (true, false) => PrinterLanguage.receipt,
+        (false, true) => PrinterLanguage.label,
+        _ => PrinterLanguage.unknown,
+      };
+}

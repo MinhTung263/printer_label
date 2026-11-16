@@ -44,6 +44,10 @@ abstract final class UsbPrinters {
     return null;
   }
 
+  /// Lý do lần [setup] gần nhất thất bại (nếu hệ điều hành báo); `null` khi không có.
+  static String? get lastSetupError =>
+      Platform.isMacOS ? MacCupsPrinters.lastError : null;
+
   static PrinterPort? port(String address) {
     if (address.startsWith(LinuxUsbPrinters.prefix) && Platform.isLinux) {
       return LinuxUsbPrinterPort(address);

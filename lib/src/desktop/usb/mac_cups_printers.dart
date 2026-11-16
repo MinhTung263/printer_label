@@ -54,24 +54,135 @@ abstract final class MacCupsPrinters {
     ];
   }
 
-  /// Tạo hàng in RAW cho máy in USB [uri]. Trả địa chỉ hàng in mới, `null` khi
-  /// không tạo được (tài khoản không có quyền quản trị...).
+  /// Lý do lần [createRawQueue] gần nhất thất bại (hiện cho người dùng); `null` khi
+  /// vừa thành công.
+  static String? lastError;
+
+  /// Chạy lệnh hệ thống — thay được trong test.
+  static Future<ProcessResult> Function(String cmd, List<String> args)
+  processRunner = (cmd, args) => Process.run(cmd, args);
+
+  /// Driver "Generic PostScript" có sẵn trong CUPS của macOS. macOS mới (14+) KHÔNG
+  /// còn cho tạo hàng in `raw` ("Raw queues are no longer supported"), nên tạo hàng in
+  /// bằng driver này: gửi byte bằng `lp -o raw` vẫn đi thẳng xuống máy in, không qua
+  /// bộ lọc của driver.
+  static const genericDriver = 'drv:///sample.drv/generic.ppd';
+
+  /// Tạo hàng in cho máy in USB [uri] để gửi byte thô ESC/POS / TSPL. Trả địa chỉ
+  /// hàng in mới, `null` khi không tạo được (xem [lastError]).
+  ///
+  /// Thử lần lượt: hàng in `raw` (macOS cũ) → driver Generic PostScript (macOS mới);
+  /// cách nào bị từ chối vì thiếu quyền thì thử lại với hộp hỏi mật khẩu quản trị của
+  /// macOS.
   static Future<String?> createRawQueue(String uri) async {
+    lastError = null;
     final name = queueNameFor(uri);
-    final r = await Process.run('lpadmin', [
-      '-p',
-      name,
-      '-E',
-      '-v',
-      uri,
-      '-m',
-      'raw',
-      '-o',
-      'printer-is-shared=false',
-    ]).timeout(_timeout);
-    if (r.exitCode != 0) return null;
-    return await exists('$prefix$name') ? '$prefix$name' : null;
+    String? failure;
+    for (final model in ['raw', genericDriver]) {
+      var r = await _lpadmin(name, uri, model);
+      if (r.exitCode != 0 && needsAuthorization('${r.stderr}')) {
+        r = await _lpadminElevated(name, uri, model);
+      }
+      if (r.exitCode == 0) {
+        if (await exists('$prefix$name')) return '$prefix$name';
+        failure = 'Đã gửi lệnh tạo hàng in nhưng macOS chưa ghi nhận';
+        continue;
+      }
+      failure = friendlyError('${r.stderr}');
+      // macOS không còn hàng in raw: chuyển sang driver Generic ngay.
+      if (!rawUnsupported('${r.stderr}') && model == 'raw') break;
+    }
+    lastError = failure ?? 'Không tạo được hàng in cho máy in USB';
+    return null;
   }
+
+  static List<String> _lpadminArgs(String name, String uri, String model) => [
+    '-p',
+    name,
+    '-E',
+    '-v',
+    uri,
+    '-m',
+    model,
+    '-o',
+    'printer-is-shared=false',
+  ];
+
+  static Future<ProcessResult> _lpadmin(
+    String name,
+    String uri,
+    String model,
+  ) async {
+    try {
+      return await processRunner(
+        'lpadmin',
+        _lpadminArgs(name, uri, model),
+      ).timeout(_timeout);
+    } catch (e) {
+      return ProcessResult(0, 1, '', '$e');
+    }
+  }
+
+  /// Chạy `lpadmin` qua hộp mật khẩu quản trị của macOS (`osascript ... with
+  /// administrator privileges`): tài khoản không có quyền sẵn vẫn cài được sau khi
+  /// nhập mật khẩu một lần. Người dùng bấm Huỷ thì thất bại.
+  static Future<ProcessResult> _lpadminElevated(
+    String name,
+    String uri,
+    String model,
+  ) async {
+    final command = [
+      'lpadmin',
+      ..._lpadminArgs(name, uri, model),
+    ].map(shellQuote).join(' ');
+    try {
+      return await processRunner('osascript', [
+        '-e',
+        'do shell script ${appleScriptQuote(command)} with administrator privileges',
+      ]).timeout(const Duration(minutes: 2));
+    } catch (e) {
+      return ProcessResult(0, 1, '', '$e');
+    }
+  }
+
+  /// Câu lỗi của `lpadmin` do thiếu quyền (cần hỏi mật khẩu quản trị).
+  static bool needsAuthorization(String stderr) {
+    final s = stderr.toLowerCase();
+    return s.contains('unauthorized') ||
+        s.contains('forbidden') ||
+        s.contains('not authorized') ||
+        s.contains('authentication') ||
+        s.contains('permission denied');
+  }
+
+  /// macOS mới không còn tạo được hàng in `raw`.
+  static bool rawUnsupported(String stderr) =>
+      stderr.toLowerCase().contains('raw queues are no longer supported');
+
+  /// Câu lỗi dễ hiểu cho người dùng.
+  static String friendlyError(String stderr) {
+    final s = stderr.trim();
+    if (s.isEmpty) return 'Không tạo được hàng in cho máy in USB';
+    if (rawUnsupported(s)) {
+      return 'macOS này không còn cho tạo hàng in thô; đang dùng cách khác';
+    }
+    if (s.toLowerCase().contains('user canceled') ||
+        s.toLowerCase().contains('-128')) {
+      return 'Bạn đã huỷ nhập mật khẩu quản trị';
+    }
+    if (needsAuthorization(s)) {
+      return 'Cần mật khẩu quản trị của máy Mac để cài máy in USB';
+    }
+    // Dòng cuối của stderr thường là lý do thật.
+    return s.split('\n').where((l) => l.trim().isNotEmpty).last.trim();
+  }
+
+  /// Bọc [s] trong nháy đơn cho shell (`'` → `'\''`).
+  static String shellQuote(String s) => "'${s.replaceAll("'", r"'\''")}'";
+
+  /// Bọc [s] thành chuỗi AppleScript (thoát `\` và `"`).
+  static String appleScriptQuote(String s) =>
+      '"${s.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
 
   static Future<bool> exists(String address) async {
     final name = address.substring(prefix.length);
@@ -134,7 +245,7 @@ abstract final class MacCupsPrinters {
 
   static Future<String> _run(String cmd, List<String> args) async {
     try {
-      final r = await Process.run(cmd, args).timeout(_timeout);
+      final r = await processRunner(cmd, args).timeout(_timeout);
       return '${r.stdout}';
     } catch (_) {
       return '';

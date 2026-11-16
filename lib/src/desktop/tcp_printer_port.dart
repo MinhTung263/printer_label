@@ -91,6 +91,23 @@ class TcpPrinterPort implements PrinterPort {
         }
       });
 
+  /// Gửi [request] rồi chờ máy in trả lời (tối đa [timeout]); `null` khi không có
+  /// byte nào. Dùng để dò ngôn ngữ máy in ([PrinterLanguageProbe]).
+  Future<Uint8List?> exchange(
+    Uint8List request, {
+    Duration timeout = const Duration(milliseconds: 700),
+  }) => PortQueue.run(id, () async {
+    final conn = await _open();
+    try {
+      conn.drain();
+      conn.socket.add(request);
+      await conn.socket.flush();
+      return await conn.readAny(timeout);
+    } finally {
+      await conn.close();
+    }
+  });
+
   @override
   Future<PaperStatus> queryStatus() => PortQueue.run(id, () async {
     final conn = await _open();
@@ -172,6 +189,22 @@ class _TcpConn {
       final w = _waiter = Completer<void>();
       await w.future.timeout(left, onTimeout: () {});
     }
+  }
+
+  /// Chờ có byte nào đó trả về (tối đa [timeout]); trả hết byte đang có.
+  Future<Uint8List?> readAny(Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (_rx.isEmpty) {
+      final left = deadline.difference(DateTime.now());
+      if (_closed || left <= Duration.zero) return null;
+      final w = _waiter = Completer<void>();
+      await w.future.timeout(left, onTimeout: () {});
+    }
+    // Chờ thêm chút để gom hết gói trả lời.
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    final out = Uint8List.fromList(_rx);
+    _rx.clear();
+    return out;
   }
 
   Future<void> close() async {

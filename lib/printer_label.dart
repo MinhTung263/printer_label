@@ -26,6 +26,11 @@ export 'src/enums/paper_size_enum.dart';
 export 'src/enums/printer_connection_type.dart';
 export 'src/enums/printer_status.dart';
 
+// Căn chỉnh tem in lệch (dùng chung mọi nền tảng)
+export 'src/label/label_calibration.dart';
+export 'src/label/label_calibration_image.dart';
+export 'src/label/schematic_tem_layout.dart';
+
 // Export components
 export 'src/component/barcode_view.dart';
 export 'src/component/cup_sticker_view.dart';
