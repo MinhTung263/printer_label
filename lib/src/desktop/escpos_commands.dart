@@ -29,7 +29,7 @@ abstract final class EscPosCommands {
 
   /// Phiếu chữ đơn giản (in thử): mỗi dòng một dòng, căn giữa, rồi cắt. Chữ
   /// tiếng Việt được bỏ dấu — in thô không có phông tiếng Việt.
-  static Uint8List textTicket(List<String> lines) {
+  static Uint8List textTicket(List<String> lines, {bool cut = true}) {
     final out = BytesBuilder(copy: false)
       ..add(init)
       ..add(alignCenter);
@@ -38,9 +38,8 @@ abstract final class EscPosCommands {
         ..add(asciiFold(line).codeUnits)
         ..addByte(0x0A);
     }
-    out
-      ..add(feed5)
-      ..add(cut);
+    out.add(feed5);
+    if (cut) out.add(EscPosCommands.cut);
     return out.takeBytes();
   }
 
@@ -69,13 +68,20 @@ abstract final class EscPosCommands {
   ///
   /// [copies] bản được NỐI SẴN thành một khối để gửi liền một lần — không để khoảng
   /// hở giữa các bản cho lệnh `ESC @` của bản sau huỷ phần đuôi bản trước.
-  static Uint8List receipt(Uint8List raster, {int copies = 1}) {
+  ///
+  /// [cut] = false: vẫn đẩy giấy qua lưỡi xé nhưng KHÔNG gửi lệnh cắt (máy in không có dao cắt
+  /// hoặc người dùng muốn tự xé).
+  static Uint8List receipt(
+    Uint8List raster, {
+    int copies = 1,
+    bool cut = true,
+  }) {
     final one = BytesBuilder(copy: false)
       ..add(init)
       ..add(alignCenter)
       ..add(raster)
-      ..add(feed5)
-      ..add(cut);
+      ..add(feed5);
+    if (cut) one.add(EscPosCommands.cut);
     final oneCopy = one.takeBytes();
     if (copies <= 1) return oneCopy;
     final all = BytesBuilder(copy: false);

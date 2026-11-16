@@ -20,6 +20,7 @@ abstract final class EscPosPrinter {
     bool openDrawer = false,
     bool checkStatus = true,
     bool beep = false,
+    bool cut = true,
   }) async {
     // Giải mã + mã hoá ở isolate riêng: ảnh hoá đơn dài làm đứng giao diện.
     // Ảnh nhỏ (phiếu thường) mã hoá ngay — tạo isolate tốn thêm 100–300ms (nhất là bản debug); chỉ ảnh
@@ -37,7 +38,7 @@ abstract final class EscPosPrinter {
         );
       } catch (_) {}
     }
-    final receipt = EscPosCommands.receipt(raster, copies: copies);
+    final receipt = EscPosCommands.receipt(raster, copies: copies, cut: cut);
     await port.send(
       beep ? Uint8List.fromList([...receipt, ...EscPosCommands.beep]) : receipt,
       checkStatus: checkStatus,
