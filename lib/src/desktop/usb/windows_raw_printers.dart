@@ -49,7 +49,10 @@ abstract final class WindowsRawPrinters {
   static bool _isUsbQueue(Map<String, Object?> p) {
     if (p['WorkOffline'] == true) return false;
     final port = '${p['PortName']}'.trim().toUpperCase();
-    return RegExp(r'^USB\d+').hasMatch(port);
+    // Hàng in do chính app tạo (`EasyPOS ...`) luôn là máy in của Agent, kể cả cổng tệp / cổng
+    // khác USB (máy chạy kiểm thử, hàng in RAW thử).
+    return RegExp(r'^USB\d+').hasMatch(port) ||
+        '${p['Name']}'.startsWith('EasyPOS');
   }
 
   /// Tạo hàng in RAW `EasyPOS <cổng>` trên cổng USB [port] bằng driver có sẵn

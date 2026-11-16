@@ -20,9 +20,14 @@ void main() {
         _p('Máy in bếp', 'IP_192.168.1.20'),
         _p('Xprinter XP-365B', 'USB001'),
         _p('EasyPOS USB002', 'USB002'),
+        _p('EasyPOS RAW CI', r'D:\\temp\\easypos_raw.prn'),
         _p('Máy in cũ đã rút', 'USB003', offline: true),
       ]);
-      expect(list.map((e) => e.name), ['Xprinter XP-365B', 'EasyPOS USB002']);
+      expect(list.map((e) => e.name), [
+        'Xprinter XP-365B',
+        'EasyPOS USB002',
+        'EasyPOS RAW CI',
+      ]);
       expect(list.first.address, 'queue:Xprinter XP-365B');
       expect(list.every((e) => !e.needsSetup), isTrue);
     },
