@@ -214,6 +214,14 @@ abstract final class MacCupsPrinters {
     ];
   }
 
+  /// URI thiết bị (`usb://...`) của hàng in [address]; `null` khi không có hàng in đó.
+  static Future<String?> uriOf(String address) async {
+    final name = address.substring(prefix.length);
+    return parseLpstat(
+      await _run('lpstat', ['-v']),
+    ).where((q) => q.name == name).firstOrNull?.uri;
+  }
+
   /// Chuỗi định danh IEEE 1284 (`device-id`) của máy in USB đang cắm sau hàng in [address]
   /// (`cups:<tên>`); `null` khi không có / máy chưa cắm.
   static Future<String?> deviceIdOf(String address) async {
@@ -285,7 +293,158 @@ abstract final class MacCupsPrinters {
   }
 }
 
-/// Gửi byte ESC/POS qua hàng in RAW của CUPS (`lp -o raw`).
+/// Phiên gửi liên tục tới một máy in USB qua backend `usb` của CUPS.
+///
+/// Vì sao không dùng `lp` cho từng lệnh: mỗi lệnh `lp` thành một việc in của CUPS, và backend USB giữ máy
+/// in KHÔNG DƯỚI 7 GIÂY sau mỗi việc ("Waiting for read thread to exit") — in liên tiếp thì mỗi phiếu
+/// cách nhau ≥7s (đã đo: việc thứ hai bắt đầu sau 7,2s). Dữ liệu thật ra tới máy in ngay đầu việc; phần
+/// chờ nằm SAU khi gửi xong. Nên mở MỘT backend, đưa dữ liệu vào stdin (`/dev/stdin`) và giữ mở: các
+/// phiếu sau đi thẳng vào máy in (độ trễ ~0). Hết [idle] không có phiếu thì đóng (backend thoát sau ≤7s).
+class MacUsbSession {
+  MacUsbSession._(this.process, this.queue);
+
+  /// Đường dẫn backend USB của CUPS (đổi được để kiểm thử bằng backend giả).
+  static String backendPath = '/usr/libexec/cups/backend/usb';
+
+  /// Không có phiếu trong chừng này thì đóng phiên (nhả máy in cho chương trình khác).
+  static Duration idle = const Duration(seconds: 90);
+
+  static final Map<String, MacUsbSession> _sessions = {};
+
+  final Process process;
+  final String queue;
+  final List<String> log = [];
+  bool closed = false;
+  bool closing = false;
+  bool connected = false;
+  Timer? _idleTimer;
+  final Completer<void> _connected = Completer<void>();
+
+  static bool get available =>
+      Platform.isMacOS && File(backendPath).existsSync();
+
+  /// Phiên đang mở và đã nối máy in của hàng in [queue] (không mở mới); `null` nếu chưa có.
+  static MacUsbSession? peek(String queue) {
+    final s = _sessions[queue];
+    return s != null && s.connected && !s.closed && !s.closing ? s : null;
+  }
+
+  /// Phiên đang mở của hàng in [queue] (hoặc mở mới); `null` khi không mở được.
+  static Future<MacUsbSession?> of(String queue, String uri) async {
+    var s = _sessions[queue];
+    if (s != null && s.closing && !s.closed) {
+      // Phiên cũ đang đóng (backend còn giữ máy in tới ≤7s): chờ thoát rồi mở phiên mới.
+      await s.process.exitCode.timeout(
+        const Duration(seconds: 12),
+        onTimeout: () => -1,
+      );
+    }
+    s = _sessions[queue];
+    if (s != null && !s.closed && !s.closing) return s;
+    _sessions.remove(queue);
+    if (!available) return null;
+    try {
+      final p = await Process.start(
+        backendPath,
+        [
+          '1',
+          Platform.environment['USER'] ?? 'easypos',
+          'EasyPOS',
+          '1',
+          '',
+          '/dev/stdin',
+        ],
+        environment: {'DEVICE_URI': uri},
+      );
+      s = MacUsbSession._(p, queue);
+      _sessions[queue] = s;
+      s._watch();
+      return s;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _watch() {
+    void onLine(String line) {
+      if (log.length > 60) log.removeAt(0);
+      log.add(line);
+      if (!connected && line.contains('Sending data to printer')) {
+        connected = true;
+        if (!_connected.isCompleted) _connected.complete();
+      }
+    }
+
+    unawaited(
+      process.stderr
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .forEach(onLine),
+    );
+    unawaited(process.stdout.drain<void>());
+    unawaited(
+      process.exitCode.then((_) {
+        closed = true;
+        if (identical(_sessions[queue], this)) _sessions.remove(queue);
+        if (!_connected.isCompleted) {
+          _connected.completeError(StateError('backend thoát'));
+        }
+      }),
+    );
+  }
+
+  /// Chờ backend nối được máy in (lần gửi đầu của phiên).
+  Future<bool> waitConnected(Duration timeout) async {
+    try {
+      await _connected.future.timeout(timeout);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Đưa [data] vào máy in; ném lỗi nếu phiên đã hỏng.
+  Future<void> write(Uint8List data) async {
+    if (closed || closing) throw StateError('phiên USB đã đóng');
+    _idleTimer?.cancel();
+    process.stdin.add(data);
+    await process.stdin.flush();
+    _idleTimer = Timer(idle, close);
+  }
+
+  /// Đóng phiên (backend thoát sau ≤7s).
+  Future<void> close() async {
+    if (closing || closed) return;
+    closing = true;
+    _idleTimer?.cancel();
+    try {
+      await process.stdin.close();
+    } catch (_) {}
+  }
+
+  /// Bỏ phiên ngay (hỏng / treo).
+  void kill() {
+    closing = true;
+    closed = true;
+    _idleTimer?.cancel();
+    _sessions.remove(queue);
+    process.kill(ProcessSignal.sigkill);
+  }
+
+  /// Nhật ký stderr của phiên hàng in [queue] (chẩn đoán / kiểm thử); rỗng khi không có phiên.
+  static List<String> sessionLog(String queue) =>
+      List.of(_sessions[queue]?.log ?? const <String>[]);
+
+  /// Đóng mọi phiên (thoát app / kiểm thử).
+  static Future<void> closeAll() async {
+    for (final s in List.of(_sessions.values)) {
+      await s.close();
+    }
+  }
+}
+
+/// Gửi byte ESC/POS / TSPL tới máy in USB qua CUPS: ưu tiên phiên backend liên tục
+/// ([MacUsbSession], không trễ giữa các phiếu), không được thì `lp -o raw`.
 class MacCupsPrinterPort implements PrinterPort {
   MacCupsPrinterPort(this.address);
 
@@ -297,10 +456,48 @@ class MacCupsPrinterPort implements PrinterPort {
   String get id => address;
 
   @override
-  Future<void> send(
-    Uint8List data, {
-    bool checkStatus = true,
-  }) => PortQueue.run(id, () async {
+  Future<void> send(Uint8List data, {bool checkStatus = true}) =>
+      PortQueue.run(id, () async {
+        if (await _viaSession(data)) return;
+        await _viaLp(data);
+      });
+
+  /// Gửi qua phiên liên tục; `false` = không dùng được (rơi về `lp`).
+  Future<bool> _viaSession(Uint8List data) async {
+    if (!MacUsbSession.available) return false;
+    // Đã có phiên nối sẵn: ghi thẳng, khỏi hỏi lại CUPS (tiết kiệm ~0,2s mỗi phiếu).
+    final open = MacUsbSession.peek(_queue);
+    if (open != null) {
+      try {
+        await open.write(data);
+        return true;
+      } catch (_) {
+        open.kill(); // phiên hỏng: mở lại bên dưới
+      }
+    }
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final uri = await MacCupsPrinters.uriOf(address);
+      // Hàng in mạng / máy chưa cắm: để `lp` xử lý và báo lỗi rõ.
+      if (uri == null || !uri.startsWith('usb:')) return false;
+      final session = await MacUsbSession.of(_queue, uri);
+      if (session == null) return false;
+      try {
+        if (!session.connected &&
+            !await session.waitConnected(const Duration(seconds: 4))) {
+          session.kill();
+          return false;
+        }
+        await session.write(data);
+        return true;
+      } catch (_) {
+        // Phiên hỏng (máy in rút / bật lại): mở phiên mới, thử lại một lần.
+        session.kill();
+      }
+    }
+    return false;
+  }
+
+  Future<void> _viaLp(Uint8List data) async {
     if (!await MacCupsPrinters.exists(address)) {
       throw UsbPrinterNotFound(address);
     }
@@ -345,7 +542,7 @@ class MacCupsPrinterPort implements PrinterPort {
         code,
       );
     }
-  });
+  }
 
   /// Tối đa chờ `lp` nhận hết dữ liệu và thoát.
   static const Duration sendTimeout = Duration(seconds: 20);
