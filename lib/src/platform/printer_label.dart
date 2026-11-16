@@ -2329,6 +2329,12 @@ class PrinterLabel {
     requestPermission: requestPermission,
   );
 
+  /// Nhận chữ trong ảnh [imagePath] (chạy trên máy, không gửi ảnh đi): iOS dùng
+  /// Vision của Apple (chạy cả Simulator), Android dùng ML Kit. Mỗi dòng chữ một
+  /// hàng; `null` khi không đọc được.
+  static Future<String?> recognizeText(String imagePath) =>
+      _platform.recognizeText(imagePath);
+
   /// Android only. Mã phần cứng ổn định của máy — giống nhau giữa các bản build /
   /// app trên cùng máy (Android ≤ 7.1: số serial; 8+: ANDROID_ID). `null` khi
   /// không đọc được. App băm ra trước khi dùng, không gửi mã gốc đi.

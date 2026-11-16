@@ -96,6 +96,16 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
 
+        // MARK: Nhận chữ trong ảnh (Vision) — đọc tờ self-test của máy in
+        case "recognize_text":
+            guard let args = call.arguments as? [String: Any],
+                  let path = args["path"] as? String
+            else {
+                result(nil)
+                return
+            }
+            TextRecognitionHelper.recognize(path: path) { text in result(text) }
+
         // MARK: Wi-Fi (gợi ý chuyển đúng Wi-Fi của máy in)
         // Đọc SSID cần entitlement "Access WiFi Information" + quyền vị trí; thiếu
         // thì trả nil. iOS không cho app quét Wi-Fi xung quanh hay mở màn chọn Wi-Fi.

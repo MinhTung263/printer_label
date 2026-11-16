@@ -17,6 +17,8 @@ DESC
   s.platform         = :ios, '12.0'
   s.swift_version    = '5.0'
   s.dependency 'Flutter'
+  # Nhận chữ trong ảnh (TextRecognitionHelper) — framework có sẵn của iOS.
+  s.weak_frameworks = 'Vision'
 
   # ✅ XCFramework
   s.vendored_frameworks = 'Classes/PrinterSDK.xcframework'

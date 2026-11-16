@@ -720,6 +720,17 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<String?> recognizeText(String imagePath) async {
+    try {
+      return await _channel.invokeMethod<String>('recognize_text', {
+        'path': imagePath,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<String?> deviceId() async {
     if (!Platform.isAndroid) return null;
     try {

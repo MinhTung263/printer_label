@@ -381,6 +381,16 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }
                 }
 
+                "recognize_text" -> {
+                    val ctx = plugin.mContext
+                    val path = call.argument<String>("path")
+                    if (ctx == null || path.isNullOrEmpty()) {
+                        result.success(null)
+                    } else {
+                        TextRecognitionHelper.recognize(ctx, path) { result.success(it) }
+                    }
+                }
+
                 "device_id" -> {
                     val ctx = plugin.mContext
                     result.success(ctx?.let { DeviceNameHelper.deviceId(it) })
