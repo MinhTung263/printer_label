@@ -25,7 +25,7 @@ abstract final class WindowsUsbPrint {
 
   /// Các máy in USB đang cắm.
   static Future<List<UsbPrinterInfo>> list() async {
-    final paths = await _paths();
+    final paths = await _paths(fresh: true);
     // Hỏi chuỗi định danh từng máy riêng, mỗi máy có giới hạn thời gian: máy tắt / đang bận không
     // trả lời lệnh hỏi thì IOCTL chờ mãi — không để nó treo cả danh sách.
     final ids = await Future.wait([for (final p in paths) _idOrNull(p)]);
@@ -40,9 +40,20 @@ abstract final class WindowsUsbPrint {
   }
 
   /// Đường dẫn thiết bị các máy in USB đang cắm (không mở thiết bị).
-  static Future<List<String>> _paths() async {
+  static (DateTime, List<String>)? _pathsCache;
+
+  static Future<List<String>> _paths({bool fresh = false}) async {
+    // Dò rút / cắm dày: dùng lại kết quả vừa liệt kê trong 1s (mỗi lần liệt kê tạo một isolate).
+    final hit = _pathsCache;
+    if (!fresh &&
+        hit != null &&
+        DateTime.now().difference(hit.$1) < const Duration(seconds: 1)) {
+      return hit.$2;
+    }
     try {
-      return await Isolate.run(_enumeratePaths).timeout(_timeout);
+      final out = await Isolate.run(_enumeratePaths).timeout(_timeout);
+      _pathsCache = (DateTime.now(), out);
+      return out;
     } catch (_) {
       return const [];
     }

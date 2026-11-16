@@ -195,12 +195,12 @@ abstract final class MacCupsPrinters {
   static Future<bool> present(String address) async {
     final name = address.substring(prefix.length);
     final queue = parseLpstat(
-      await _run('lpstat', ['-v']),
+      await _runCached('lpstat', ['-v']),
     ).where((q) => q.name == name).firstOrNull;
     if (queue == null) return false;
     if (!queue.uri.startsWith('usb:')) return true;
     final devices = parseLpinfo(
-      await _run('lpinfo', ['--include-schemes', 'usb', '-v']),
+      await _runCached('lpinfo', ['--include-schemes', 'usb', '-v']),
     );
     return devices.contains(queue.uri);
   }
@@ -281,6 +281,23 @@ abstract final class MacCupsPrinters {
         : serial;
     final base = model.isEmpty ? 'USB' : model;
     return '$queuePrefix$base${tail.isEmpty ? '' : '_$tail'}';
+  }
+
+  static final Map<String, (DateTime, String)> _cache = {};
+
+  /// Như [_run] nhưng dùng lại kết quả vừa chạy trong [ttl] — dò rút / cắm dày (mỗi 1,5s, nhiều
+  /// máy in) không đẻ hàng loạt tiến trình `lpstat` / `lpinfo`.
+  static Future<String> _runCached(
+    String cmd,
+    List<String> args, {
+    Duration ttl = const Duration(milliseconds: 1000),
+  }) async {
+    final key = '$cmd ${args.join(' ')}';
+    final hit = _cache[key];
+    if (hit != null && DateTime.now().difference(hit.$1) < ttl) return hit.$2;
+    final out = await _run(cmd, args);
+    _cache[key] = (DateTime.now(), out);
+    return out;
   }
 
   static Future<String> _run(String cmd, List<String> args) async {
