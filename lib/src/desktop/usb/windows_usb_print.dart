@@ -25,28 +25,50 @@ abstract final class WindowsUsbPrint {
 
   /// Các máy in USB đang cắm.
   static Future<List<UsbPrinterInfo>> list() async {
-    final found = await Isolate.run(_enumerate);
+    final paths = await _paths();
+    // Hỏi chuỗi định danh từng máy riêng, mỗi máy có giới hạn thời gian: máy tắt / đang bận không
+    // trả lời lệnh hỏi thì IOCTL chờ mãi — không để nó treo cả danh sách.
+    final ids = await Future.wait([for (final p in paths) _idOrNull(p)]);
     return [
-      for (final (path, id) in found)
+      for (var i = 0; i < paths.length; i++)
         UsbPrinterInfo(
-          address: '$prefix$path',
-          name: _nameOf(path, id),
+          address: '$prefix${paths[i]}',
+          name: _nameOf(paths[i], ids[i]),
           detail: 'USB',
         ),
     ];
   }
 
+  /// Đường dẫn thiết bị các máy in USB đang cắm (không mở thiết bị).
+  static Future<List<String>> _paths() async {
+    try {
+      return await Isolate.run(_enumeratePaths).timeout(_timeout);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static const _timeout = Duration(seconds: 5);
+
+  static Future<String?> _idOrNull(String path) async {
+    try {
+      return await Isolate.run(
+        () => _readId(path),
+      ).timeout(const Duration(seconds: 3));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Máy [address] còn cắm không.
   static Future<bool> present(String address) async {
     final path = pathOf(address).toLowerCase();
-    final found = await Isolate.run(_enumerate);
-    return found.any((e) => e.$1.toLowerCase() == path);
+    return (await _paths()).any((p) => p.toLowerCase() == path);
   }
 
   /// Chuỗi IEEE 1284 của máy [address] (hỏi máy qua `IOCTL_USBPRINT_GET_1284_ID`); `null` khi
   /// không đọc được.
-  static Future<String?> deviceId(String address) =>
-      Isolate.run(() => _readId(pathOf(address)));
+  static Future<String?> deviceId(String address) => _idOrNull(pathOf(address));
 
   /// VD `\\?\usb#vid_0483&pid_5740#serial#{guid}` → `USB 0483:5740`.
   static String shortName(String address) {
@@ -267,12 +289,12 @@ const int _invalidHandle = -1;
 /// `IOCTL_USBPRINT_GET_1284_ID` = CTL_CODE(FILE_DEVICE_UNKNOWN, 13, METHOD_BUFFERED, FILE_ANY_ACCESS).
 const int _ioctlGet1284Id = 0x00220034;
 
-/// Các máy in USB đang cắm: `(đường dẫn thiết bị, chuỗi IEEE 1284 hoặc null)`.
-List<(String, String?)> _enumerate() {
+/// Đường dẫn thiết bị các máy in USB đang cắm (chỉ liệt kê, KHÔNG mở thiết bị).
+List<String> _enumeratePaths() {
   final api = _Api();
   final guid = _usbPrintGuid();
   final is64 = sizeOf<IntPtr>() == 8;
-  final result = <(String, String?)>[];
+  final result = <String>[];
   final set = api.getClassDevs(
     guid,
     nullptr,
@@ -318,7 +340,7 @@ List<(String, String?)> _enumerate() {
           detail.address + 4,
         ).toDartString();
         if (path.isEmpty) continue;
-        result.add((path, _readIdWith(api, path)));
+        result.add(path);
       } finally {
         calloc.free(detail);
       }
