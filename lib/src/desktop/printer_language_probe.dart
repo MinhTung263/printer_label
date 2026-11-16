@@ -69,6 +69,24 @@ abstract final class PrinterLanguageProbe {
     r'gp-?(1124|1134|1324|1524|2120|3120|3150)|ht-?(300|330)|dl-?(8|7)\d{2}',
   );
 
+  /// Đọc ngôn ngữ máy in từ chuỗi định danh IEEE 1284 máy USB tự báo
+  /// (`MFG:..;CMD:TSPL2;MDL:..;CLS:PRINTER;`): `CMD:` liệt kê các lệnh máy hiểu. TSPL / ZPL /
+  /// EPL / CPCL / DPL → máy tem; ESC/POS → máy hoá đơn; có cả hai → [PrinterLanguage.both].
+  /// `null` khi chuỗi không có `CMD:`.
+  static PrinterLanguage? fromIeee1284(String deviceId) {
+    final m = RegExp(
+      r'(?:^|;)\s*(?:CMD|COMMAND SET):([^;]*)',
+      caseSensitive: false,
+    ).firstMatch(deviceId);
+    if (m == null) return null;
+    final cmds = m.group(1)!.toUpperCase();
+    final label = RegExp(
+      r'TSPL|ZPL|EPL|CPCL|DPL|TSC|BPLA|BPLB|SBPL|ZJ',
+    ).hasMatch(cmds);
+    final receipt = RegExp(r'ESC\s*/?\s*_?POS|ESCPOS|STAR').hasMatch(cmds);
+    return decide(escpos: receipt, tspl: label);
+  }
+
   static PrinterLanguage decide({required bool escpos, required bool tspl}) =>
       switch ((escpos, tspl)) {
         (true, true) => PrinterLanguage.both,

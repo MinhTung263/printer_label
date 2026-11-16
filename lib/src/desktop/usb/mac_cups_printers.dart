@@ -214,6 +214,36 @@ abstract final class MacCupsPrinters {
     ];
   }
 
+  /// Chuỗi định danh IEEE 1284 (`device-id`) của máy in USB đang cắm sau hàng in [address]
+  /// (`cups:<tên>`); `null` khi không có / máy chưa cắm.
+  static Future<String?> deviceIdOf(String address) async {
+    final name = address.substring(prefix.length);
+    final uri = parseLpstat(
+      await _run('lpstat', ['-v']),
+    ).where((q) => q.name == name).firstOrNull?.uri;
+    if (uri == null) return null;
+    final out = await _run('lpinfo', ['-l', '--include-schemes', 'usb', '-v']);
+    return parseLpinfoDeviceIds(out)[uri];
+  }
+
+  /// `lpinfo -l -v`: các khối `Device: uri = ...` + `device-id = ...` → `{uri: device-id}`.
+  static Map<String, String> parseLpinfoDeviceIds(String out) {
+    final map = <String, String>{};
+    String? uri;
+    for (final line in out.split('\n')) {
+      final u = RegExp(r'^\s*Device:\s*uri\s*=\s*(\S+)').firstMatch(line);
+      if (u != null) {
+        uri = u.group(1);
+        continue;
+      }
+      final d = RegExp(r'^\s*device-id\s*=\s*(.*)$').firstMatch(line);
+      if (d != null && uri != null && d.group(1)!.trim().isNotEmpty) {
+        map[uri] = d.group(1)!.trim();
+      }
+    }
+    return map;
+  }
+
   /// URI máy in USB trong `lpinfo -v` (`direct usb://Hãng/Model?serial=...`).
   static List<String> parseLpinfo(String out) => [
     for (final line in out.split('\n'))

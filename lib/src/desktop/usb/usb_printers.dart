@@ -5,10 +5,13 @@ import 'linux_usb_printers.dart';
 import 'mac_cups_printers.dart';
 import 'usb_printer_info.dart';
 import 'windows_raw_printers.dart';
+import 'windows_usb_print.dart';
 
 /// Máy in cắm trực tiếp vào máy tính, theo hệ điều hành:
 /// - Linux: `/dev/usb/lpN` (địa chỉ `usb:<vid>:<pid>:<serial>`);
-/// - Windows: hàng in RAW (địa chỉ `queue:<tên hàng in>`);
+/// - Windows: nói chuyện thẳng với driver máy in USB có sẵn của hệ điều hành (địa chỉ
+///   `usbp:<đường dẫn thiết bị>`, không cần driver hãng / hàng in) hoặc hàng in RAW cũ
+///   (`queue:<tên hàng in>`);
 /// - macOS: hàng in RAW của CUPS (địa chỉ `cups:<tên hàng in>`).
 abstract final class UsbPrinters {
   static bool get supported =>
@@ -18,12 +21,22 @@ abstract final class UsbPrinters {
   static bool isLocal(String address) =>
       address.startsWith(LinuxUsbPrinters.prefix) ||
       address.startsWith(WindowsRawPrinters.prefix) ||
+      address.startsWith(WindowsUsbPrint.prefix) ||
       address.startsWith(MacCupsPrinters.prefix);
 
   static Future<List<UsbPrinterInfo>> list() async {
     try {
       if (Platform.isLinux) return await LinuxUsbPrinters.list();
-      if (Platform.isWindows) return await WindowsRawPrinters.list();
+      if (Platform.isWindows) {
+        // Máy in USB cắm trực tiếp (không cần hàng in / driver) + hàng in do chính app tạo trước đây.
+        final direct = await WindowsUsbPrint.list();
+        final queues = await WindowsRawPrinters.list();
+        return [
+          ...direct,
+          for (final q in queues)
+            if (q.name.startsWith('EasyPOS')) q,
+        ];
+      }
       if (Platform.isMacOS) return await MacCupsPrinters.list();
     } catch (_) {}
     return const [];
@@ -48,9 +61,26 @@ abstract final class UsbPrinters {
   static String? get lastSetupError =>
       Platform.isMacOS ? MacCupsPrinters.lastError : null;
 
+  /// Chuỗi định danh IEEE 1284 (`CMD:TSPL2;CLS:PRINTER;...`) của máy in USB [address] — dùng để biết
+  /// máy hiểu lệnh nào (tem / hoá đơn). Mới đọc được trên macOS (qua CUPS); nơi khác `null`.
+  static Future<String?> deviceId(String address) async {
+    try {
+      if (Platform.isMacOS && address.startsWith(MacCupsPrinters.prefix)) {
+        return await MacCupsPrinters.deviceIdOf(address);
+      }
+      if (Platform.isWindows && address.startsWith(WindowsUsbPrint.prefix)) {
+        return await WindowsUsbPrint.deviceId(address);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static PrinterPort? port(String address) {
     if (address.startsWith(LinuxUsbPrinters.prefix) && Platform.isLinux) {
       return LinuxUsbPrinterPort(address);
+    }
+    if (address.startsWith(WindowsUsbPrint.prefix) && Platform.isWindows) {
+      return WindowsUsbPrintPort(address);
     }
     if (address.startsWith(WindowsRawPrinters.prefix) && Platform.isWindows) {
       return WindowsRawPrinterPort(address);
@@ -66,6 +96,9 @@ abstract final class UsbPrinters {
     if (address.startsWith(LinuxUsbPrinters.prefix) && Platform.isLinux) {
       return await LinuxUsbPrinters.devicePath(address) != null;
     }
+    if (address.startsWith(WindowsUsbPrint.prefix) && Platform.isWindows) {
+      return WindowsUsbPrint.present(address);
+    }
     if (address.startsWith(WindowsRawPrinters.prefix) && Platform.isWindows) {
       return WindowsRawPrinters.exists(address);
     }
@@ -77,6 +110,9 @@ abstract final class UsbPrinters {
 
   /// Tên ngắn để hiện (bỏ tiền tố địa chỉ).
   static String label(String address) {
+    if (address.startsWith(WindowsUsbPrint.prefix)) {
+      return WindowsUsbPrint.shortName(address);
+    }
     if (address.startsWith(WindowsRawPrinters.prefix)) {
       return address.substring(WindowsRawPrinters.prefix.length);
     }
