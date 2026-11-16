@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -265,32 +267,58 @@ class MacCupsPrinterPort implements PrinterPort {
   String get id => address;
 
   @override
-  Future<void> send(Uint8List data, {bool checkStatus = true}) =>
-      PortQueue.run(id, () async {
-        if (!await MacCupsPrinters.exists(address)) {
-          throw UsbPrinterNotFound(address);
-        }
-        final p = await Process.start('lp', [
-          '-d',
-          _queue,
-          '-o',
-          'raw',
-          '-t',
-          'EasyPOS',
-        ]);
+  Future<void> send(
+    Uint8List data, {
+    bool checkStatus = true,
+  }) => PortQueue.run(id, () async {
+    if (!await MacCupsPrinters.exists(address)) {
+      throw UsbPrinterNotFound(address);
+    }
+    final p = await Process.start('lp', [
+      '-d',
+      _queue,
+      '-o',
+      'raw',
+      '-t',
+      'EasyPOS',
+    ]);
+    // Gửi + đóng + chờ `lp` thoát, TẤT CẢ trong một giới hạn thời gian: trước đây chờ
+    // `stdin.close()` không giới hạn nên `lp` ngừng đọc là kẹt mãi. Đọc hết stdout /
+    // stderr để `lp` không bị nghẽn ống, nuốt lỗi ghi (EPIPE khi `lp` thoát sớm).
+    final err = StringBuffer();
+    unawaited(p.stdout.drain<void>());
+    unawaited(p.stderr.transform(utf8.decoder).forEach(err.write));
+    Future<int> run() async {
+      try {
         p.stdin.add(data);
         await p.stdin.close();
-        final code = await p.exitCode.timeout(
-          const Duration(seconds: 30),
-          onTimeout: () {
-            p.kill();
-            return -1;
-          },
-        );
-        if (code != 0) {
-          throw ProcessException('lp', ['-d', _queue], 'lp lỗi', code);
-        }
-      });
+      } catch (_) {
+        // lp đóng ống sớm: lấy mã thoát bên dưới.
+      }
+      return p.exitCode;
+    }
+
+    final code = await run().timeout(
+      sendTimeout,
+      onTimeout: () {
+        p.kill(ProcessSignal.sigkill);
+        return -1;
+      },
+    );
+    if (code != 0) {
+      throw ProcessException(
+        'lp',
+        ['-d', _queue],
+        code == -1
+            ? 'lp không phản hồi sau ${sendTimeout.inSeconds}s'
+            : 'lp lỗi: ${err.toString().trim()}',
+        code,
+      );
+    }
+  });
+
+  /// Tối đa chờ `lp` nhận hết dữ liệu và thoát.
+  static const Duration sendTimeout = Duration(seconds: 20);
 
   /// CUPS không trả trạng thái giấy của máy ESC/POS — không hỏi giấy.
   @override

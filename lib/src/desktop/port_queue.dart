@@ -11,11 +11,18 @@ abstract final class PortQueue {
 
   static Duration cooldown = const Duration(milliseconds: 100);
 
+  /// Một việc treo quá lâu thì thôi chặn các việc sau: không có giới hạn này, MỘT lệnh gửi
+  /// bị kẹt (máy in / hệ điều hành không trả lời) làm mọi phiếu sau tới máy in đó chờ mãi
+  /// tới hết thời gian chờ (đã gặp: máy USB macOS báo "không phản hồi" sau 60s dù máy
+  /// bình thường). Việc treo vẫn chạy tiếp nền, chỉ không giữ hàng đợi nữa.
+  static Duration maxHold = const Duration(seconds: 25);
+
   static Future<T> run<T>(String key, Future<T> Function() task) {
     final prev = _queues[key] ?? Future<void>.value();
     final result = prev.then((_) => task());
     final tail = result
         .then<void>((_) {}, onError: (_) {})
+        .timeout(maxHold, onTimeout: () {})
         .then((_) => Future<void>.delayed(cooldown));
     _queues[key] = tail;
     unawaited(
