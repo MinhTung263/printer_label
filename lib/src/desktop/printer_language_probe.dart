@@ -79,11 +79,21 @@ abstract final class PrinterLanguageProbe {
       caseSensitive: false,
     ).firstMatch(deviceId);
     if (m == null) return null;
-    final cmds = m.group(1)!.toUpperCase();
-    final label = RegExp(
-      r'TSPL|ZPL|EPL|CPCL|DPL|TSC|BPLA|BPLB|SBPL|ZJ',
-    ).hasMatch(cmds);
-    final receipt = RegExp(r'ESC\s*/?\s*_?POS|ESCPOS|STAR').hasMatch(cmds);
+    // Tách từng lệnh (phân cách bằng dấu phẩy): khớp theo ĐẦU từng lệnh — khớp chuỗi con làm
+    // `POSTSCRIPT` (chứa "TSC") bị nhận nhầm là máy in tem.
+    final tokens = m
+        .group(1)!
+        .toUpperCase()
+        .split(RegExp(r'[,\s]+'))
+        .where((t) => t.isNotEmpty)
+        .toList();
+    final label = tokens.any(
+      (t) =>
+          RegExp(r'^(TSPL|ZPL|EPL|CPCL|DPL|TSC|BPLA|BPLB|SBPL|ZJ)').hasMatch(t),
+    );
+    final receipt = tokens.any(
+      (t) => RegExp(r'^(ESC/?_?POS|ESCPOS|STAR)').hasMatch(t),
+    );
     return decide(escpos: receipt, tspl: label);
   }
 

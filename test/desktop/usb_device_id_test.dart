@@ -3,6 +3,7 @@ import 'package:printer_label/desktop.dart';
 
 void main() {
   _extraTests();
+  _postscriptTests();
   test('IEEE 1284: CMD:TSPL2 → máy tem; ESC/POS → hoá đơn; cả hai → both', () {
     expect(
       PrinterLanguageProbe.fromIeee1284(
@@ -84,4 +85,31 @@ void _extraTests() {
       expect(UsbPrinters.isLocal(r'usbp:\\?\usb#vid_0483&pid_5740'), isTrue);
     });
   });
+}
+
+void _postscriptTests() {
+  test(
+    'IEEE 1284: máy văn phòng (PCL / PostScript) KHÔNG bị nhận nhầm là máy tem',
+    () {
+      // "POSTSCRIPT" chứa chuỗi con "TSC" — chỉ khớp theo đầu từng lệnh.
+      expect(
+        PrinterLanguageProbe.fromIeee1284(
+          'MFG:HP;MDL:DesignJet T920;CMD:PCL,PJL,POSTSCRIPT;CLS:PRINTER;',
+        ),
+        PrinterLanguage.unknown,
+      );
+      expect(
+        PrinterLanguageProbe.fromIeee1284(
+          'MFG:ACME;CMD:ESCPOS,PCL,POSTSCRIPT;CLS:PRINTER;',
+        ),
+        PrinterLanguage.receipt,
+      );
+      expect(
+        PrinterLanguageProbe.fromIeee1284(
+          'MFG:TSC;CMD:TSPL2,POSTSCRIPT;CLS:PRINTER;',
+        ),
+        PrinterLanguage.label,
+      );
+    },
+  );
 }

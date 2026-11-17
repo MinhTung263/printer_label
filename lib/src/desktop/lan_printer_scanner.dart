@@ -68,6 +68,7 @@ abstract final class LanPrinterScanner {
     Duration timeout = const Duration(milliseconds: 400),
     int parallel = 128,
     bool wide = true,
+    void Function(LanPrinterFound found)? onFound,
   }) async {
     final nics = <String>[];
     for (final nic in await NetworkInterface.list(
@@ -97,7 +98,10 @@ abstract final class LanPrinterScanner {
       await Future.wait(
         batch.map((h) async {
           if (await probe(h, port: port, timeout: timeout)) {
-            found.add(LanPrinterFound(h, port));
+            final f = LanPrinterFound(h, port);
+            found.add(f);
+            // Máy in thấy tới đâu báo tới đó (màn chọn máy in hiện ngay, không chờ quét hết).
+            onFound?.call(f);
           }
         }),
       );
@@ -175,7 +179,22 @@ abstract final class LanPrinterScanner {
         if (!mine.contains(h) && seen.add(h)) hosts.add(h);
       }
     }
-    return hosts.length <= maxHosts ? hosts : hosts.sublist(0, maxHosts);
+    // Thứ tự dò: máy đã trả lời ARP (đang bật thật) → cùng dải /24 với máy này → các dải còn lại.
+    // Máy in thường nằm ở hai nhóm đầu nên hiện ra trong vài trăm ms thay vì cuối lượt quét.
+    final own = {
+      for (final ip in localIps)
+        if (ip.split('.').length == 4) ip.split('.').take(3).join('.'),
+    };
+    final known = arp.toSet();
+    int rank(String h) => known.contains(h)
+        ? 0
+        : own.contains(h.split('.').take(3).join('.'))
+        ? 1
+        : 2;
+    final ordered = [
+      for (var r = 0; r < 3; r++) ...hosts.where((h) => rank(h) == r),
+    ];
+    return ordered.length <= maxHosts ? ordered : ordered.sublist(0, maxHosts);
   }
 
   /// Máy [host] có mở cổng [port] không.

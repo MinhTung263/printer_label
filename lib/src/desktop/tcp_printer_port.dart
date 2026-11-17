@@ -46,7 +46,7 @@ class TcpPrinterPort implements PrinterPort {
 
   /// Máy in không trả lời hỏi trạng thái (nhiều máy giá rẻ): khỏi hỏi lại trong
   /// [noStatusFor] — mỗi phiếu đỡ chờ [statusTimeout].
-  static Duration noStatusFor = const Duration(seconds: 60);
+  static Duration noStatusFor = const Duration(minutes: 10);
   static final Map<String, DateTime> _noStatusUntil = {};
 
   /// [tspl]: câu hỏi `<ESC>!?` của máy tem — nhớ riêng với câu hỏi `DLE EOT` (một máy tem
