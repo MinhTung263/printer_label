@@ -71,7 +71,7 @@ abstract final class UsbPrinters {
       Platform.isMacOS ? MacCupsPrinters.lastError : null;
 
   /// Chuỗi định danh IEEE 1284 (`CMD:TSPL2;CLS:PRINTER;...`) của máy in USB [address] — dùng để biết
-  /// máy hiểu lệnh nào (tem / hoá đơn). Mới đọc được trên macOS (qua CUPS); nơi khác `null`.
+  /// máy hiểu lệnh nào (tem / hoá đơn). macOS (qua CUPS), Windows (usbprint), Linux (sysfs của `usblp`); nơi khác `null`.
   static Future<String?> deviceId(String address) async {
     try {
       if (Platform.isMacOS && address.startsWith(MacCupsPrinters.prefix)) {
@@ -79,6 +79,9 @@ abstract final class UsbPrinters {
       }
       if (Platform.isWindows && address.startsWith(WindowsUsbPrint.prefix)) {
         return await WindowsUsbPrint.deviceId(address);
+      }
+      if (Platform.isLinux && address.startsWith(LinuxUsbPrinters.prefix)) {
+        return await LinuxUsbPrinters.deviceId(address);
       }
     } catch (_) {}
     return null;

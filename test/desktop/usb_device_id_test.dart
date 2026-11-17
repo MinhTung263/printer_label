@@ -4,6 +4,7 @@ import 'package:printer_label/desktop.dart';
 void main() {
   _extraTests();
   _postscriptTests();
+  _variantTests();
   test('IEEE 1284: CMD:TSPL2 → máy tem; ESC/POS → hoá đơn; cả hai → both', () {
     expect(
       PrinterLanguageProbe.fromIeee1284(
@@ -112,4 +113,64 @@ void _postscriptTests() {
       );
     },
   );
+}
+
+void _variantTests() {
+  test('IEEE 1284: các cách viết lệnh của từng hãng đều nhận đúng', () {
+    PrinterLanguage? of(String cmd) =>
+        PrinterLanguageProbe.fromIeee1284('MFG:X;MDL:Y;CMD:$cmd;CLS:PRINTER;');
+    // Máy hoá đơn.
+    for (final c in [
+      'ESC/POS',
+      'ESCPOS',
+      'ESC POS',
+      'ESC_POS',
+      'EPSON',
+      'esc/pos',
+      'STAR',
+      'ESC/POS,PCL',
+    ]) {
+      expect(of(c), PrinterLanguage.receipt, reason: c);
+    }
+    // Máy tem.
+    for (final c in [
+      'TSPL',
+      'TSPL2',
+      'tspl2',
+      'ZPL',
+      'ZPL II',
+      'EPL2',
+      'EZPL',
+      'CPCL',
+      'DPL',
+      'TSC',
+      'BPLA',
+    ]) {
+      expect(of(c), PrinterLanguage.label, reason: c);
+    }
+    // Cả hai.
+    expect(of('ESC/POS,TSPL2'), PrinterLanguage.both);
+    expect(of('ESC POS, TSPL'), PrinterLanguage.both);
+    // Máy văn phòng / không rõ: không phải phiếu cũng không phải tem.
+    for (final c in [
+      'PCL',
+      'PCL,PJL,POSTSCRIPT',
+      'ESCPR',
+      'ESC/P',
+      'GDI',
+      'URF',
+    ]) {
+      expect(of(c), PrinterLanguage.unknown, reason: c);
+    }
+  });
+
+  test('COMMAND SET: tên đầy đủ cũng được đọc', () {
+    expect(
+      PrinterLanguageProbe.fromIeee1284(
+        'MANUFACTURER:X;COMMAND SET:ESC/POS;MODEL:Y;',
+      ),
+      PrinterLanguage.receipt,
+    );
+    expect(PrinterLanguageProbe.fromIeee1284('MFG:X;MDL:Y;'), isNull);
+  });
 }

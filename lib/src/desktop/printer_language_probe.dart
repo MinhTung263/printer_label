@@ -74,27 +74,35 @@ abstract final class PrinterLanguageProbe {
   /// EPL / CPCL / DPL → máy tem; ESC/POS → máy hoá đơn; có cả hai → [PrinterLanguage.both].
   /// `null` khi chuỗi không có `CMD:`.
   static PrinterLanguage? fromIeee1284(String deviceId) {
+    final cmds = ieeeCommands(deviceId);
+    if (cmds == null) return null;
+    final label = cmds.any(
+      (t) => RegExp(
+        r'^(TSPL|ZPL|EPL|EZPL|CPCL|DPL|TSC|BPLA|BPLB|SBPL|ZJ)',
+      ).hasMatch(t),
+    );
+    final receipt = cmds.any(
+      (t) => RegExp(r'^(ESC/?POS|EPSON|STAR)').hasMatch(t),
+    );
+    return decide(escpos: receipt, tspl: label);
+  }
+
+  /// Các lệnh máy in tự báo trong `CMD:` / `COMMAND SET:` của chuỗi IEEE 1284, viết hoa, bỏ khoảng trắng
+  /// và gạch dưới (`ESC POS` / `ESC_POS` → `ESCPOS`); `null` khi chuỗi không có `CMD:`.
+  ///
+  /// Mỗi hãng viết một kiểu (`ESC/POS`, `ESCPOS`, `ESC POS`, `EPSON`, `TSPL2`, `ZPL II`...) nên so khớp theo
+  /// ĐẦU từng lệnh sau khi chuẩn hoá — khớp chuỗi con làm `POSTSCRIPT` (chứa "TSC") bị nhận nhầm là máy tem.
+  static List<String>? ieeeCommands(String deviceId) {
     final m = RegExp(
       r'(?:^|;)\s*(?:CMD|COMMAND SET):([^;]*)',
       caseSensitive: false,
     ).firstMatch(deviceId);
     if (m == null) return null;
-    // Tách từng lệnh (phân cách bằng dấu phẩy): khớp theo ĐẦU từng lệnh — khớp chuỗi con làm
-    // `POSTSCRIPT` (chứa "TSC") bị nhận nhầm là máy in tem.
-    final tokens = m
-        .group(1)!
-        .toUpperCase()
-        .split(RegExp(r'[,\s]+'))
-        .where((t) => t.isNotEmpty)
-        .toList();
-    final label = tokens.any(
-      (t) =>
-          RegExp(r'^(TSPL|ZPL|EPL|CPCL|DPL|TSC|BPLA|BPLB|SBPL|ZJ)').hasMatch(t),
-    );
-    final receipt = tokens.any(
-      (t) => RegExp(r'^(ESC/?_?POS|ESCPOS|STAR)').hasMatch(t),
-    );
-    return decide(escpos: receipt, tspl: label);
+    return [
+      for (final t in m.group(1)!.split(RegExp(r'[,;]')))
+        if (t.trim().isNotEmpty)
+          t.toUpperCase().replaceAll(RegExp(r'[\s_]+'), ''),
+    ];
   }
 
   static PrinterLanguage decide({required bool escpos, required bool tspl}) =>
