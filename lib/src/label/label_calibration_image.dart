@@ -14,6 +14,8 @@ abstract final class LabelCalibrationImage {
 
   /// Ảnh PNG đen trắng cho tem rộng [widthMm] x cao [heightMm].
   ///
+  /// [jewelry]: vẽ tem mẫu kiểu vàng bạc (chữ bên trái, mã QR bên phải).
+  ///
   /// [labelsPerRow] khác `null`: vẽ tem MẪU giống hình xem trước trên màn Agent (khung,
   /// hai thanh chữ, mã vạch) thay cho thước và dấu thập; [temWidthMm] là bề rộng MỘT tem (không có thì chia đều cả hàng).
   static Uint8List png({
@@ -22,6 +24,7 @@ abstract final class LabelCalibrationImage {
     LabelCalibration calibration = LabelCalibration.none,
     int? labelsPerRow,
     int? temWidthMm,
+    bool jewelry = false,
   }) {
     final w = widthMm * dotsPerMm;
     final h = heightMm * dotsPerMm;
@@ -35,6 +38,7 @@ abstract final class LabelCalibrationImage {
         count: labelsPerRow.clamp(1, 4),
         temWidthMm: temWidthMm,
         widthMm: widthMm,
+        jewelry: jewelry,
         black: black,
       );
       return Uint8List.fromList(img.encodePng(image));
@@ -116,13 +120,18 @@ abstract final class LabelCalibrationImage {
     required int count,
     required int? temWidthMm,
     required int widthMm,
+    required bool jewelry,
     required img.Color black,
   }) {
     final w = image.width;
     final h = image.height;
     final temW = (temWidthMm ?? (widthMm / count).floor()) * dotsPerMm;
     final gap = count > 1 ? (w - temW * count) ~/ (count - 1) : 0;
-    final layout = SchematicTemLayout.of(temW.toDouble(), h.toDouble());
+    final layout = SchematicTemLayout.of(
+      temW.toDouble(),
+      h.toDouble(),
+      jewelry: jewelry,
+    );
     final stroke = layout.strokeWidth.round().clamp(2, 8);
 
     void fill(int left, Box b) => img.fillRect(
@@ -149,6 +158,11 @@ abstract final class LabelCalibrationImage {
       }
       fill(left, layout.bar1);
       fill(left, layout.bar2);
+      final price = layout.price;
+      if (price != null) fill(left, price);
+      for (final c in layout.qrCells) {
+        fill(left, c);
+      }
       for (final (x, bw) in layout.bars) {
         fill(
           left,

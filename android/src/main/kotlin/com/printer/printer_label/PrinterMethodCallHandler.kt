@@ -418,6 +418,33 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
 
                 "is_keep_alive_running" -> result.success(PrintKeepAliveService.isRunning)
 
+                // Tối ưu pin: ứng dụng bị tối ưu thì Android (nhất là máy Xiaomi / Oppo...) dừng dịch vụ
+                // nền sau một lúc tắt màn hình — trạm in ngừng nhận lệnh.
+                "is_ignoring_battery_optimizations" -> {
+                    val ctx = plugin.mContext
+                    val ok = if (ctx == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                        true
+                    } else {
+                        val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE)
+                            as? android.os.PowerManager
+                        pm?.isIgnoringBatteryOptimizations(ctx.packageName) ?: true
+                    }
+                    result.success(ok)
+                }
+
+                // Mở danh sách "Tối ưu hoá pin" (không cần quyền đặc biệt — người dùng chọn app).
+                "open_battery_optimization_settings" -> {
+                    val ctx: android.content.Context? = plugin.activity ?: plugin.mContext
+                    val opened = runCatching {
+                        val intent = android.content.Intent(
+                            android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        ctx?.startActivity(intent)
+                        ctx != null
+                    }.getOrDefault(false)
+                    result.success(opened)
+                }
+
                 // Wi-Fi hiện tại / xung quanh để gợi ý chuyển đúng Wi-Fi của máy in.
                 "current_wifi" -> {
                     val ctx = plugin.mContext

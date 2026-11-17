@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../printer_port.dart';
+import 'linux_cups_printers.dart';
 import 'linux_usb_printers.dart';
 import 'mac_cups_printers.dart';
 import 'usb_printer_info.dart';
@@ -20,13 +21,21 @@ abstract final class UsbPrinters {
   /// Địa chỉ [address] là máy in USB / hàng in (không phải LAN).
   static bool isLocal(String address) =>
       address.startsWith(LinuxUsbPrinters.prefix) ||
+      address.startsWith(LinuxCupsPrinters.prefix) ||
       address.startsWith(WindowsRawPrinters.prefix) ||
       address.startsWith(WindowsUsbPrint.prefix) ||
       address.startsWith(MacCupsPrinters.prefix);
 
   static Future<List<UsbPrinterInfo>> list() async {
     try {
-      if (Platform.isLinux) return await LinuxUsbPrinters.list();
+      if (Platform.isLinux) {
+        final direct = await LinuxUsbPrinters.list();
+        // Máy chỉ có trong CUPS (hoặc `usblp` không nhận): dự phòng qua `lp -o raw`.
+        final cups = await LinuxCupsPrinters.list(
+          directNames: [for (final d in direct) d.name],
+        );
+        return [...direct, ...cups];
+      }
       if (Platform.isWindows) {
         // Máy in USB cắm trực tiếp (không cần hàng in / driver) + hàng in do chính app tạo trước đây.
         final direct = await WindowsUsbPrint.list();
@@ -76,6 +85,9 @@ abstract final class UsbPrinters {
   }
 
   static PrinterPort? port(String address) {
+    if (address.startsWith(LinuxCupsPrinters.prefix) && Platform.isLinux) {
+      return LinuxCupsPrinterPort(address);
+    }
     if (address.startsWith(LinuxUsbPrinters.prefix) && Platform.isLinux) {
       return LinuxUsbPrinterPort(address);
     }
@@ -93,6 +105,9 @@ abstract final class UsbPrinters {
 
   /// Máy in còn cắm / hàng in còn tồn tại.
   static Future<bool> present(String address) async {
+    if (address.startsWith(LinuxCupsPrinters.prefix) && Platform.isLinux) {
+      return LinuxCupsPrinters.present(address);
+    }
     if (address.startsWith(LinuxUsbPrinters.prefix) && Platform.isLinux) {
       return await LinuxUsbPrinters.devicePath(address) != null;
     }
@@ -108,8 +123,27 @@ abstract final class UsbPrinters {
     return false;
   }
 
+  /// Máy in USB [address] đã rút cắm sang cổng khác (địa chỉ đổi): trả địa chỉ mới.
+  /// Mới có trên Windows (máy không có số serial); nơi khác / không tìm được → `null`.
+  static Future<String?> relocate(
+    String address, {
+    Set<String> taken = const {},
+  }) async {
+    try {
+      if (Platform.isWindows && address.startsWith(WindowsUsbPrint.prefix)) {
+        return await WindowsUsbPrint.findMoved(address, taken: taken);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Tên ngắn để hiện (bỏ tiền tố địa chỉ).
   static String label(String address) {
+    if (address.startsWith(LinuxCupsPrinters.prefix)) {
+      return address
+          .substring(LinuxCupsPrinters.prefix.length)
+          .replaceAll('_', ' ');
+    }
     if (address.startsWith(WindowsUsbPrint.prefix)) {
       return WindowsUsbPrint.shortName(address);
     }

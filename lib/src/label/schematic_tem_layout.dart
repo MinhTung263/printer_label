@@ -8,6 +8,8 @@ class SchematicTemLayout {
     required this.code,
     required this.barcodeUnit,
     required this.strokeWidth,
+    this.price,
+    this.jewelry = false,
   });
 
   /// Khung viền thụt vào khỏi mép tem: tỉ lệ so với cạnh ngắn của tem.
@@ -27,7 +29,14 @@ class SchematicTemLayout {
 
   /// Tính cho tem rộng [width] × cao [height] (đơn vị tuỳ ý — chấm hoặc điểm ảnh); toạ độ
   /// theo gốc ở góc trái trên của tem.
-  factory SchematicTemLayout.of(double width, double height) {
+  ///
+  /// [jewelry]: tem vàng bạc, trang sức (nhỏ, dài) — nửa trái là ba thanh chữ (tên, tuổi + trọng
+  /// lượng, giá), nửa phải là mã QR vuông thay cho dãy vạch mã vạch.
+  factory SchematicTemLayout.of(
+    double width,
+    double height, {
+    bool jewelry = false,
+  }) {
     final shortest = width < height ? width : height;
     final inset = shortest * frameInset;
     final frame = Box(inset, inset, width - inset, height - inset);
@@ -39,6 +48,43 @@ class SchematicTemLayout {
       frame.right - pad,
       frame.bottom - pad,
     );
+    if (jewelry) {
+      final qrSide = inner.height < inner.width * 0.42
+          ? inner.height
+          : inner.width * 0.42;
+      final textW = inner.width - qrSide - inner.width * 0.06;
+      final qr = Box(
+        inner.right - qrSide,
+        inner.top + (inner.height - qrSide) / 2,
+        inner.right,
+        inner.top + (inner.height + qrSide) / 2,
+      );
+      return SchematicTemLayout._(
+        frame: frame,
+        bar1: Box(
+          inner.left,
+          inner.top,
+          inner.left + textW * 0.9,
+          inner.top + inner.height * 0.2,
+        ),
+        bar2: Box(
+          inner.left,
+          inner.top + inner.height * 0.34,
+          inner.left + textW * 0.6,
+          inner.top + inner.height * 0.34 + inner.height * 0.14,
+        ),
+        price: Box(
+          inner.left,
+          inner.bottom - inner.height * 0.24,
+          inner.left + textW * 0.75,
+          inner.bottom,
+        ),
+        code: qr,
+        barcodeUnit: qr.width / 9,
+        strokeWidth: height * strokeRatio,
+        jewelry: true,
+      );
+    }
     return SchematicTemLayout._(
       frame: frame,
       bar1: Box(
@@ -66,6 +112,12 @@ class SchematicTemLayout {
 
   final Box frame;
   final Box bar1;
+
+  /// Thanh giá (chỉ tem vàng bạc); `null` ở tem thường.
+  final Box? price;
+
+  /// Tem vàng bạc: [code] là ô mã QR vuông (vẽ bằng [qrCells]) thay cho dãy vạch.
+  final bool jewelry;
   final Box bar2;
 
   /// Vùng mã vạch.
@@ -77,8 +129,34 @@ class SchematicTemLayout {
   /// Độ dày nét khung.
   final double strokeWidth;
 
+  /// Các ô đen của mã QR mẫu (lưới 9×9: ba góc định vị + vài ô rải đều) — chỉ tem vàng bạc.
+  List<Box> get qrCells {
+    if (!jewelry) return const [];
+    const n = 9;
+    final u = code.width / n;
+    bool finder(int r, int c) =>
+        (r < 3 && c < 3) || (r < 3 && c >= n - 3) || (r >= n - 3 && c < 3);
+    final out = <Box>[];
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        if (finder(r, c) || (r * 7 + c * 3) % 5 < 2) {
+          out.add(
+            Box(
+              code.left + c * u,
+              code.top + r * u,
+              code.left + (c + 1) * u,
+              code.top + (r + 1) * u,
+            ),
+          );
+        }
+      }
+    }
+    return out;
+  }
+
   /// Các vạch đen của mã vạch: danh sách `(x, bề rộng)` trong [code].
   List<(double, double)> get bars {
+    if (jewelry) return const [];
     final out = <(double, double)>[];
     var x = code.left;
     var k = 0;

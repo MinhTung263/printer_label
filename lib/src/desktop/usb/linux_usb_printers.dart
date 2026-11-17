@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -74,22 +75,37 @@ class LinuxUsbPrinterPort implements PrinterPort {
   String get id => address;
 
   @override
-  Future<void> send(Uint8List data, {bool checkStatus = true}) =>
-      PortQueue.run(id, () async {
-        final dev = await LinuxUsbPrinters.devicePath(address);
-        if (dev == null) throw UsbPrinterNotFound(address);
-        final raf = await File(dev).open(mode: FileMode.writeOnlyAppend);
-        try {
-          for (var off = 0; off < data.length; off += chunkSize) {
-            final end = off + chunkSize < data.length
-                ? off + chunkSize
-                : data.length;
-            await raf.writeFrom(data, off, end);
-          }
-        } finally {
-          await raf.close();
-        }
-      });
+  Future<void> send(
+    Uint8List data, {
+    bool checkStatus = true,
+  }) => PortQueue.run(id, () async {
+    final dev = await LinuxUsbPrinters.devicePath(address);
+    if (dev == null) throw UsbPrinterNotFound(address);
+    final raf = await File(dev).open(mode: FileMode.writeOnlyAppend);
+    try {
+      // `usblp` chặn khi máy in tắt / hết giấy: có giới hạn thời gian để không treo mãi.
+      await _write(raf, data).timeout(
+        writeTimeout,
+        onTimeout: () => throw TimeoutException(
+          'Máy in USB không nhận dữ liệu',
+          writeTimeout,
+        ),
+      );
+    } finally {
+      // Không chờ đóng nếu đang kẹt — đóng nền.
+      unawaited(raf.close().catchError((_) => raf));
+    }
+  });
+
+  /// Giới hạn một lần gửi tới máy in USB.
+  static Duration writeTimeout = const Duration(seconds: 20);
+
+  Future<void> _write(RandomAccessFile raf, Uint8List data) async {
+    for (var off = 0; off < data.length; off += chunkSize) {
+      final end = off + chunkSize < data.length ? off + chunkSize : data.length;
+      await raf.writeFrom(data, off, end);
+    }
+  }
 
   /// `usblp` đọc trạng thái không ổn định giữa các máy — không hỏi giấy.
   @override

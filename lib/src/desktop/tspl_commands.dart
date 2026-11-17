@@ -10,7 +10,8 @@ abstract final class TsplCommands {
   /// Một tem: ảnh [bitmap] (1 bit, [widthBytes] byte mỗi dòng, [heightDots] dòng).
   /// [copies]: số bản của tem này. [home]: dò khe decal trước khi in (khổ 3 tem).
   /// [referenceX] / [referenceY]: dời gốc toạ độ (chấm, 8 chấm = 1mm; dương = sang
-  /// phải / xuống dưới) — chỉnh tem in lệch mà không phải sửa ảnh.
+  /// phải / xuống dưới) — chỉnh tem in lệch mà không phải sửa ảnh. [ribbon]: xem
+  /// [TsplLabelSpec.ribbon].
   static Uint8List label({
     required Uint8List bitmap,
     required int widthBytes,
@@ -23,10 +24,14 @@ abstract final class TsplCommands {
     bool home = false,
     int referenceX = 0,
     int referenceY = 0,
+    bool? ribbon,
   }) {
     final head = [
       'SIZE ${_mm(widthMm)} mm,${_mm(heightMm)} mm',
       'GAP ${_mm(gapMm)} mm,${_mm(gapOffsetMm)} mm',
+      // Máy in truyền nhiệt (ruy-băng mực): TSPL2 là `SET RIBBON ON` (không có "SET" thì máy
+      // bỏ qua lệnh và in như nhiệt trực tiếp — ra tem trắng).
+      if (ribbon != null) 'SET RIBBON ${ribbon ? 'ON' : 'OFF'}',
       'REFERENCE $referenceX,$referenceY',
       'DIRECTION 0',
       if (home) 'HOME',

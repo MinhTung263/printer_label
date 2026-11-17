@@ -49,8 +49,10 @@ class TcpPrinterPort implements PrinterPort {
   static Duration noStatusFor = const Duration(seconds: 60);
   static final Map<String, DateTime> _noStatusUntil = {};
 
-  bool get _statusUnsupported {
-    final until = _noStatusUntil[id];
+  /// [tspl]: câu hỏi `<ESC>!?` của máy tem — nhớ riêng với câu hỏi `DLE EOT` (một máy tem
+  /// có thể trả lời câu này mà im lặng với câu kia).
+  bool _statusUnsupported({bool tspl = false}) {
+    final until = _noStatusUntil[tspl ? '$id#tspl' : id];
     return until != null && DateTime.now().isBefore(until);
   }
 
@@ -67,29 +69,39 @@ class TcpPrinterPort implements PrinterPort {
     }
   }
 
+  /// [tsplStatus]: hỏi trạng thái bằng `<ESC>!?` (máy tem TSPL) thay vì `DLE EOT` (máy hoá
+  /// đơn) — hết giấy / mở nắp / kẹt giấy / hết mực thì KHÔNG gửi (nơi gọi giữ lệnh, tự in
+  /// khi máy sẵn sàng); máy không trả lời thì in như thường.
   @override
-  Future<void> send(Uint8List data, {bool checkStatus = true}) =>
-      PortQueue.run(id, () async {
-        final conn = await _open();
-        try {
-          if (checkStatus && !_statusUnsupported) {
-            final status = await _queryOn(conn);
-            if (status == PaperStatus.unknown) {
-              _noStatusUntil[id] = DateTime.now().add(noStatusFor);
-            }
-            if (status.blocksPrinting) throw PrinterStatusException(status);
-          }
-          for (var off = 0; off < data.length; off += chunkSize) {
-            final end = off + chunkSize < data.length
-                ? off + chunkSize
-                : data.length;
-            conn.socket.add(Uint8List.sublistView(data, off, end));
-            await conn.socket.flush();
-          }
-        } finally {
-          await conn.close();
+  Future<void> send(
+    Uint8List data, {
+    bool checkStatus = true,
+    bool tsplStatus = false,
+  }) => PortQueue.run(id, () async {
+    final conn = await _open();
+    try {
+      if (checkStatus && !_statusUnsupported(tspl: tsplStatus)) {
+        final status = tsplStatus
+            ? await _queryTsplOn(conn)
+            : await _queryOn(conn);
+        if (status == PaperStatus.unknown) {
+          _noStatusUntil[tsplStatus ? '$id#tspl' : id] = DateTime.now().add(
+            noStatusFor,
+          );
         }
-      });
+        if (status.blocksPrinting) throw PrinterStatusException(status);
+      }
+      for (var off = 0; off < data.length; off += chunkSize) {
+        final end = off + chunkSize < data.length
+            ? off + chunkSize
+            : data.length;
+        conn.socket.add(Uint8List.sublistView(data, off, end));
+        await conn.socket.flush();
+      }
+    } finally {
+      await conn.close();
+    }
+  });
 
   /// Gửi [request] rồi chờ máy in trả lời (tối đa [timeout]); `null` khi không có
   /// byte nào. Dùng để dò ngôn ngữ máy in ([PrinterLanguageProbe]).
@@ -117,6 +129,17 @@ class TcpPrinterPort implements PrinterPort {
       await conn.close();
     }
   });
+
+  /// Hỏi `<ESC>!?` (máy tem TSPL) và đọc MỘT byte trạng thái.
+  Future<PaperStatus> _queryTsplOn(_TcpConn conn) async {
+    try {
+      conn.drain();
+      final reply = await conn.askTspl(statusTimeout);
+      return reply == null ? PaperStatus.unknown : PaperStatus.parseTspl(reply);
+    } on SocketException {
+      return PaperStatus.unknown;
+    }
+  }
 
   /// Hỏi TỪNG câu, chấp nhận trả lời lẻ: nhiều máy giá rẻ chỉ hiểu `DLE EOT 4`.
   /// Cuộn giấy hỏi trước — không trả lời thì máy không hỗ trợ, khỏi hỏi tiếp.
@@ -189,6 +212,16 @@ class _TcpConn {
       final w = _waiter = Completer<void>();
       await w.future.timeout(left, onTimeout: () {});
     }
+  }
+
+  /// Gửi `<ESC>!?` và chờ byte trạng thái TSPL đầu tiên; `null` khi hết giờ / byte lạ.
+  Future<int?> askTspl(Duration timeout) async {
+    socket.add(EscPosCommands.tsplStatus);
+    await socket.flush();
+    final reply = await readAny(timeout);
+    if (reply == null || reply.isEmpty) return null;
+    final b = reply.first;
+    return PaperStatus.isTsplStatusByte(b) ? b : null;
   }
 
   /// Chờ có byte nào đó trả về (tối đa [timeout]); trả hết byte đang có.

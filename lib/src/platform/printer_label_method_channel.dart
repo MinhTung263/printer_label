@@ -609,6 +609,45 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<bool> setKeepScreenOn(bool on) async {
+    if (!Platform.isIOS) return false;
+    try {
+      return await _channel.invokeMethod<bool>('set_keep_screen_on', {
+            'on': on,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> isIgnoringBatteryOptimizations() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _channel.invokeMethod<bool>(
+            'is_ignoring_battery_optimizations',
+          ) ??
+          true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  @override
+  Future<bool> openBatteryOptimizationSettings() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>(
+            'open_battery_optimization_settings',
+          ) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
   Future<bool> isKeepAliveRunning() async {
     if (!Platform.isAndroid) return false;
     try {

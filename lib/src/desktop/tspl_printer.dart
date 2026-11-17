@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../label/label_calibration.dart';
 import '../label/label_calibration_image.dart';
 import 'printer_port.dart';
+import 'tcp_printer_port.dart';
 import 'tspl_commands.dart';
 import 'tspl_label_spec.dart';
 import 'tspl_raster.dart';
@@ -29,8 +30,11 @@ abstract final class TsplPrinter {
     if (images.isEmpty) return;
     // Chỉnh lệch làm NGAY trong ảnh (không dùng REFERENCE: nhiều máy in bỏ qua giá trị
     // âm hoặc hiểu khác nhau) nên cùng một độ chỉnh cho kết quả giống nhau mọi máy.
-    final shiftX = spec.shiftXDots + calibration.offsetXDots;
-    final shiftY = calibration.offsetYDots;
+    // Độ chỉnh tính bằng mm → đổi ra chấm theo đầu in (203dpi: 8 chấm/mm, 300dpi: ~11,81).
+    final dpm = spec.dotsPerMm;
+    final shiftX =
+        spec.scaledShiftXDots + (calibration.offsetXMm * dpm).round();
+    final shiftY = (calibration.offsetYMm * dpm).round();
     // MỘT isolate cho cả job (mở isolate mỗi hàng tốn thêm), dựng sẵn lệnh của mọi hàng.
     final data = await Isolate.run(() {
       final out = BytesBuilder(copy: false);
@@ -53,6 +57,7 @@ abstract final class TsplPrinter {
             gapMm: spec.gapMm,
             copies: copies,
             home: spec.home,
+            ribbon: spec.ribbon,
           ),
         );
       }
@@ -61,7 +66,14 @@ abstract final class TsplPrinter {
     if (data == null) throw const FormatException('Ảnh tem không hợp lệ');
     // MỘT kết nối cho cả job: mỗi lần gửi riêng tốn thêm kết nối + nghỉ
     // [PortQueue.cooldown] (máy in tem giá rẻ còn hay báo "bận" ở lần mở lại).
-    await port.send(data, checkStatus: false);
+    // Máy tem LAN: hỏi `<ESC>!?` trước — hết giấy / mở nắp / kẹt giấy / hết mực thì không
+    // gửi (Agent giữ lệnh rồi tự in khi máy sẵn sàng). Máy không trả lời: in như thường.
+    final p = port;
+    if (p is TcpPrinterPort) {
+      await p.send(data, tsplStatus: true);
+    } else {
+      await port.send(data, checkStatus: false);
+    }
   }
 
   /// In tem thử căn chỉnh ([repeat] hàng liền nhau trong một lần — để so độ lệch giữa hàng đầu và hàng cuối) ([LabelCalibrationImage]) đúng khổ [spec] với độ chỉnh
@@ -84,16 +96,11 @@ abstract final class TsplPrinter {
           calibration: calibration,
           labelsPerRow: labelsPerRow,
           temWidthMm: temWidthMm,
+          jewelry: spec.isJewelry,
         ),
     ],
     // Tem thử đã vẽ sát mép: không dịch ảnh, chỉ áp độ chỉnh.
-    spec: TsplLabelSpec(
-      widthMm: spec.widthMm,
-      heightMm: spec.heightMm,
-      gapMm: spec.gapMm,
-      home: spec.home,
-      shiftXDots: 0,
-    ),
+    spec: spec.copyWith(shiftXDots: 0),
     calibration: calibration,
   );
 

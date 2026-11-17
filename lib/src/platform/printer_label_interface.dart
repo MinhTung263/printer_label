@@ -305,6 +305,16 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Android only. Dịch vụ chạy nền đang chạy không.
   Future<bool> isKeepAliveRunning() async => false;
 
+  /// iOS only. Giữ màn hình sáng ([on]) để iOS không khoá màn hình rồi treo kết nối nền —
+  /// dùng khi máy làm trạm in. Nơi khác `false`.
+  Future<bool> setKeepScreenOn(bool on) async => false;
+
+  /// Android only. Ứng dụng đã được miễn "tối ưu hoá pin" chưa (nơi khác `true`).
+  Future<bool> isIgnoringBatteryOptimizations() async => true;
+
+  /// Android only. Mở danh sách "Tối ưu hoá pin" của hệ thống; `false` khi không mở được.
+  Future<bool> openBatteryOptimizationSettings() async => false;
+
   /// Phát khi người dùng bấm nút dừng trên thông báo chạy nền (dịch vụ đã dừng).
   Stream<void> get keepAliveStoppedByUser => const Stream.empty();
 

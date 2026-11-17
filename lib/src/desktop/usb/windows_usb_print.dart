@@ -77,6 +77,62 @@ abstract final class WindowsUsbPrint {
     return (await _paths()).any((p) => p.toLowerCase() == path);
   }
 
+  /// Máy in vừa cắm sang CỔNG USB KHÁC: máy không có số serial thì Windows tự đặt
+  /// mã thể hiện (dạng `6&2a3b4c&0&2`, chứa `&`) theo cổng cắm → đường dẫn đổi, địa chỉ
+  /// đã lưu hết đúng. Tìm lại máy cùng VID/PID đang cắm ở đường dẫn mới; trả địa chỉ mới,
+  /// `null` khi máy cũ còn đó, không tìm lại được hoặc không chắc đúng máy.
+  ///
+  /// [taken]: địa chỉ các máy in khác đã cấu hình — không giành máy của chúng (hai máy
+  /// cùng model: rút một chiếc thì chiếc còn lại KHÔNG được nhận lệnh của chiếc kia).
+  static Future<String?> findMoved(
+    String address, {
+    Set<String> taken = const {},
+  }) async {
+    final now = await _paths(fresh: true);
+    final moved = pickMoved(
+      pathOf(address),
+      now,
+      taken: {
+        for (final t in taken)
+          if (isDevice(t)) pathOf(t),
+      },
+    );
+    return moved == null ? null : '$prefix$moved';
+  }
+
+  /// Chọn đường dẫn mới của máy [oldPath] trong [present] (thuần — kiểm thử được).
+  static String? pickMoved(
+    String oldPath,
+    List<String> present, {
+    Set<String> taken = const {},
+  }) {
+    final lower = {for (final p in present) p.toLowerCase()};
+    if (lower.contains(oldPath.toLowerCase())) return null;
+    final old = _parse(oldPath);
+    // Có số serial: đường dẫn đã bền theo máy, không phụ thuộc cổng.
+    if (old == null || !old.portBound) return null;
+    final takenLower = {for (final t in taken) t.toLowerCase()};
+    final candidates = [
+      for (final p in present)
+        if (_parse(p)?.vidPid == old.vidPid &&
+            !takenLower.contains(p.toLowerCase()))
+          p,
+    ];
+    return candidates.length == 1 ? candidates.single : null;
+  }
+
+  static ({String vidPid, bool portBound})? _parse(String path) {
+    final m = RegExp(
+      r'usb#(vid_[0-9a-f]{4}&pid_[0-9a-f]{4})#([^#]*)#',
+      caseSensitive: false,
+    ).firstMatch(path);
+    if (m == null) return null;
+    return (
+      vidPid: m.group(1)!.toLowerCase(),
+      portBound: m.group(2)!.contains('&'),
+    );
+  }
+
   /// Chuỗi IEEE 1284 của máy [address] (hỏi máy qua `IOCTL_USBPRINT_GET_1284_ID`); `null` khi
   /// không đọc được.
   static Future<String?> deviceId(String address) => _idOrNull(pathOf(address));

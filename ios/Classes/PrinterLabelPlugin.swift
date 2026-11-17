@@ -127,6 +127,14 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             result([String]())
         case "open_wifi_settings":
             result(false)
+        // Máy làm trạm in: iOS tự khoá màn hình rồi treo socket nền sau ~30 giây — giữ màn
+        // hình sáng khi trạm in đang bật (cắm nguồn, giữ app mở).
+        case "set_keep_screen_on":
+            let on = (call.arguments as? [String: Any])?["on"] as? Bool ?? false
+            DispatchQueue.main.async {
+                UIApplication.shared.isIdleTimerDisabled = on
+                result(true)
+            }
         // Nối TẠM Wi-Fi của máy in để in (cần entitlement "Hotspot Configuration";
         // lần đầu iOS hỏi người dùng). joinOnce: rời app thì iOS tự bỏ mạng này.
         case "join_printer_wifi":

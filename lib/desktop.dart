@@ -24,6 +24,7 @@ export 'src/desktop/tspl_label_spec.dart';
 export 'src/desktop/tspl_printer.dart';
 export 'src/desktop/tspl_raster.dart';
 export 'src/desktop/usb/ieee1284.dart';
+export 'src/desktop/usb/linux_cups_printers.dart';
 export 'src/desktop/usb/mac_cups_printers.dart';
 export 'src/desktop/usb/usb_printer_info.dart';
 export 'src/desktop/usb/usb_printers.dart';

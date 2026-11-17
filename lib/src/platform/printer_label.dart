@@ -2356,6 +2356,18 @@ class PrinterLabel {
   /// Android only. Dừng dịch vụ chạy nền.
   static Future<void> stopKeepAlive() => _platform.stopKeepAlive();
 
+  /// iOS only. Giữ màn hình sáng ([on]) cho máy làm trạm in (iOS khoá màn hình là treo
+  /// kết nối nền). Nơi khác `false`.
+  static Future<bool> setKeepScreenOn(bool on) => _platform.setKeepScreenOn(on);
+
+  /// Android only. Ứng dụng đã được miễn "tối ưu hoá pin" chưa (nơi khác `true`).
+  static Future<bool> isIgnoringBatteryOptimizations() =>
+      _platform.isIgnoringBatteryOptimizations();
+
+  /// Android only. Mở danh sách "Tối ưu hoá pin" của hệ thống.
+  static Future<bool> openBatteryOptimizationSettings() =>
+      _platform.openBatteryOptimizationSettings();
+
   /// Android only. Dịch vụ chạy nền đang chạy không.
   static Future<bool> isKeepAliveRunning() => _platform.isKeepAliveRunning();
 

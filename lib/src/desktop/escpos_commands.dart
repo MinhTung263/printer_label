@@ -23,6 +23,9 @@ abstract final class EscPosCommands {
   /// `DLE EOT n` — hỏi trạng thái tức thời (n = 2: offline, n = 4: cuộn giấy).
   static List<int> realtimeStatus(int n) => [0x10, 0x04, n];
 
+  /// `<ESC>!?` — hỏi trạng thái máy in tem TSPL (trả về MỘT byte).
+  static const List<int> tsplStatus = [0x1B, 0x21, 0x3F];
+
   /// Còi báo bếp `ESC B n t`: kêu 3 lần, mỗi lần 100ms (máy không có còi bỏ
   /// qua lệnh này).
   static const List<int> beep = [0x1B, 0x42, 0x03, 0x02];
