@@ -1,4 +1,17 @@
-## Unreleased (dự kiến 2.5.0)
+## [2.5.0] - 2026-11-18
+
+* **In trên máy tính (Windows / Linux / macOS)** — entrypoint riêng `package:printer_label/desktop.dart`
+  (app điện thoại KHÔNG import file này nên không đổi gì): ESC/POS + TSPL qua LAN, USB (Windows `usbprint` không
+  cần driver, Linux `usblp` / CUPS, macOS CUPS), dò máy in mạng + USB, nhận loại máy in (tem / hoá đơn) và khổ
+  giấy, bíp nhận máy, căn chỉnh tem, tự cắt giấy. Thêm phụ thuộc `image` và `ffi` (chỉ dùng bởi `desktop.dart`);
+  `sdk` tối thiểu nâng lên `>=3.8.0`.
+* **Linux:** máy in tem không khai tên USB (4BARCODE...) lấy tên + loại máy từ chuỗi IEEE 1284 của `usblp`;
+  `UsbPrinters.issues()` báo vì sao máy in thấy mà chưa dùng được (thiếu `usblp`, driver khác giữ, thiếu quyền ghi).
+* **Quét máy in mạng:** `LanPrinterScanner.scan(onFound:)` báo từng máy ngay khi thấy; thứ tự dò ưu tiên máy đã
+  trả lời ARP và cùng dải.
+* **Bíp:** `PrinterBeep.plan` — nhiều cách bíp (còi tem, nhích tem, ESC/POS) để thử lần lượt.
+
+### Các thay đổi khác của 2.5.0
 
 * **Chạy nền (Android):** `startKeepAlive` / `stopKeepAlive` / `isKeepAliveRunning` /
   `keepAliveStoppedByUser` — `startKeepAlive(requestPermission: true)` tự xin quyền
