@@ -22,6 +22,20 @@ class UsbPrinterInfo {
   bool get needsSetup => setupPort != null;
 }
 
+/// Máy in USB mà hệ điều hành thấy nhưng Agent chưa dùng được, kèm lý do và cách xử lý bằng tiếng Việt.
+class UsbPrinterIssue {
+  const UsbPrinterIssue(this.name, this.message);
+
+  /// Tên dễ đọc của máy in (hoặc `USB vid:pid` khi máy không khai tên).
+  final String name;
+
+  /// Vì sao chưa dùng được + làm gì tiếp.
+  final String message;
+
+  @override
+  String toString() => '$name: $message';
+}
+
 /// Không tìm thấy máy in USB / hàng in đã chọn (rút cáp, đổi máy...).
 class UsbPrinterNotFound implements Exception {
   const UsbPrinterNotFound(this.address);

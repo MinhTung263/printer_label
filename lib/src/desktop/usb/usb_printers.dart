@@ -51,6 +51,15 @@ abstract final class UsbPrinters {
     return const [];
   }
 
+  /// Máy in USB mà hệ điều hành thấy nhưng chưa dùng được, kèm lý do (mới có trên Linux: chưa có cổng
+  /// `/dev/usb/lpN` hoặc chưa có quyền ghi); nơi khác rỗng.
+  static Future<List<UsbPrinterIssue>> issues() async {
+    try {
+      if (Platform.isLinux) return await LinuxUsbPrinters.issues();
+    } catch (_) {}
+    return const [];
+  }
+
   /// Tạo hàng in RAW cho máy in USB chưa có hàng in
   /// ([UsbPrinterInfo.setupPort]): Windows hỏi quyền quản trị (UAC), macOS cần
   /// tài khoản quản trị. Trả địa chỉ để chọn, `null` khi không tạo được.

@@ -18,6 +18,7 @@ abstract final class LinuxUsbPrinters {
   /// Thư mục sysfs / thiết bị — đặt lại được để kiểm thử bằng thư mục giả.
   static String sysClass = '/sys/class/usbmisc';
   static String devDir = '/dev/usb';
+  static String usbBus = '/sys/bus/usb/devices';
   static const prefix = 'usb:';
 
   static Future<List<UsbPrinterInfo>> list() async {
@@ -56,6 +57,79 @@ abstract final class LinuxUsbPrinters {
     }
     found.sort((a, b) => a.detail.compareTo(b.detail));
     return found;
+  }
+
+  /// Máy in USB mà hệ điều hành THẤY nhưng Agent chưa dùng được — để báo khách vì sao thay vì im lặng:
+  /// - thiết bị kiểu máy in (class 7) chưa có `/dev/usb/lpN` (module `usblp` chưa nạp, hoặc driver khác giữ);
+  /// - có `/dev/usb/lpN` nhưng người dùng chưa có quyền ghi (luật udev chưa áp dụng).
+  static Future<List<UsbPrinterIssue>> issues() async {
+    final out = <UsbPrinterIssue>[];
+    final bus = Directory(usbBus);
+    if (!bus.existsSync()) return out;
+    String read(String path) {
+      try {
+        return File(path).readAsStringSync().trim();
+      } catch (_) {
+        return '';
+      }
+    }
+
+    for (final e in bus.listSync()) {
+      final base = e.path.split('/').last;
+      if (!base.contains(':')) continue; // chỉ interface (VD `1-1:1.0`)
+      if (read('${e.path}/bInterfaceClass') != '07') continue;
+      final usb = '${e.path}/..';
+      final vid = read('$usb/idVendor');
+      final pid = read('$usb/idProduct');
+      final ieee = _readIeee(e.path);
+      var name = '${read('$usb/manufacturer')} ${read('$usb/product')}'.trim();
+      if (name.isEmpty && ieee != null) name = Ieee1284.name(ieee);
+      if (name.isEmpty) name = 'USB $vid:$pid';
+
+      final misc = Directory('${e.path}/usbmisc');
+      final lp = misc.existsSync()
+          ? misc
+                .listSync()
+                .map((x) => x.path.split('/').last)
+                .where((n) => n.startsWith('lp'))
+                .firstOrNull
+          : null;
+      if (lp == null) {
+        String? driver;
+        try {
+          driver = Link('${e.path}/driver').targetSync().split('/').last;
+        } catch (_) {}
+        out.add(
+          UsbPrinterIssue(
+            name,
+            'hệ điều hành thấy máy in nhưng chưa cho dùng cổng in '
+            '(${driver == null ? 'chưa có driver máy in USB — module usblp chưa nạp' : 'đang do driver "$driver" giữ'}). '
+            'Chạy "sudo modprobe usblp" rồi rút và cắm lại máy in; bản cài .deb của Agent '
+            'tự nạp usblp mỗi lần khởi động.',
+          ),
+        );
+        continue;
+      }
+      final dev = '$devDir/$lp';
+      if (!File(dev).existsSync()) continue;
+      try {
+        final raf = await File(
+          dev,
+        ).open(mode: FileMode.append).timeout(const Duration(seconds: 1));
+        await raf.close();
+      } on FileSystemException catch (ex) {
+        if (ex.osError?.errorCode == 13) {
+          out.add(
+            UsbPrinterIssue(
+              name,
+              'không có quyền ghi $dev. Cài bản .deb mới nhất của Agent (có quy tắc udev) rồi rút và '
+              'cắm lại máy in; hoặc thêm người dùng vào nhóm lp: sudo usermod -aG lp \$USER rồi đăng nhập lại.',
+            ),
+          );
+        }
+      } catch (_) {}
+    }
+    return out;
   }
 
   /// Chuỗi định danh IEEE 1284 của máy in ở thư mục lớp [classPath] (`.../usbmisc/lpN`), `null` khi
