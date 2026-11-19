@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'escpos_commands.dart';
@@ -46,6 +47,19 @@ class TcpPrinterPort implements PrinterPort {
 
   /// Máy in không trả lời hỏi trạng thái (nhiều máy giá rẻ): khỏi hỏi lại trong
   /// [noStatusFor] — mỗi phiếu đỡ chờ [statusTimeout].
+  /// Biên độ ngẫu nhiên (ms) cộng vào mỗi lần chờ thử lại khi máy in bận.
+  static int retryJitterMs = 350;
+  static final Random _jitter = Random();
+
+  /// Máy in có lần gửi bị đứt GIỮA CHỪNG (rút dây, mất Wi-Fi): bộ đệm máy còn dở dang một lệnh ảnh
+  /// nên phiếu kế tiếp in ra ký tự lạ / giấy dài. Lần gửi sau xả bằng [_flushBytes] trước.
+  static final Set<String> _dirty = {};
+
+  /// 1024 byte 0x00 (nuốt nốt phần dữ liệu ảnh còn thiếu của lệnh dở) + `ESC @` (đưa máy về ban đầu).
+  static final Uint8List _flushBytes = Uint8List(1026)
+    ..[1024] = 0x1B
+    ..[1025] = 0x40;
+
   static Duration noStatusFor = const Duration(minutes: 10);
   static final Map<String, DateTime> _noStatusUntil = {};
 
@@ -64,7 +78,12 @@ class TcpPrinterPort implements PrinterPort {
         if (!LanPrinterScanner.isRefused(e) || attempt >= busyRetries.length) {
           rethrow;
         }
-        await Future<void>.delayed(busyRetries[attempt]);
+        // Ngẫu nhiên thêm 0..350ms: nhiều máy cùng thấy cổng bận không thử lại ĐÚNG cùng lúc
+        // (lại đụng nhau).
+        await Future<void>.delayed(
+          busyRetries[attempt] +
+              Duration(milliseconds: _jitter.nextInt(retryJitterMs)),
+        );
       }
     }
   }
@@ -91,12 +110,24 @@ class TcpPrinterPort implements PrinterPort {
         }
         if (status.blocksPrinting) throw PrinterStatusException(status);
       }
-      for (var off = 0; off < data.length; off += chunkSize) {
-        final end = off + chunkSize < data.length
-            ? off + chunkSize
-            : data.length;
-        conn.socket.add(Uint8List.sublistView(data, off, end));
+      // Lần trước đứt giữa chừng: xả bộ đệm máy in hoá đơn rồi mới in (máy tem TSPL không cần).
+      if (!tsplStatus && _dirty.contains(id)) {
+        conn.socket.add(_flushBytes);
         await conn.socket.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      try {
+        for (var off = 0; off < data.length; off += chunkSize) {
+          final end = off + chunkSize < data.length
+              ? off + chunkSize
+              : data.length;
+          conn.socket.add(Uint8List.sublistView(data, off, end));
+          await conn.socket.flush();
+        }
+        _dirty.remove(id);
+      } catch (_) {
+        _dirty.add(id);
+        rethrow;
       }
     } finally {
       await conn.close();

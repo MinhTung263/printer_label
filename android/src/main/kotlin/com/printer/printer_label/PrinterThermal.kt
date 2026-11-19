@@ -467,43 +467,16 @@ class PrinterThermal {
         val height = bitmap.height
         val widthBytes = (width + 7) / 8
 
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-
-        // 1) Nhị phân hoá toàn ảnh MỘT lần bằng số nguyên (trước đây tính xám bằng
-        //    Double cho từng điểm + ghi từng byte qua ByteArrayOutputStream — chậm trên
-        //    máy POS yếu). Kết quả giống hệt: cháy khi alpha > 50 và xám < 200, với
-        //    xám = 0.299R + 0.587G + 0.114B (nhân 1000 để giữ số nguyên, không sai lệch).
-        //
-        //    Ngưỡng 200 — KHÔNG hạ về 128: đầu in nhiệt chỉ có cháy/trắng; chữ anti-alias
-        //    gồm lõi đậm + viền xám, ngưỡng 128 chỉ còn bộ xương mảnh -> in RẤT MỜ (đã
-        //    ghi nhận trên máy BLE ở cả iOS và Android). Dùng chung cho mọi kết nối.
-        var bits = ByteArray(widthBytes * height)
-        val blankRow = BooleanArray(height)
-        for (y in 0 until height) {
-            val rowPixel = y * width
-            val rowByte = y * widthBytes
-            var any = 0
-            for (xByte in 0 until widthBytes) {
-                var byteVal = 0
-                val x0 = xByte * 8
-                val xEnd = Math.min(x0 + 8, width)
-                var x = x0
-                while (x < xEnd) {
-                    val pixel = pixels[rowPixel + x]
-                    if (((pixel ushr 24) and 0xff) > 50) {
-                        val gray1000 = 299 * ((pixel shr 16) and 0xff) +
-                            587 * ((pixel shr 8) and 0xff) +
-                            114 * (pixel and 0xff)
-                        if (gray1000 < 200_000) byteVal = byteVal or (0x80 ushr (x - x0))
-                    }
-                    x++
-                }
-                bits[rowByte + xByte] = byteVal.toByte()
-                any = any or byteVal
-            }
-            blankRow[y] = any == 0
+        // 1) Nhị phân hoá ảnh theo từng DẢI dòng ([RasterBinarizer]): không cấp phát mảng điểm ảnh cho cả
+        //    ảnh (hoá đơn 150 món ở khổ 80mm ~57MB). Quy tắc: cháy khi alpha > 50 và xám < 200, với
+        //    xám = 0.299R + 0.587G + 0.114B (số nguyên, nhân 1000). Ngưỡng 200 — KHÔNG hạ về 128: đầu in
+        //    nhiệt chỉ có cháy/trắng; chữ anti-alias gồm lõi đậm + viền xám, ngưỡng 128 chỉ còn bộ xương
+        //    mảnh -> in RẤT MỜ (đã ghi nhận trên máy BLE ở cả iOS và Android). Dùng chung cho mọi kết nối.
+        val raster = RasterBinarizer.binarize(width, height) { startRow, rowCount, buffer ->
+            bitmap.getPixels(buffer, 0, width, 0, startRow, width, rowCount)
         }
+        var bits = raster.bits
+        val blankRow = raster.blankRow
         // Chỉ thêm chấm trên dòng đã có chấm đen nên [blankRow] không đổi.
         if (boostThinStrokes) bits = ThinStrokeBooster.boost(bits, widthBytes, width, height)
 

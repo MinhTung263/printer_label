@@ -17,6 +17,10 @@ class LanDeviceModel {
   /// True if the name was customized by the user
   final bool isCustomName;
 
+  /// `false` = máy in đang để IP tĩnh (TẮT DHCP), `true` = đang nhận IP từ router, `null` = chưa biết
+  /// (máy không có trang cấu hình web / chưa đọc được).
+  final bool? dhcp;
+
   const LanDeviceModel({
     required this.ip,
     required this.name,
@@ -24,6 +28,7 @@ class LanDeviceModel {
     this.port = 9100,
     this.mac,
     this.isCustomName = false,
+    this.dhcp,
   });
 
   /// Factory helper to create a model with fallback name if name is empty
@@ -34,6 +39,7 @@ class LanDeviceModel {
     int port = 9100,
     String? mac,
     bool isCustomName = false,
+    bool? dhcp,
   }) {
     final cleanName = name?.trim();
     final displayName = (cleanName != null && cleanName.isNotEmpty)
@@ -47,6 +53,7 @@ class LanDeviceModel {
       port: port,
       mac: mac,
       isCustomName: isCustomName,
+      dhcp: dhcp,
     );
   }
 
@@ -58,6 +65,7 @@ class LanDeviceModel {
       port: map['port'] as int? ?? 9100,
       mac: map['mac'] as String?,
       isCustomName: map['isCustomName'] as bool? ?? false,
+      dhcp: map['dhcp'] as bool?,
     );
   }
 
@@ -69,6 +77,7 @@ class LanDeviceModel {
       'port': port,
       'mac': mac,
       'isCustomName': isCustomName,
+      'dhcp': dhcp,
     };
   }
 
@@ -79,6 +88,7 @@ class LanDeviceModel {
     int? port,
     String? mac,
     bool? isCustomName,
+    bool? dhcp,
   }) {
     return LanDeviceModel(
       ip: ip ?? this.ip,
@@ -87,6 +97,7 @@ class LanDeviceModel {
       port: port ?? this.port,
       mac: mac ?? this.mac,
       isCustomName: isCustomName ?? this.isCustomName,
+      dhcp: dhcp ?? this.dhcp,
     );
   }
 

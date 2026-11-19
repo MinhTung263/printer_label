@@ -129,4 +129,56 @@ void main() {
       throwsA(isA<SocketException>()),
     );
   });
+
+  test(
+    'lần gửi trước đứt giữa chừng: lần sau xả bộ đệm (0x00 x1024 + ESC @) rồi mới in',
+    () async {
+      // Máy in cắt kết nối ngay khi nhận byte đầu tiên của lần đầu.
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final jobs = <Uint8List>[];
+      var n = 0;
+      server.listen((s) {
+        final first = n++ == 0;
+        final buf = BytesBuilder();
+        s.listen(
+          (d) {
+            if (first) {
+              s.destroy();
+            } else {
+              buf.add(d);
+            }
+          },
+          onDone: () {
+            if (!first) jobs.add(buf.takeBytes());
+            s.destroy();
+          },
+          onError: (_) {},
+        );
+      });
+      addTearDown(server.close);
+      final p = TcpPrinterPort('127.0.0.1', port: server.port, chunkSize: 1000);
+      Object? error;
+      try {
+        await p.send(Uint8List(3 * 1024 * 1024), checkStatus: false);
+      } catch (e) {
+        error = e;
+      }
+      expect(error, isNotNull, reason: 'lần đầu phải lỗi vì bị cắt');
+      await p.send(Uint8List.fromList([1, 2, 3]), checkStatus: false);
+      for (var i = 0; i < 100 && jobs.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      final got = jobs.single;
+      expect(got.length, 1026 + 3);
+      expect(got.sublist(0, 1024).every((b) => b == 0), isTrue);
+      expect(got.sublist(1024, 1026), [0x1B, 0x40]);
+      expect(got.sublist(1026), [1, 2, 3]);
+      // Lần thứ ba: đã xả rồi nên không xả nữa.
+      await p.send(Uint8List.fromList([9]), checkStatus: false);
+      for (var i = 0; i < 100 && jobs.length < 2; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(jobs.last, [9]);
+    },
+  );
 }

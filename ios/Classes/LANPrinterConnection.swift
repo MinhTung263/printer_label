@@ -577,7 +577,8 @@ public final class LANPrinterConnection {
         }
 
         // Backoff tăng dần theo số lần đã thử — nhường socket cho thiết bị đang in.
-        let delay = retryBaseDelay * pow(2.0, Double(max(0, attempts - 1)))
+        // Cộng ngẫu nhiên 0–35%: nhiều thiết bị cùng thấy máy in bận không thử lại ĐÚNG cùng lúc.
+        let delay = retryBaseDelay * pow(2.0, Double(max(0, attempts - 1))) * Double.random(in: 1.0...1.35)
         writeQueue[0].attempts = attempts + 1
         print("[LANPrinterConnection] 🔄 Thử lại \(ip) sau \(String(format: "%.1f", delay))s (lần \(attempts + 1)/\(maxAttempts), \(kind.rawValue))")
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in

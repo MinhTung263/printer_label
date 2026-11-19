@@ -79,6 +79,19 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         }
 
         private val mainHandler = Handler(Looper.getMainLooper())
+
+        /**
+         * Máy in có lần gửi bị đứt GIỮA CHỪNG (rút dây, rớt Wi-Fi, kẹt ghi): bộ đệm máy còn
+         * dở một lệnh ảnh (`GS v 0` / `BITMAP`) nên nó nuốt tiếp bill sau làm dữ liệu ảnh -> in
+         * ký tự lạ, giấy chạy dài. Lần kết nối sau tới máy đó xả bằng [FLUSH_BYTES] trước.
+         */
+        private val dirty: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+        /** 1024 byte 0x00 (nuốt nốt phần ảnh còn thiếu) + `ESC @` (đưa máy về trạng thái đầu). */
+        private val FLUSH_BYTES = ByteArray(1026).also { it[1024] = 0x1B; it[1025] = 0x40 }
+
+        /** Chờ máy nuốt xong phần xả trước khi gửi bill. */
+        private const val FLUSH_SETTLE_MS = 50L
     }
 
     private val appContext = context?.applicationContext
@@ -194,6 +207,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
             input = s.getInputStream()
             alive = true
             acquireWifiLock()
+            flushIfDirty(info)
             return true
         } catch (e: Exception) {
             lastFailure = classify(e)
@@ -276,6 +290,19 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
     }
 
     // ─── Ghi ─────────────────────────────────────────────────────────────────
+
+    /** Lần gửi trước tới [info] đứt giữa chừng -> xả bộ đệm máy in (lỗi xả không chặn việc in). */
+    private fun flushIfDirty(info: String) {
+        if (!dirty.contains(info)) return
+        try {
+            synchronized(writeLock) { writeFully(FLUSH_BYTES) }
+            Thread.sleep(FLUSH_SETTLE_MS)
+            dirty.remove(info)
+            Log.i(TAG, "Đã xả bộ đệm $info sau lần gửi đứt giữa chừng")
+        } catch (e: Exception) {
+            Log.w(TAG, "Xả bộ đệm $info lỗi: ${e.message}")
+        }
+    }
 
     /**
      * Ghi hết [data] theo từng gói nhỏ, mỗi gói có watchdog: kẹt quá
@@ -439,6 +466,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         if (lastFailure == null || lastFailure == Failure.OTHER) lastFailure = reason
         if (lastErrorMessage == null) lastErrorMessage = e.message ?: e.javaClass.simpleName
         Log.w(TAG, "Kết nối $connectInfo lỗi (${lastFailure}): $lastErrorMessage")
+        if (reason == Failure.SEND_FAILED) dirty.add(connectInfo)
         abort(socket)
         val info = connectInfo
         val msg = lastErrorMessage ?: ""

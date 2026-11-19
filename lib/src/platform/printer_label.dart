@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../desktop/lan_printer_scanner.dart' show LanPrinterScanner;
+import '../desktop/printer_language_probe.dart';
 import '../src.dart';
 
 enum BuiltInPrinterType {
@@ -166,6 +168,48 @@ class PrinterLabel {
     // nhiều interface cùng subnet (VD WiFi + VPN) làm subnet bị quét lặp.
     final Set<String> emitted = <String>{};
 
+    // Máy trả lời "từ chối kết nối" cổng in: máy còn sống nhưng cổng in không nhận lúc đó. Máy in
+    // nhiệt LAN giá rẻ chỉ nhận 1–2 kết nối cùng lúc nên đang bận với thiết bị khác (Agent, máy
+    // POS, điện thoại khác) cũng từ chối — quét một lượt sẽ bỏ sót máy đó ("lúc thấy lúc không").
+    final Set<String> refused = <String>{};
+
+    // Dò lại các máy đáng ngờ (từ chối kết nối + máy đã thấy ở lần quét trước) vài vòng, nghỉ giữa
+    // vòng cho máy kịp nhả kết nối, thời gian chờ dài hơn lượt quét nhanh. Số máy ít nên rẻ.
+    Future<int> recheck(Set<String> scanned) async {
+      final candidates = <String>{
+        ...refused,
+        for (final ip in _lanDeviceCache.keys)
+          if (scanned.contains(ip)) ip,
+      }..removeAll(emitted);
+      var found = 0;
+      for (var round = 0; round < 2 && candidates.isNotEmpty; round++) {
+        if (controller.isClosed) break;
+        if (round > 0) await Future.delayed(const Duration(milliseconds: 400));
+        final list = candidates.toList();
+        for (var i = 0; i < list.length; i += 16) {
+          final chunk = list.skip(i).take(16);
+          await Future.wait(
+            chunk.map((ip) async {
+              try {
+                final socket = await Socket.connect(
+                  ip,
+                  port,
+                  timeout: const Duration(seconds: 1),
+                );
+                socket.destroy();
+                if (!controller.isClosed && emitted.add(ip)) {
+                  found++;
+                  candidates.remove(ip);
+                  controller.add(ip);
+                }
+              } catch (_) {}
+            }),
+          );
+        }
+      }
+      return found;
+    }
+
     Future<int> scanPass(
       List<String> validIps, {
       bool includeExtra = false,
@@ -211,48 +255,109 @@ class PrinterLabel {
       // dù mạng hoàn toàn khoẻ. Ở đây mỗi worker xong 1 IP là bốc IP kế tiếp ngay,
       // nên tổng thời gian ~ (số IP / số worker) x RTT thực, không x timeout.
       final bool isIOS = Platform.isIOS;
-      final int concurrency = isIOS ? 24 : 48;
+      // 48 (trước đây iOS 24): quét 2 lượt bên dưới nên mỗi lượt có thể nhanh hơn mà tổng thời
+      // gian không tăng; 48 socket vẫn xa trần file descriptor của iOS (256).
+      const int concurrency = 48;
       // IP không tồn tại thường bị firewall drop (không có RST) -> luôn phải chờ hết
-      // timeout. Giữ ngắn vì máy in trong cùng LAN gần như luôn trả lời dưới 100ms;
-      // các IP chậm bất thường đã được lần quét 2 (auto retry) bọc lót.
+      // timeout. Giữ ngắn vì máy in trong cùng LAN gần như luôn trả lời dưới 100ms.
       final connectTimeout =
           timeout ??
           (isIOS
               ? const Duration(milliseconds: 600)
               : const Duration(milliseconds: 400));
 
-      int next = 0;
-      Future<void> worker() async {
-        while (true) {
-          if (controller.isClosed) return;
-          final index = next++;
-          if (index >= targets.length) return;
-          final targetIp = targets[index];
-          try {
-            final socket = await Socket.connect(
-              targetIp,
-              port,
-              timeout: connectTimeout,
-            );
-            socket.destroy();
-            // Chặn phát trùng: lần quét 2 chạy lại cùng dải, và nhiều interface
-            // có thể sinh cùng subnet.
-            if (!controller.isClosed && emitted.add(targetIp)) {
-              foundCount++;
-              controller.add(targetIp);
+      // Một lượt quét [list]: mỗi worker bốc IP kế tiếp ngay khi xong IP trước.
+      Future<void> sweep(
+        List<String> list, {
+        Duration? within,
+        int workers = concurrency,
+      }) async {
+        final wait = within ?? connectTimeout;
+        int next = 0;
+        Future<void> worker() async {
+          while (true) {
+            if (controller.isClosed) return;
+            final index = next++;
+            if (index >= list.length) return;
+            final targetIp = list[index];
+            try {
+              final socket = await Socket.connect(
+                targetIp,
+                port,
+                timeout: wait,
+              );
+              socket.destroy();
+              // Chặn phát trùng: lượt quét sau chạy lại cùng dải, và nhiều interface
+              // có thể sinh cùng subnet.
+              if (!controller.isClosed && emitted.add(targetIp)) {
+                foundCount++;
+                controller.add(targetIp);
+              }
+            } catch (e) {
+              // Bỏ qua lỗi kết nối; nhưng nhớ máy "từ chối" để dò lại ([recheck]).
+              if (e is SocketException && LanPrinterScanner.isRefused(e)) {
+                refused.add(targetIp);
+              }
             }
-          } catch (_) {
-            // Ignore connection errors
           }
         }
+
+        await Future.wait(
+          List.generate(
+            workers < list.length ? workers : list.length,
+            (_) => worker(),
+          ),
+        );
       }
 
-      await Future.wait(
-        List.generate(
-          concurrency < targets.length ? concurrency : targets.length,
-          (_) => worker(),
+      // Quét HAI lượt. Một máy in vẫn có lúc không đáp gói kết nối đầu (ARP chưa có trong bộ
+      // nhớ, máy in bận nhịp đó): đo thật trên cùng một mạng, quét một lượt bỏ sót máy in đang
+      // bật tới ~25% số lần ("lúc thấy lúc không"). Lượt hai chỉ dò các IP lượt một chưa thấy,
+      // và RẺ hơn nhiều: lượt một đã kích hoạt ARP nên máy in thật đáp trong vài chục ms —
+      // chờ 300ms, 96 kết nối cùng lúc (~0,8s), chạy song song với [recheck].
+      // Máy đã biết (đã nhận ra ở lần quét trước / lần mở app trước) dò TRƯỚC, đồng thời: hiện ra
+      // sau vài trăm ms thay vì phải chờ quét tới IP của nó giữa dải.
+      final known = [
+        for (final ip in _lanDeviceCache.keys)
+          if (targets.contains(ip)) ip,
+      ];
+      if (known.isNotEmpty) {
+        await Future.wait(
+          known.map((ip) async {
+            try {
+              final socket = await Socket.connect(
+                ip,
+                port,
+                timeout: const Duration(milliseconds: 800),
+              );
+              socket.destroy();
+              if (!controller.isClosed && emitted.add(ip)) {
+                foundCount++;
+                controller.add(ip);
+              }
+            } catch (e) {
+              if (e is SocketException && LanPrinterScanner.isRefused(e)) {
+                refused.add(ip);
+              }
+            }
+          }),
+        );
+      }
+      await sweep([
+        for (final ip in targets)
+          if (!emitted.contains(ip)) ip,
+      ]);
+      await Future.wait([
+        sweep(
+          [
+            for (final ip in targets)
+              if (!emitted.contains(ip)) ip,
+          ],
+          within: const Duration(milliseconds: 300),
+          workers: 96,
         ),
-      );
+        recheck(targets.toSet()).then((n) => foundCount += n),
+      ]);
       return foundCount;
     }
 
@@ -1395,7 +1500,128 @@ class PrinterLabel {
     if (root != null) return root;
     final index = await fetchPath('/index.html');
     if (index != null) return index;
-    return await fetchPath('/status.html');
+    final status = await fetchPath('/status.html');
+    if (status != null) return status;
+    // Máy in dùng module Ethernet có trang cấu hình riêng (HPRT...): trang chủ chỉ là khung, MAC
+    // nằm ở /port_stat.htm dạng số thập phân `0-71-80-61-180-164` (không khớp mẫu hex ở trên).
+    return (await queryHttpNetInfo(ip, timeout: timeout))?.mac;
+  }
+
+  /// Đọc cấu hình mạng (MAC, IP, mặt nạ, cổng ra, DHCP bật hay tắt) từ trang web của máy in
+  /// (`/port_stat.htm`, cổng 80) — máy in HPRT và các máy dùng cùng module Ethernet. Chỉ ĐỌC,
+  /// không đổi gì trên máy in. `null` khi máy không có trang này / không trả lời.
+  static Future<LanPrinterNetInfo?> queryHttpNetInfo(
+    String ip, {
+    Duration timeout = const Duration(milliseconds: 800),
+  }) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    try {
+      final req = await client
+          .getUrl(Uri.parse('http://$ip/port_stat.htm'))
+          .timeout(timeout);
+      final res = await req.close().timeout(timeout);
+      if (res.statusCode != 200) return null;
+      final body = await res
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .join()
+          .timeout(timeout);
+      return parseWebNetInfo(body);
+    } catch (_) {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Tách cấu hình mạng từ nội dung trang `/port_stat.htm` ([html] thô hoặc đã bỏ thẻ).
+  /// `null` khi không đủ MAC + IP. Công khai để test với trang thật.
+  static LanPrinterNetInfo? parseWebNetInfo(String html) {
+    final text = html
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    String? after(String label) => RegExp(
+      '$label\\s+([^ ]+)',
+      caseSensitive: false,
+    ).firstMatch(text)?.group(1);
+
+    // MAC: 6 số thập phân phân cách bằng '-' (VD 0-71-80-61-180-164) hoặc hex AA-BB-... / AA:BB:...
+    final rawMac = after(r'Mac\s*Address');
+    String? mac;
+    if (rawMac != null) {
+      final parts = rawMac.split(RegExp('[-:]'));
+      if (parts.length == 6) {
+        final isHex = parts.every(
+          (p) => RegExp(r'^[0-9A-Fa-f]{2}$').hasMatch(p),
+        );
+        final isDec = parts.every((p) {
+          final n = int.tryParse(p);
+          return n != null && n >= 0 && n <= 255;
+        });
+        // "10-20-30-40-50-60" khớp cả hai: trang HPRT luôn ghi thập phân, nên ưu tiên thập phân
+        // khi có phần tử không phải 2 chữ số hex, còn lại coi là thập phân nếu có ký tự > 99.
+        final decimal =
+            isDec &&
+            (!isHex || parts.any((p) => p.length != 2 || int.parse(p) > 99));
+        final bytes = [
+          for (final p in parts)
+            decimal ? int.parse(p) : int.parse(p, radix: 16),
+        ];
+        mac = bytes
+            .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+            .join(':');
+        if (mac == '00:00:00:00:00:00' || mac == 'FF:FF:FF:FF:FF:FF') {
+          mac = null;
+        }
+      }
+    }
+    final ip = after(r'IP\s*Address');
+    if (mac == null ||
+        ip == null ||
+        !RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(ip)) {
+      return null;
+    }
+    final dhcp = after('DHCP')?.toLowerCase();
+    return LanPrinterNetInfo(
+      mac: mac,
+      ip: ip,
+      mask: after(r'Subnet\s*Mask') ?? '',
+      gateway: after(r'Gate\s*Way') ?? '',
+      dhcp: dhcp == 'enabled',
+    );
+  }
+
+  /// Bật DHCP cho máy in qua trang cấu hình web (`/tcpip_cfg.htm`, HPRT và máy cùng module).
+  /// ĐỔI cấu hình mạng của máy in: máy chuyển sang nhận IP từ router (IP có thể đổi) nên chỉ gọi khi
+  /// người dùng đã đồng ý. Trả `true` khi máy xác nhận "DHCP Enabled" sau khi lưu.
+  static Future<bool> enableLanDhcpViaWeb(
+    String ip, {
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    final before = await queryHttpNetInfo(ip, timeout: timeout);
+    if (before == null) return false;
+    if (before.dhcp) return true; // đã bật
+    final client = HttpClient()..connectionTimeout = timeout;
+    try {
+      // Cùng form của trang: dhcp_mode=1 (DHCP Client), DHCP_time=30 (giây chờ cấp IP), nút Save.
+      final req = await client
+          .getUrl(
+            Uri.parse(
+              'http://$ip/tcpip_cfg.htm?dhcp_mode=1&DHCP_time=30&save=+Save+',
+            ),
+          )
+          .timeout(timeout);
+      final res = await req.close().timeout(timeout);
+      await res.drain<void>();
+    } catch (_) {
+      // Máy đổi mạng ngay khi lưu nên có thể không kịp trả lời: xác nhận bên dưới.
+    } finally {
+      client.close(force: true);
+    }
+    // Xác nhận: máy phải đang ở chế độ DHCP (có thể đã đổi IP) — hỏi lại theo MAC trên cùng IP.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    final after = await queryHttpNetInfo(ip, timeout: timeout);
+    return after?.dhcp ?? false;
   }
 
   // ---------------------------------------------------------------------------
@@ -1483,18 +1709,34 @@ class PrinterLabel {
     String ip, {
     Duration timeout = const Duration(milliseconds: 800),
   }) async {
-    final results = await Future.wait([
+    // Trả MAC ĐẦU TIÊN có được, không chờ đủ 4 nguồn: nguồn im lặng luôn chờ hết [timeout]
+    // (800ms) trong khi máy tự khai MAC (UDP) trả lời trong vài chục ms. Trước đây Future.wait
+    // làm máy chỉ nhận ra qua MAC (VD Xprinter) hiện tên chậm ~0,8s. MAC từ nguồn nào cũng là
+    // MAC của máy đó nên không cần chờ nguồn "ưu tiên" hơn.
+    final sources = <Future<String?>>[
       // MAC do chính firmware máy in tự khai báo — đáng tin nhất, và gửi unicast nên
       // chạy được trên iPhone thật mà không cần entitlement multicast.
       queryXpUdpInfo(ip, timeout: timeout).then((v) => v?.mac),
       querySnmpMac(ip, timeout: timeout),
       queryHttpMac(ip, timeout: timeout),
       queryNetBiosMac(ip, timeout: timeout),
-    ]);
-
-    for (final mac in results) {
-      if (mac != null && mac.isNotEmpty) return mac;
+    ];
+    final first = Completer<String?>();
+    var left = sources.length;
+    for (final f in sources) {
+      f
+          .then<void>((mac) {
+            if (mac != null && mac.isNotEmpty && !first.isCompleted) {
+              first.complete(mac);
+            }
+          })
+          .catchError((_) {})
+          .whenComplete(() {
+            if (--left == 0 && !first.isCompleted) first.complete(null);
+          });
     }
+    final fastMac = await first.future;
+    if (fastMac != null) return fastMac;
 
     try {
       final nativeInfo = await _platform.getLanPrinterInfo(ip: ip);
@@ -1714,6 +1956,7 @@ class PrinterLabel {
       String? modelName;
       String? mac;
       LanDeviceModel? last = _lanDeviceCache[ip];
+      bool? dhcp;
 
       // Phát lại mỗi khi có thêm thông tin (tên trước, MAC sau) — UI cập nhật
       // theo IP nên hiện tên ngay khi có, không chờ MAC / bản quét SDK.
@@ -1727,7 +1970,10 @@ class PrinterLabel {
         final displayName = (vendor != null && vendor.isNotEmpty)
             ? vendor
             : modelName;
-        if (controller.isClosed || (displayName == null && mac == null)) return;
+        if (controller.isClosed ||
+            (displayName == null && mac == null && dhcp == null)) {
+          return;
+        }
         final device = LanDeviceModel.fromIp(
           ip,
           // Chưa nhận ra tên lần này thì giữ tên đã nhớ từ lần quét trước.
@@ -1735,12 +1981,14 @@ class PrinterLabel {
           vendor: vendor ?? last?.vendor,
           port: port,
           mac: mac ?? last?.mac,
+          dhcp: dhcp ?? last?.dhcp,
         );
         final prev = last;
         if (prev != null &&
             prev.name == device.name &&
             prev.vendor == device.vendor &&
-            prev.mac == device.mac) {
+            prev.mac == device.mac &&
+            prev.dhcp == device.dhcp) {
           return;
         }
         last = device;
@@ -1755,8 +2003,18 @@ class PrinterLabel {
             modelName = v;
             emit();
           }),
+          // Cấu hình mạng qua trang web của máy in (HPRT...): biết máy đang TẮT DHCP (IP tĩnh) và
+          // thêm MAC cho máy không trả lời các nguồn khác. Chỉ đọc, một lần GET nhỏ.
+          queryHttpNetInfo(ip, timeout: const Duration(milliseconds: 600)).then(
+            (info) {
+              if (info == null) return;
+              dhcp = info.dhcp;
+              mac ??= info.mac;
+              emit();
+            },
+          ),
           Future.wait([
-            resolveLanPrinterMac(ip).then((v) => mac = v),
+            resolveLanPrinterMac(ip).then((v) => mac = v ?? mac),
             sdkScanDone,
           ]).then((_) {
             mac ??= sdkMacByIp[ip];
@@ -1851,48 +2109,76 @@ class PrinterLabel {
   }
 
   /// Lệnh còi / nhích giấy dùng chung cho mọi loại máy (ESC/POS + TSPL/CPCL/ZPL).
-  static List<int> _identifyPayload({required bool beep, required bool feed}) {
+  ///
+  /// [escpos] / [tspl]: chỉ gồm mã của loại máy tương ứng. Máy in hoá đơn KHÔNG hiểu lệnh tem
+  /// dạng chữ (`SOUND`, `! U1 BEEP`, `FEED`...) nên in nguyên văn ra giấy thành ký tự lạ.
+  static List<int> _identifyPayload({
+    required bool beep,
+    required bool feed,
+    bool escpos = true,
+    bool tspl = true,
+    String? vendor,
+  }) {
     final payload = <int>[];
 
-    if (beep) {
-      // --- 1. ESC/POS & Hardware Real-Time Buzzer (Kêu 1 tiếng ngắn) ---
-      payload.addAll([
-        // Real-time hardware pulse pin 2 & pin 5 (DLE DC4 1 1 t) - Kích hoạt còi ngay lập tức
-        0x10, 0x14, 0x01, 0x01, 0x05,
-        0x10, 0x14, 0x02, 0x01, 0x05,
+    if (beep && escpos) {
+      // --- 1. ESC/POS: mã còi theo HÃNG ---
+      // Trước đây gửi cả loạt mã của mọi hãng. Máy không hiểu mã nào thì in tham số của mã đó ra
+      // giấy (`ESC ( A`, `GS ( A`, `1F 1B 1F 53`...) hoặc hiểu NHẦM thành lệnh khác: `ESC C n` đặt
+      // chiều dài trang = n dòng nên máy đẩy giấy dài sau mỗi dòng (cả các lần in sau, vì không có
+      // lệnh nào hủy), `ESC p` mở két. Bấm loa nhiều lần ra "đống giấy". Nay chỉ gửi mã chung (BEL +
+      // `ESC B n t`, còi chuẩn của máy POS) cộng mã riêng của đúng hãng nếu nhận ra hãng.
+      payload.addAll([0x07, 0x1B, 0x42, 0x01, 0x01]);
+      switch ((vendor ?? '').toLowerCase()) {
+        case 'xprinter':
+          payload.addAll([0x1F, 0x1B, 0x1F, 0x53, 0x01]);
+        case 'rongta' || 'gprinter':
+          payload.addAll([0x1B, 0x43, 0x01, 0x01]);
+        case 'epson':
+          payload.addAll([
+            0x1B,
+            0x28,
+            0x41,
+            0x02,
+            0x00,
+            0x30,
+            0x01,
+            0x1D,
+            0x28,
+            0x41,
+            0x02,
+            0x00,
+            0x30,
+            0x01,
+            0x1B,
+            0x28,
+            0x41,
+            0x04,
+            0x00,
+            0x30,
+            0x01,
+            0x01,
+            0x01,
+            0x1D,
+            0x28,
+            0x41,
+            0x04,
+            0x00,
+            0x30,
+            0x01,
+            0x01,
+            0x01,
+          ]);
+        case 'citizen':
+          payload.addAll([0x1B, 0x1E]);
+        case 'star':
+          payload.addAll([0x1B, 0x07]);
+      }
+      // Hủy mọi trạng thái còn lại (kiểu chữ, chiều dài trang...) để lần in sau không bị ảnh hưởng.
+      payload.addAll([0x1B, 0x40]);
+    }
 
-        // ASCII Bell (BEL)
-        0x07,
-
-        // ESC B 1 1 (Xprinter, HPRT, POS-80 buzzer: 1 beep)
-        0x1B, 0x42, 0x01, 0x01,
-
-        // ESC C 1 1 (Rongta, Gprinter buzzer: 1 beep)
-        0x1B, 0x43, 0x01, 0x01,
-
-        // ESC s 1 (Generic POS buzzer: 1 beep)
-        0x1B, 0x73, 0x01,
-
-        // Xprinter Extended Beeper: 1 beep
-        0x1F, 0x1B, 0x1F, 0x53, 0x01,
-
-        // Epson Standard Buzzer: ESC ( A và GS ( A (1 beep)
-        0x1B, 0x28, 0x41, 0x02, 0x00, 0x30, 0x01,
-        0x1D, 0x28, 0x41, 0x02, 0x00, 0x30, 0x01,
-        0x1B, 0x28, 0x41, 0x04, 0x00, 0x30, 0x01, 0x01, 0x01,
-        0x1D, 0x28, 0x41, 0x04, 0x00, 0x30, 0x01, 0x01, 0x01,
-
-        // Citizen (ESC RS) & Star (ESC BEL)
-        0x1B, 0x1E,
-        0x1B, 0x07,
-
-        // Kích xung cổng RJ11 (còi ngoài / chuông báo bếp qua cả pin 2 và pin 5)
-        0x1B, 0x70, 0x00, 0x20, 0x20,
-        0x1B, 0x70, 0x01, 0x20, 0x20,
-        0x1B, 0x70, 0x30, 0x20, 0x20,
-        0x1B, 0x70, 0x31, 0x20, 0x20,
-      ]);
-
+    if (beep && tspl) {
       // --- 2. TSPL / CPCL / ZPL Buzzer (Máy in tem: Kêu 1 tiếng ngắn) ---
       payload.addAll(
         utf8.encode(
@@ -1906,12 +2192,16 @@ class PrinterLabel {
 
     if (feed) {
       // Nhích nhẹ 1 nhịp giấy (~3mm) để vừa nghe tiếng motor vừa thấy giấy nhích
-      payload.addAll(utf8.encode("\r\nFEED 24\r\n")); // TSPL: feed 24 dots
-      payload.addAll([0x1B, 0x4A, 0x18]); // ESC/POS: ESC J 24 dots
+      if (tspl) {
+        payload.addAll(utf8.encode("\r\nFEED 24\r\n")); // TSPL: feed 24 dots
+      }
+      if (escpos) payload.addAll([0x1B, 0x4A, 0x18]); // ESC/POS: ESC J 24 dots
     }
 
     return payload;
   }
+
+  static final Map<String, (PrinterLanguage, DateTime)> _identifyLanguage = {};
 
   /// Sends an identify signal (audio beep, paper feed, or test slip) to a LAN printer to help
   /// the user physically determine which printer on their desk matches [ipAddress].
@@ -1922,8 +2212,49 @@ class PrinterLabel {
     bool feed = true,
     bool printSlip = false,
     Duration timeout = const Duration(seconds: 2),
+
+    /// Hỏi máy in là hoá đơn hay tem trước rồi chỉ gửi mã của loại đó (mất thêm ~1,5s). Tắt
+    /// = gửi mã của cả hai loại như trước (máy in hoá đơn có thể in ký tự lạ).
+    bool detectType = true,
   }) async {
-    final payload = _identifyPayload(beep: beep, feed: feed);
+    var escpos = true;
+    var tspl = true;
+    if (detectType) {
+      // Loại máy nhớ vài phút theo IP: bấm kêu lại nhiều lần không phải hỏi máy (~1,5s) mỗi lần.
+      final key = '$ipAddress:$port';
+      final cached = _identifyLanguage[key];
+      PrinterLanguage language;
+      if (cached != null &&
+          DateTime.now().difference(cached.$2) < const Duration(minutes: 5)) {
+        language = cached.$1;
+      } else {
+        try {
+          language = await PrinterLanguageProbe.probeLan(ipAddress, port: port);
+        } catch (_) {
+          language = PrinterLanguage.unknown;
+        }
+        // Chỉ nhớ khi máy đã trả lời (unknown có thể do máy đang bận).
+        if (language != PrinterLanguage.unknown) {
+          _identifyLanguage[key] = (language, DateTime.now());
+        }
+      }
+      // Máy tem chỉ nhận lệnh tem; máy hoá đơn (và máy không trả lời — phần lớn là máy hoá đơn)
+      // chỉ nhận lệnh ESC/POS; máy hai chế độ nhận cả hai.
+      escpos = language != PrinterLanguage.label;
+      tspl =
+          language == PrinterLanguage.label || language == PrinterLanguage.both;
+    }
+    // Hãng (nhận ra khi quét: theo tên model / MAC): chọn mã còi đúng hãng, xem [_identifyPayload].
+    final vendor =
+        _lanDeviceCache[ipAddress]?.vendor ??
+        detectVendor(_lanDeviceCache[ipAddress]?.name ?? '');
+    final payload = _identifyPayload(
+      beep: beep,
+      feed: feed,
+      escpos: escpos,
+      tspl: tspl,
+      vendor: vendor,
+    );
 
     if (printSlip) {
       // ESC/POS Test Slip

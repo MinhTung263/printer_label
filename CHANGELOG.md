@@ -1,3 +1,15 @@
+## [2.5.1] - 2026-11-19
+
+* **In ảnh dài không tràn RAM (Android):** `getEscPosRasterBytes` nhị phân hoá ảnh theo từng dải 64 dòng
+  (`RasterBinarizer`) thay vì nạp cả ảnh vào mảng điểm ảnh — kết quả byte giống hệt, tiết kiệm hàng chục MB với
+  hoá đơn dài trên máy yếu (Android 6 / 2GB). Có test `RasterBinarizerTest`.
+* **Quét máy in mạng:** 2 vòng quét + kiểm tra lại, dò máy đã biết trước; nhận diện máy theo payload từng hãng
+  (Xprinter UDP, HPRT...), nhớ ngôn ngữ máy in; `resolveLanPrinterMac` (MAC lấy đầu tiên thắng).
+* **DHCP máy in LAN:** `LanDevice.dhcp`; `queryHttpNetInfo` / `parseWebNetInfo` đọc trang web máy in,
+  `enableLanDhcpViaWeb` bật DHCP để máy không đổi IP khi khởi động lại.
+* **Gửi qua LAN ổn định hơn:** flush sau khi ghi và trễ ngẫu nhiên nhỏ giữa các lệnh (Dart, Kotlin, Swift)
+  để máy in không bị rớt lệnh khi in dồn.
+
 ## [2.5.0] - 2026-11-18
 
 * **In trên máy tính (Windows / Linux / macOS)** — entrypoint riêng `package:printer_label/desktop.dart`
