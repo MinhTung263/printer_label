@@ -1,3 +1,21 @@
+## [2.5.2] - 2026-11-20
+
+* **Máy in Gprinter (module Ethernet):** `GprinterUdp` — dò máy (`B[]G`) và đổi IP / netmask / gateway / DHCP qua UDP
+  broadcast tới `255.255.255.255:3000`, theo giao thức trong SDK Android chính thức của hãng
+  (`com.gprinter.udp.ethernet.*`). `scanXpPrinters` / `scanNetPrinters` / `findLanPrinterIssues` gộp cả máy Gprinter
+  (mục kết quả có `proto: gprinter`), `changeLanPrinterIp` tự dùng đúng giao thức theo MAC (tắt DHCP → IP → gateway →
+  netmask → khởi động lại mạng) nên "Sửa & thêm" máy lệch dải chạy như Xprinter. Gói dò gửi hai lần để bù UDP mất
+  gói. Có test `gprinter_udp_test.dart`; đã thử trên simulator iOS với máy Gprinter thật (đưa sang dải khác rồi tự
+  sửa về dải của quán), chưa thử trên iPhone thật (cần quyền multicast của Apple).
+
+* **Đổi IP máy in LAN nhanh hơn:** `changeLanPrinterIp(knownXpPrinter: true)` — máy đã trả lời broadcast
+  `XP0001FIND` (nên đã có MAC) chắc chắn nhận `XP0001SAVE` theo MAC, bỏ bước đọc cấu hình unicast và dò hãng qua cổng
+  in tới IP cũ (máy ở DẢI KHÁC thì hai bước này chỉ chờ hết hạn, vài giây). Xác minh máy in sau khi đổi: chờ đầu
+  1s (trước 2s) và hỏi mỗi 0,7s (trước 1,5s).
+* **Quét máy in qua broadcast (Android):** giữ `MulticastLock` trong lúc `scanNetPrinters` (nhả sau 1,5s) và khai báo
+  quyền `CHANGE_WIFI_MULTICAST_STATE` — một số máy lọc gói broadcast tới khi tiết kiệm điện Wi-Fi nên không nhận được
+  trả lời `XP0001FIND` (không thấy máy in, nhất là máy khác dải IP).
+
 ## [2.5.1] - 2026-11-19
 
 * **In ảnh dài không tràn RAM (Android):** `getEscPosRasterBytes` nhị phân hoá ảnh theo từng dải 64 dòng

@@ -61,7 +61,12 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
   bool _canChangeIp(Map<String, String> p) =>
       p['xp'] == 'true' || _getBrandType(p['vendor'], p['name'] ?? '') != 'POS';
 
-  String _getMethodLabel(String brandType) {
+  /// Máy in Gprinter (module Ethernet) trả lời gói dò `B[]G` của SDK hãng — đổi IP qua UDP
+  /// broadcast cổng 3000 (xem `GprinterUdp`), khác Xprinter (`XP0001SAVE`, cổng 9000).
+  bool _isGprinter(Map<String, String>? p) => p?['proto'] == 'gprinter';
+
+  String _getMethodLabel(String brandType, Map<String, String>? printer) {
+    if (_isGprinter(printer)) return 'UDP Broadcast 3000 (Gprinter)';
     switch (brandType) {
       case 'TSC':
         return 'TSPL Port 9100';
@@ -99,6 +104,8 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
             final entry = index >= 0 ? printers[index] : <String, String>{};
             entry['ip'] = ip;
             entry['xp'] = 'true';
+            // Máy Gprinter được dò bằng UDP `B[]G` (có sẵn MAC/IP/mask/gateway/DHCP).
+            if (item['proto'] == 'gprinter') entry['proto'] = 'gprinter';
             if (mac != null && mac.isNotEmpty) entry['mac'] = mac;
             entry.putIfAbsent('mac', () => '');
             entry.putIfAbsent('name', () => item['name'] ?? 'Máy in LAN');
@@ -123,8 +130,7 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
             final mac = device.mac ?? '';
             final index = printers.indexWhere(
               (p) =>
-                  p['ip'] == device.ip ||
-                  (mac.isNotEmpty && p['mac'] == mac),
+                  p['ip'] == device.ip || (mac.isNotEmpty && p['mac'] == mac),
             );
             if (index >= 0) {
               if (mac.isNotEmpty) printers[index]['mac'] = mac;
@@ -322,8 +328,7 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
                 ),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child:
-                  const Icon(Icons.router, color: Colors.white, size: 16),
+              child: const Icon(Icons.router, color: Colors.white, size: 16),
             ),
             const SizedBox(width: 10),
             const Text(
@@ -348,12 +353,11 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
                       height: 20,
                       child: CircularProgressIndicator(
                         strokeWidth: 2.2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                            Color(0xFF4F46E5)),
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(Color(0xFF4F46E5)),
                       ),
                     )
-                  : const Icon(Icons.radar,
-                      color: Color(0xFF4F46E5), size: 24),
+                  : const Icon(Icons.radar, color: Color(0xFF4F46E5), size: 24),
               tooltip: "Quét lại mạng",
             ),
           ),
@@ -463,7 +467,8 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
             GestureDetector(
               onTap: _scan,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: const Color(0xFF4F46E5).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
@@ -631,7 +636,10 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
               useDhcp = (p['dhcp'] == 'true');
             });
             final ip = p['ip'];
-            if (ip != null && ip.isNotEmpty) _prefillFromPrinter(ip);
+            // Máy Gprinter đã khai mask/gateway/DHCP trong gói dò, không cần hỏi thêm kiểu XP.
+            if (ip != null && ip.isNotEmpty && !_isGprinter(p)) {
+              _prefillFromPrinter(ip);
+            }
           },
           borderRadius: BorderRadius.circular(16),
           child: AnimatedContainer(
@@ -643,9 +651,8 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
                   : Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: isSelected
-                    ? const Color(0xFF4F46E5)
-                    : Colors.grey.shade200,
+                color:
+                    isSelected ? const Color(0xFF4F46E5) : Colors.grey.shade200,
                 width: isSelected ? 1.8 : 1.0,
               ),
               boxShadow: [
@@ -711,9 +718,11 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
                               ),
                             ),
                             child: Text(
-                              (p['vendor']?.isNotEmpty == true
-                                      ? p['vendor']!
-                                      : brandType) +
+                              (_isGprinter(p)
+                                      ? 'Gprinter'
+                                      : (p['vendor']?.isNotEmpty == true
+                                          ? p['vendor']!
+                                          : brandType)) +
                                   (_canChangeIp(p)
                                       ? ''
                                       : ' · không đổi IP được'),
@@ -799,7 +808,7 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
 
   // ─── Section 2: Configuration Console ───────────────────────────────────────
   Widget _buildConfigConsole(String selectedBrandType) {
-    final methodLabel = _getMethodLabel(selectedBrandType);
+    final methodLabel = _getMethodLabel(selectedBrandType, selectedPrinter);
     final targetMac = selectedPrinter!['mac'] ?? '';
 
     return Container(
@@ -827,8 +836,8 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
                   color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.tune,
-                    color: Color(0xFF4F46E5), size: 18),
+                child:
+                    const Icon(Icons.tune, color: Color(0xFF4F46E5), size: 18),
               ),
               const SizedBox(width: 10),
               const Expanded(
@@ -1189,7 +1198,8 @@ class _NetworkConfigScreenState extends State<NetworkConfigScreen>
                   : const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.save_outlined, color: Colors.white, size: 20),
+                        Icon(Icons.save_outlined,
+                            color: Colors.white, size: 20),
                         SizedBox(width: 8),
                         Text(
                           "Lưu cấu hình mạng",

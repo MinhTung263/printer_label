@@ -31,6 +31,8 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Nối tạm Wi-Fi của máy in khi in (Android 6–9: chuyển Wi-Fi bằng WifiManager). -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- Giữ MulticastLock khi quét máy in qua broadcast (xem scan_net_printers). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Máy Agent tự khởi động lại khi bật máy (AgentBootReceiver). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />

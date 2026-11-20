@@ -274,9 +274,16 @@ class POSNetConfigHelper {
             var discovered: [[String: Any]] = []
             var seenMacs = Set<String>()
             let startTime = Date()
+            var lastFoundAt: Date?
             var recvBuf = [UInt8](repeating: 0, count: 512)
 
             while Date().timeIntervalSince(startTime) < timeout {
+                // Trả sớm: đã có máy trả lời và 0,6s không có thêm máy nào.
+                if let last = lastFoundAt,
+                   Date().timeIntervalSince(startTime) >= 0.7,
+                   Date().timeIntervalSince(last) >= 0.6 {
+                    break
+                }
                 var srcAddr = sockaddr_in()
                 var srcLen = socklen_t(MemoryLayout<sockaddr_in>.size)
 
@@ -305,6 +312,7 @@ class POSNetConfigHelper {
 
                         if !macStr.isEmpty && !ipStr.isEmpty && !seenMacs.contains(macStr.uppercased()) {
                             seenMacs.insert(macStr.uppercased())
+                            lastFoundAt = Date()
                             discovered.append([
                                 "mac": macStr,
                                 "ip": ipStr,

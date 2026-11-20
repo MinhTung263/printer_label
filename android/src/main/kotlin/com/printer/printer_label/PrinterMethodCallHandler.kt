@@ -518,8 +518,23 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                 }
 
                 "scan_net_printers" -> {
-                    // Callback của SDK chạy trên thread khác, main thread đọc sau 1.5s.
+                    // Một số máy Android lọc gói broadcast / multicast tới (tiết kiệm điện Wi-Fi)
+                    // trừ khi app giữ MulticastLock: không có thì máy in trả lời tin
+                    // `XP0001FIND` mà app không nhận được (không thấy máy in, nhất là máy
+                    // khác dải IP). Giữ khoá trong lúc quét, nhả ngay sau đó.
+                    val multicastLock = runCatching {
+                        val ctx: android.content.Context? = plugin.activity ?: plugin.mContext
+                        (ctx?.applicationContext?.getSystemService(android.content.Context.WIFI_SERVICE)
+                            as? android.net.wifi.WifiManager)
+                            ?.createMulticastLock("printer_label_scan")
+                            ?.apply {
+                                setReferenceCounted(false)
+                                acquire()
+                            }
+                    }.getOrNull()
+                    // Callback của SDK chạy trên thread khác.
                     val devices = java.util.Collections.synchronizedList(mutableListOf<Map<String, Any>>())
+                    val lastAddAt = java.util.concurrent.atomic.AtomicLong(0L)
                     net.posprinter.POSPrinter.searchNetDevice { udpDevice ->
                         if (udpDevice != null) {
                             val map = mapOf(
@@ -530,14 +545,28 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                                 "dhcp" to udpDevice.isDhcp
                             )
                             devices.add(map)
+                            lastAddAt.set(android.os.SystemClock.elapsedRealtime())
                         }
                     }
-                    // searchNetDevice works synchronously or asynchronously? 
-                    // Wait, usually it might be asynchronous. We should probably wait a bit or it returns immediately.
-                    // Assuming we wait 1.5 seconds.
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        result.success(synchronized(devices) { devices.toList() })
-                    }, 1500)
+                    // Trước đây chờ cứng 1,5s. Giờ trả sớm: đã có máy trả lời và 0,6s không
+                    // có thêm máy nào (máy in thường trả lời trong vài trăm ms) — kết quả
+                    // hiện nhanh hơn rõ khi có máy; không có máy nào thì vẫn chờ đủ 1,5s.
+                    val startedAt = android.os.SystemClock.elapsedRealtime()
+                    val handler = Handler(Looper.getMainLooper())
+                    val tick = object : Runnable {
+                        override fun run() {
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            val last = lastAddAt.get()
+                            val quiet = last != 0L && now - startedAt >= 700 && now - last >= 600
+                            if (quiet || now - startedAt >= 1500) {
+                                runCatching { multicastLock?.takeIf { it.isHeld }?.release() }
+                                result.success(synchronized(devices) { devices.toList() })
+                            } else {
+                                handler.postDelayed(this, 100)
+                            }
+                        }
+                    }
+                    handler.postDelayed(tick, 100)
                 }
 
                 "set_net_ip" -> {

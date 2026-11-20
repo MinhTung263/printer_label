@@ -1,3 +1,4 @@
+import '../service/gprinter_udp.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'dart:convert';
@@ -891,23 +892,28 @@ class PrinterLabel {
       final dest = InternetAddress(ip);
       final completer = Completer<String?>();
 
-      sock.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final dg = sock?.receive();
-          if (dg == null || completer.isCompleted) return;
+      sock.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            final dg = sock?.receive();
+            if (dg == null || completer.isCompleted) return;
 
-          final values = _parseSnmpResponse(dg.data);
-          for (final v in values) {
-            final trimmed = v.trim();
-            if (trimmed.isNotEmpty &&
-                !trimmed.toUpperCase().contains('LINUX') &&
-                !trimmed.toUpperCase().contains('UNKNOWN')) {
-              completer.complete(trimmed);
-              return;
+            final values = _parseSnmpResponse(dg.data);
+            for (final v in values) {
+              final trimmed = v.trim();
+              if (trimmed.isNotEmpty &&
+                  !trimmed.toUpperCase().contains('LINUX') &&
+                  !trimmed.toUpperCase().contains('UNKNOWN')) {
+                completer.complete(trimmed);
+                return;
+              }
             }
           }
-        }
-      });
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       // OIDs chuẩn MIB-2, Printer MIB và Enterprise MIB của HPRT / POS
       final oids = [
@@ -954,15 +960,20 @@ class PrinterLabel {
       final dest = InternetAddress(ip);
       final completer = Completer<String?>();
 
-      sock.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final dg = sock?.receive();
-          if (dg == null || completer.isCompleted) return;
+      sock.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            final dg = sock?.receive();
+            if (dg == null || completer.isCompleted) return;
 
-          final mac = _parseSnmpMacResponse(dg.data);
-          if (mac != null) completer.complete(mac);
-        }
-      });
+            final mac = _parseSnmpMacResponse(dg.data);
+            if (mac != null) completer.complete(mac);
+          }
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       // ifPhysAddress cho vài chỉ số interface phổ biến (hầu hết máy in chỉ có 1-2 card mạng)
       final oids = ['1.3.6.1.2.1.2.2.1.6.1', '1.3.6.1.2.1.2.2.1.6.2'];
@@ -1002,29 +1013,34 @@ class PrinterLabel {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
 
       final completer = Completer<String?>();
-      socket.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final dg = socket?.receive();
-          if (dg == null || completer.isCompleted) return;
+      socket.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            final dg = socket?.receive();
+            if (dg == null || completer.isCompleted) return;
 
-          final text = String.fromCharCodes(
-            dg.data.where((b) => b >= 0x20 && b < 0x7F),
-          );
-          final vendor = detectVendor(text);
-          if (vendor != null) {
-            final modelMatch = RegExp(
-              r'\b(HT[0-9]+[A-Za-z0-9_-]*|HD[0-9]+[A-Za-z0-9_-]*|HM-[A-Za-z0-9_-]+|SL[0-9]+[A-Za-z0-9_-]*|TL[0-9]+[A-Za-z0-9_-]*|HL[0-9]+[A-Za-z0-9_-]*|N[0-9]+[A-Za-z0-9_-]*|LPQ[0-9]+[A-Za-z0-9_-]*|PPT[0-9]+[A-Za-z0-9_-]*|TP[0-9]+[A-Za-z0-9_-]*)\b',
-              caseSensitive: false,
-            ).firstMatch(text);
-            if (modelMatch != null) {
-              completer.complete('HPRT_${modelMatch.group(1)}');
+            final text = String.fromCharCodes(
+              dg.data.where((b) => b >= 0x20 && b < 0x7F),
+            );
+            final vendor = detectVendor(text);
+            if (vendor != null) {
+              final modelMatch = RegExp(
+                r'\b(HT[0-9]+[A-Za-z0-9_-]*|HD[0-9]+[A-Za-z0-9_-]*|HM-[A-Za-z0-9_-]+|SL[0-9]+[A-Za-z0-9_-]*|TL[0-9]+[A-Za-z0-9_-]*|HL[0-9]+[A-Za-z0-9_-]*|N[0-9]+[A-Za-z0-9_-]*|LPQ[0-9]+[A-Za-z0-9_-]*|PPT[0-9]+[A-Za-z0-9_-]*|TP[0-9]+[A-Za-z0-9_-]*)\b',
+                caseSensitive: false,
+              ).firstMatch(text);
+              if (modelMatch != null) {
+                completer.complete('HPRT_${modelMatch.group(1)}');
+                return;
+              }
+              completer.complete('HPRT');
               return;
             }
-            completer.complete('HPRT');
-            return;
           }
-        }
-      });
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       final dest = InternetAddress(ip);
       // Gói tin truy vấn cấu hình mạng HPRT / Hanin
@@ -1062,29 +1078,34 @@ class PrinterLabel {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
 
       final completer = Completer<String?>();
-      socket.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final dg = socket?.receive();
-          if (dg == null || completer.isCompleted) return;
+      socket.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            final dg = socket?.receive();
+            if (dg == null || completer.isCompleted) return;
 
-          final text = String.fromCharCodes(
-            dg.data.where((b) => b >= 0x20 && b < 0x7F),
-          );
-          final vendor = detectVendor(text);
-          if (vendor != null && vendor != 'POS' && vendor != 'Xprinter/POS') {
-            final modelMatch = RegExp(
-              r'\b(HT[0-9]+[A-Za-z0-9_-]*|HD[0-9]+[A-Za-z0-9_-]*|HM-[A-Za-z0-9_-]+|SL[0-9]+[A-Za-z0-9_-]*|TL[0-9]+[A-Za-z0-9_-]*|HL[0-9]+[A-Za-z0-9_-]*|N[0-9]+[A-Za-z0-9_-]*|LPQ[0-9]+[A-Za-z0-9_-]*|PPT[0-9]+[A-Za-z0-9_-]*|TP[0-9]+[A-Za-z0-9_-]*|XP-[A-Za-z0-9_-]+|GP-[A-Za-z0-9_-]+|TDP-[A-Za-z0-9_-]+|TTP-[A-Za-z0-9_-]+|RP[0-9]+[A-Za-z0-9_-]*|TM-[A-Za-z0-9_-]+|ZD[0-9]+|SRP-[A-Za-z0-9_-]+|BTP-[A-Za-z0-9_-]+)\b',
-              caseSensitive: false,
-            ).firstMatch(text);
-            if (modelMatch != null) {
-              completer.complete('${vendor}_${modelMatch.group(1)}');
+            final text = String.fromCharCodes(
+              dg.data.where((b) => b >= 0x20 && b < 0x7F),
+            );
+            final vendor = detectVendor(text);
+            if (vendor != null && vendor != 'POS' && vendor != 'Xprinter/POS') {
+              final modelMatch = RegExp(
+                r'\b(HT[0-9]+[A-Za-z0-9_-]*|HD[0-9]+[A-Za-z0-9_-]*|HM-[A-Za-z0-9_-]+|SL[0-9]+[A-Za-z0-9_-]*|TL[0-9]+[A-Za-z0-9_-]*|HL[0-9]+[A-Za-z0-9_-]*|N[0-9]+[A-Za-z0-9_-]*|LPQ[0-9]+[A-Za-z0-9_-]*|PPT[0-9]+[A-Za-z0-9_-]*|TP[0-9]+[A-Za-z0-9_-]*|XP-[A-Za-z0-9_-]+|GP-[A-Za-z0-9_-]+|TDP-[A-Za-z0-9_-]+|TTP-[A-Za-z0-9_-]+|RP[0-9]+[A-Za-z0-9_-]*|TM-[A-Za-z0-9_-]+|ZD[0-9]+|SRP-[A-Za-z0-9_-]+|BTP-[A-Za-z0-9_-]+)\b',
+                caseSensitive: false,
+              ).firstMatch(text);
+              if (modelMatch != null) {
+                completer.complete('${vendor}_${modelMatch.group(1)}');
+                return;
+              }
+              completer.complete(vendor);
               return;
             }
-            completer.complete(vendor);
-            return;
           }
-        }
-      });
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       final ssdpMsg = utf8.encode(
         "M-SEARCH * HTTP/1.1\r\n"
@@ -1118,45 +1139,50 @@ class PrinterLabel {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
 
       final completer = Completer<String?>();
-      socket.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final dg = socket?.receive();
-          if (dg == null || completer.isCompleted) return;
+      socket.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            final dg = socket?.receive();
+            if (dg == null || completer.isCompleted) return;
 
-          // Parse raw bytes in mDNS response for printer information
-          final text = String.fromCharCodes(
-            dg.data.where((b) => b >= 0x20 && b < 0x7F),
-          );
+            // Parse raw bytes in mDNS response for printer information
+            final text = String.fromCharCodes(
+              dg.data.where((b) => b >= 0x20 && b < 0x7F),
+            );
 
-          // 1. Tìm TXT record `ty=...` hoặc `product=...` hoặc `mdl=...`
-          final match = RegExp(
-            r'(ty|product|mdl|model|mfg)=([^\x00\r\n;]+)',
-            caseSensitive: false,
-          ).firstMatch(text);
-          if (match != null) {
-            final modelStr = match.group(2)?.trim();
-            if (modelStr != null && modelStr.isNotEmpty) {
-              completer.complete(modelStr);
-              return;
-            }
-          }
-
-          // 2. Tìm model match thông thường từ toàn bộ text
-          final vendor = detectVendor(text);
-          if (vendor != null && vendor != 'POS' && vendor != 'Xprinter/POS') {
-            final modelMatch = RegExp(
-              r'\b(HT[0-9]+[A-Za-z0-9_-]*|HD[0-9]+[A-Za-z0-9_-]*|HM-[A-Za-z0-9_-]+|SL[0-9]+[A-Za-z0-9_-]*|TL[0-9]+[A-Za-z0-9_-]*|HL[0-9]+[A-Za-z0-9_-]*|N[0-9]+[A-Za-z0-9_-]*|LPQ[0-9]+[A-Za-z0-9_-]*|PPT[0-9]+[A-Za-z0-9_-]*|TP[0-9]+[A-Za-z0-9_-]*|XP-[A-Za-z0-9_-]+|GP-[A-Za-z0-9_-]+|TDP-[A-Za-z0-9_-]+|TTP-[A-Za-z0-9_-]+|RP[0-9]+[A-Za-z0-9_-]*|TM-[A-Za-z0-9_-]+|ZD[0-9]+|SRP-[A-Za-z0-9_-]+|BTP-[A-Za-z0-9_-]+)\b',
+            // 1. Tìm TXT record `ty=...` hoặc `product=...` hoặc `mdl=...`
+            final match = RegExp(
+              r'(ty|product|mdl|model|mfg)=([^\x00\r\n;]+)',
               caseSensitive: false,
             ).firstMatch(text);
-            if (modelMatch != null) {
-              completer.complete(modelMatch.group(1));
+            if (match != null) {
+              final modelStr = match.group(2)?.trim();
+              if (modelStr != null && modelStr.isNotEmpty) {
+                completer.complete(modelStr);
+                return;
+              }
+            }
+
+            // 2. Tìm model match thông thường từ toàn bộ text
+            final vendor = detectVendor(text);
+            if (vendor != null && vendor != 'POS' && vendor != 'Xprinter/POS') {
+              final modelMatch = RegExp(
+                r'\b(HT[0-9]+[A-Za-z0-9_-]*|HD[0-9]+[A-Za-z0-9_-]*|HM-[A-Za-z0-9_-]+|SL[0-9]+[A-Za-z0-9_-]*|TL[0-9]+[A-Za-z0-9_-]*|HL[0-9]+[A-Za-z0-9_-]*|N[0-9]+[A-Za-z0-9_-]*|LPQ[0-9]+[A-Za-z0-9_-]*|PPT[0-9]+[A-Za-z0-9_-]*|TP[0-9]+[A-Za-z0-9_-]*|XP-[A-Za-z0-9_-]+|GP-[A-Za-z0-9_-]+|TDP-[A-Za-z0-9_-]+|TTP-[A-Za-z0-9_-]+|RP[0-9]+[A-Za-z0-9_-]*|TM-[A-Za-z0-9_-]+|ZD[0-9]+|SRP-[A-Za-z0-9_-]+|BTP-[A-Za-z0-9_-]+)\b',
+                caseSensitive: false,
+              ).firstMatch(text);
+              if (modelMatch != null) {
+                completer.complete(modelMatch.group(1));
+                return;
+              }
+              completer.complete(vendor);
               return;
             }
-            completer.complete(vendor);
-            return;
           }
-        }
-      });
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       // DNS Query Header (Transaction ID: 0x0001, Standard Query)
       // Query for _printer._tcp.local (PTR)
@@ -1201,49 +1227,54 @@ class PrinterLabel {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
 
       final completer = Completer<String?>();
-      socket.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final datagram = socket?.receive();
-          if (datagram != null &&
-              datagram.data.length > 40 &&
-              !completer.isCompleted) {
-            final data = datagram.data;
-            final text = String.fromCharCodes(
-              data.where((b) => (b >= 0x20 && b < 0x7F) || b == 0x00),
-            );
-            final tokens = text
-                .split(RegExp(r'[\x00\s]+'))
-                .map((s) => s.trim())
-                .where(
-                  (s) =>
-                      s.length >= 3 &&
-                      s.length <= 20 &&
-                      !s.contains('WORKGROUP') &&
-                      !s.contains('MSBROWSE'),
-                )
-                .toList();
+      socket.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            final datagram = socket?.receive();
+            if (datagram != null &&
+                datagram.data.length > 40 &&
+                !completer.isCompleted) {
+              final data = datagram.data;
+              final text = String.fromCharCodes(
+                data.where((b) => (b >= 0x20 && b < 0x7F) || b == 0x00),
+              );
+              final tokens = text
+                  .split(RegExp(r'[\x00\s]+'))
+                  .map((s) => s.trim())
+                  .where(
+                    (s) =>
+                        s.length >= 3 &&
+                        s.length <= 20 &&
+                        !s.contains('WORKGROUP') &&
+                        !s.contains('MSBROWSE'),
+                  )
+                  .toList();
 
-            for (final token in tokens) {
-              if (isSpecificModel(token)) {
-                completer.complete(token);
+              for (final token in tokens) {
+                if (isSpecificModel(token)) {
+                  completer.complete(token);
+                  return;
+                }
+                final vendor = detectVendor(token);
+                if (vendor != null &&
+                    vendor != 'POS' &&
+                    vendor != 'Xprinter/POS') {
+                  completer.complete(token);
+                  return;
+                }
+              }
+
+              if (tokens.isNotEmpty) {
+                completer.complete(tokens.first);
                 return;
               }
-              final vendor = detectVendor(token);
-              if (vendor != null &&
-                  vendor != 'POS' &&
-                  vendor != 'Xprinter/POS') {
-                completer.complete(token);
-                return;
-              }
-            }
-
-            if (tokens.isNotEmpty) {
-              completer.complete(tokens.first);
-              return;
             }
           }
-        }
-      });
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       socket.send(_nbstatPacket, InternetAddress(ip), 137);
 
@@ -1286,14 +1317,19 @@ class PrinterLabel {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
 
       final completer = Completer<String?>();
-      socket.listen((event) {
-        if (event == RawSocketEvent.read) {
-          final datagram = socket?.receive();
-          if (datagram == null || completer.isCompleted) return;
-          final mac = _parseNetBiosMac(datagram.data);
-          if (mac != null) completer.complete(mac);
-        }
-      });
+      socket.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            final datagram = socket?.receive();
+            if (datagram == null || completer.isCompleted) return;
+            final mac = _parseNetBiosMac(datagram.data);
+            if (mac != null) completer.complete(mac);
+          }
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       socket.send(_nbstatPacket, InternetAddress(ip), 137);
 
@@ -2783,20 +2819,16 @@ class PrinterLabel {
     _recentNetScanAt = DateTime.now();
     // SDK (XP0001FIND: Xprinter, PDIT...) và broadcast theo giao thức hãng (Epson,
     // Star) chạy song song; gộp theo IP, ưu tiên bản SDK (có sẵn MAC).
-    final future =
-        Future.wait([
-          _platform.scanNetPrinters().catchError(
-            (_) => <Map<String, String>>[],
-          ),
-          scanVendorBroadcast(),
-        ]).then((lists) {
-          final byIp = <String, Map<String, String>>{};
-          for (final item in [...lists[0], ...lists[1]]) {
-            final ip = item['ip'];
-            if (ip != null && ip.isNotEmpty) byIp.putIfAbsent(ip, () => item);
-          }
-          return byIp.values.toList();
-        });
+    final future = Future.wait([_sdkScanShared(), scanVendorBroadcast()]).then((
+      lists,
+    ) {
+      final byIp = <String, Map<String, String>>{};
+      for (final item in [...lists[0], ...lists[1]]) {
+        final ip = item['ip'];
+        if (ip != null && ip.isNotEmpty) byIp.putIfAbsent(ip, () => item);
+      }
+      return byIp.values.toList();
+    });
     _recentNetScan = future;
     future.catchError((_) {
       _recentNetScan = null;
@@ -2926,7 +2958,10 @@ class PrinterLabel {
           vendor: 'POS',
           bindSamePort: false,
           payloads: [ascii.encode(_genericFindPayload)],
-          matches: (d) => String.fromCharCodes(d) != _genericFindPayload,
+          // Nhiều hộp mạng ESC/POS trả lời bằng CHÍNH chuỗi dò (dội lại, nguồn là IP máy in).
+          // Socket này bind cổng ngẫu nhiên nên chỉ nhận được gói trả lời gửi riêng cho nó,
+          // còn gói dội của chính máy này đã bị loại ở trên (theo IP máy).
+          matches: (_) => true,
         ),
     ]);
     await Future.delayed(wait);
@@ -2934,6 +2969,28 @@ class PrinterLabel {
       s.close();
     }
     return found.values.toList();
+  }
+
+  /// Máy in ESC/POS trả lời gói dò chung nhưng đang ở dải IP KHÁC thiết bị (điện thoại không
+  /// tới được, và không có giao thức đổi IP): trả danh sách IP để báo người dùng. Máy đã có
+  /// MAC (Xprinter...) do [findLanPrinterIssues] xử lý nên không lặp lại ở đây.
+  static Future<List<String>> findOtherSubnetPosPrinters() async {
+    final localPrefixes = (await _localPrivateIpv4s())
+        .map((ip) => ip.split('.').take(3).join('.'))
+        .toSet();
+    if (localPrefixes.isEmpty) return const [];
+    final xpIps = {
+      for (final item in await _sdkScanShared())
+        if (item['ip'] != null) item['ip']!,
+    };
+    final found = await scanVendorBroadcast();
+    return [
+      for (final item in found)
+        if (item['ip'] != null &&
+            !xpIps.contains(item['ip']) &&
+            !localPrefixes.contains(item['ip']!.split('.').take(3).join('.')))
+          item['ip']!,
+    ];
   }
 
   static const String _genericFindPayload = 'FIND_POS_PRINTER';
@@ -2946,6 +3003,83 @@ class PrinterLabel {
     );
     final m = RegExp(r'([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}').firstMatch(text);
     return m == null ? null : normalizeMac(m.group(0));
+  }
+
+  /// MAC các máy in nói giao thức Gprinter (UDP `B[]G`), điền sau mỗi lần dò.
+  static final Set<String> _gprinterMacs = <String>{};
+
+  static Future<List<Map<String, String>>>? _recentSdkScan;
+  static DateTime _recentSdkScanAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Quét SDK (`XP0001FIND`) dùng chung trong [_netScanShare]: [scanNetPrinters],
+  /// [findLanPrinterIssues] và tìm lại theo MAC chạy gần nhau chỉ broadcast một lần.
+  /// Quét máy in `XP0001FIND` (Xprinter, PDIT...) bằng broadcast — nhanh (không chờ
+  /// broadcast hãng Epson / Star như [scanNetPrinters]) và dùng chung kết quả trong
+  /// vài giây. Trả `[{mac, ip, mask, gateway, dhcp}]` của MỌI máy trả lời, kể cả máy
+  /// đang ở dải IP khác thiết bị. Dùng để biết một máy (theo MAC) đang ở IP nào ngay
+  /// khi kết nối tới IP đã lưu thất bại, thay vì chờ kết nối hết hạn.
+  ///
+  /// [fresh]: bỏ kết quả dùng chung vài giây trước, quét mới (dùng khi vừa có thay đổi
+  /// — VD in lỗi vì máy đổi IP — kết quả cũ có thể chưa có máy).
+  static Future<List<Map<String, String>>> scanXpPrinters({
+    bool fresh = false,
+  }) {
+    if (fresh) _recentSdkScan = null;
+    return _sdkScanShared();
+  }
+
+  static Future<List<Map<String, String>>> _sdkScanShared() {
+    final recent = _recentSdkScan;
+    if (recent != null &&
+        DateTime.now().difference(_recentSdkScanAt) < _netScanShare) {
+      return recent;
+    }
+    _recentSdkScanAt = DateTime.now();
+    // Máy Xprinter (XP0001FIND, native) và Gprinter (UDP `B[]G`, Dart) dò song song; máy
+    // Gprinter được đánh dấu để [changeLanPrinterIp] dùng đúng giao thức.
+    final future =
+        Future.wait([
+          _platform.scanNetPrinters().catchError(
+            (_) => <Map<String, String>>[],
+          ),
+          GprinterUdp.search().catchError((_) => <GprinterNetInfo>[]),
+        ]).then((r) {
+          final xp = r[0] as List<Map<String, String>>;
+          final gp = r[1] as List<GprinterNetInfo>;
+          final xpIps = {
+            for (final i in xp)
+              if (i['ip'] != null) i['ip']!,
+          };
+          return [
+            ...xp,
+            for (final g in gp)
+              if (!xpIps.contains(g.ip))
+                {
+                  'ip': g.ip,
+                  'mac': g.mac,
+                  'mask': g.mask,
+                  'gateway': g.gateway,
+                  'dhcp': '${g.dhcp}',
+                  'proto': 'gprinter',
+                  if (g.name != null) 'name': g.name!,
+                },
+          ];
+        });
+    _recentSdkScan = future;
+    future
+        .then((list) {
+          for (final i in list) {
+            final mac = normalizeMac(i['mac']);
+            if (mac == null) continue;
+            if (i['proto'] == 'gprinter') {
+              _gprinterMacs.add(mac);
+            } else {
+              _gprinterMacs.remove(mac);
+            }
+          }
+        })
+        .catchError((_) {});
+    return future;
   }
 
   static const Duration _netScanShare = Duration(seconds: 5);
@@ -2971,7 +3105,10 @@ class PrinterLabel {
     String prefix(String ip) => ip.split('.').take(3).join('.');
 
     final printers = <String, LanPrinterNetInfo>{};
-    for (final item in await scanNetPrinters()) {
+    // Chỉ cần kết quả SDK (`XP0001FIND`): máy tìm qua broadcast hãng (Epson / Star) bị bỏ
+    // ở dưới nên không chờ chúng (`scanNetPrinters` chờ cả hai, ~1,5s) — hiện sớm hơn.
+    final sdkScan = await _sdkScanShared();
+    for (final item in sdkScan) {
       final ip = item['ip']?.trim() ?? '';
       final mac = normalizeMac(item['mac']);
       if (mac == null || _ipv4ToInt(ip) == null) continue;
@@ -3071,15 +3208,20 @@ class PrinterLabel {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
       final completer = Completer<LanPrinterNetInfo?>();
 
-      socket.listen((event) {
-        if (event != RawSocketEvent.read) return;
-        final dg = socket?.receive();
-        if (dg == null || completer.isCompleted) return;
-        // Chỉ nhận trả lời từ đúng IP được hỏi.
-        if (dg.address.address != dest.address) return;
-        final info = _parseXpFoundPacket(dg.data);
-        if (info != null) completer.complete(info);
-      });
+      socket.listen(
+        (event) {
+          if (event != RawSocketEvent.read) return;
+          final dg = socket?.receive();
+          if (dg == null || completer.isCompleted) return;
+          // Chỉ nhận trả lời từ đúng IP được hỏi.
+          if (dg.address.address != dest.address) return;
+          final info = _parseXpFoundPacket(dg.data);
+          if (info != null) completer.complete(info);
+        },
+        // Lỗi gửi / nhận UDP (VD "Host is down" khi IP không tới được) báo qua stream:
+        // không bắt thì thành lỗi không xử lý ở toàn app.
+        onError: (Object _) {},
+      );
 
       final packet = ascii.encode('XP0001FIND');
       socket.send(packet, dest, 9000);
@@ -3227,13 +3369,26 @@ class PrinterLabel {
   /// Máy in (đúng [mac] nếu biết) có đang trả lời ở [ip] và in được không.
   static Future<bool> _printerAnswersAt(String ip, String? mac) async {
     final xp = await queryXpUdpInfo(ip);
-    if (xp != null && mac != null && xp.mac != mac) return false;
+    // Máy trả lời `XP0001FIND` ở [ip] với ĐÚNG MAC là đủ chứng minh cấu hình mới đã áp
+    // dụng. KHÔNG mở thêm cổng in 9100: máy in nhiệt chỉ nhận một kết nối — nếu app còn
+    // giữ kết nối cũ tới IP này (hoặc vừa mở / đóng dồn dập) thì lần thử TCP thất bại và
+    // báo "chưa xác minh" dù máy in đã đổi IP.
+    if (xp != null && mac != null) return xp.mac == mac;
     if (xp == null && mac != null) {
       final found = normalizeMac(await resolveLanPrinterMac(ip));
       // Đọc được MAC mà khác → máy khác. Không đọc được MAC → chỉ dựa vào cổng in.
       if (found != null && found != mac) return false;
     }
     return _tcpOpen(ip, 9100);
+  }
+
+  /// Máy họ Xprinter ([mac]) đã trả lời broadcast `XP0001FIND` ở đúng [ip] chưa. Dùng để
+  /// xác minh sau khi đổi IP: nhiều máy chỉ trả lời broadcast chứ KHÔNG trả lời gói gửi
+  /// riêng (unicast) tới nó, nên hỏi unicast thì vòng nào cũng thất bại. Quét mới mỗi vòng
+  /// (không dùng kết quả chung).
+  static Future<bool> _xpAnswersViaBroadcast(String ip, String mac) async {
+    final list = await scanXpPrinters(fresh: true);
+    return list.any((i) => normalizeMac(i['mac']) == mac && i['ip'] == ip);
   }
 
   /// Tìm IP hiện tại của máy in theo [mac] sau khi chuyển sang DHCP.
@@ -3379,6 +3534,13 @@ class PrinterLabel {
     String? gateway,
     bool checkConflict = true,
     Duration verifyTimeout = const Duration(seconds: 15),
+
+    /// Máy ĐÃ trả lời tin broadcast `XP0001FIND` (Xprinter, PDIT... — nhờ vậy mới có [mac]
+    /// và [currentIp]) nên chắc chắn nhận `XP0001SAVE` theo MAC: bỏ qua bước đọc cấu hình
+    /// unicast tới [currentIp] và dò hãng qua cổng in. Máy ở DẢI KHÁC thì unicast tới
+    /// [currentIp] không tới được — mỗi bước đó chỉ chờ hết hạn (vài giây) rồi vẫn đi
+    /// đúng đường UDP theo MAC. Cần truyền [mac] (và nên truyền [mask] / [gateway]).
+    bool knownXpPrinter = false,
   }) async {
     final oldIp = currentIp.trim();
     if (_ipv4ToInt(oldIp) == null) {
@@ -3389,15 +3551,17 @@ class PrinterLabel {
     }
 
     // 1. Cấu hình hiện tại và MAC của máy in.
-    final info = await queryXpUdpInfo(oldIp);
+    final skipProbe = knownXpPrinter && normalizeMac(mac) != null;
+    final info = skipProbe ? null : await queryXpUdpInfo(oldIp);
     String? printerMac = normalizeMac(mac) ?? info?.mac;
     printerMac ??= normalizeMac(await resolveLanPrinterMac(oldIp));
+    final isGprinter = printerMac != null && _gprinterMacs.contains(printerMac);
 
     // Cách gửi lệnh: máy trả lời XP0001FIND -> UDP XP0001SAVE; TSC/Godex/Zebra do
     // plugin tự nhận ra -> lệnh văn bản qua 9100.
     final vendor =
         vendorFromMac(printerMac) ??
-        (info == null
+        (info == null && !skipProbe
             ? detectVendor(await getLanPrinterName(oldIp) ?? '')
             : null);
     final lowerVendor = (vendor ?? '').toLowerCase();
@@ -3528,6 +3692,18 @@ class PrinterLabel {
       if (await _sendRawNetCommand(oldIp, command)) {
         method = isTspl ? 'tspl' : 'zpl';
       }
+    } else if (isGprinter) {
+      // Máy in Gprinter: lệnh UDP theo SDK của hãng (tắt DHCP → IP → gateway → netmask →
+      // khởi động lại mạng), không phải XP0001SAVE.
+      final sent = dhcp
+          ? await GprinterUdp.setDhcp(mac: printerMac)
+          : await GprinterUdp.setStatic(
+              mac: printerMac,
+              ip: targetIp ?? oldIp,
+              mask: effMask,
+              gateway: effGateway.isEmpty ? (info?.gateway ?? '') : effGateway,
+            );
+      if (sent) method = 'gprinter';
     } else {
       // Có MAC: XP0001SAVE qua UDP. Không có MAC: native thử SDK riêng của nền tảng.
       final sent = await _platform.setNetIp(
@@ -3557,16 +3733,22 @@ class PrinterLabel {
 
     // 5. Xác minh máy in đã nhận cấu hình mới.
     final deadline = DateTime.now().add(verifyTimeout);
-    await Future.delayed(const Duration(seconds: 2));
+    // Máy in cần một nhịp để áp cấu hình mạng mới; hỏi sớm hơn (1s) và dày hơn (0,7s)
+    // để biết ngay khi máy trả lời — trước đây chờ cứng 2s rồi mỗi 1,5s.
+    await Future.delayed(const Duration(seconds: 1));
     String? verifiedIp;
     if (!dhcp) {
       while (true) {
-        if (await _printerAnswersAt(targetIp!, printerMac)) {
+        if (isGprinter
+            ? await _gprinterAnswersAt(targetIp!, printerMac)
+            : skipProbe && printerMac != null
+            ? await _xpAnswersViaBroadcast(targetIp!, printerMac)
+            : await _printerAnswersAt(targetIp!, printerMac)) {
           verifiedIp = targetIp;
           break;
         }
         if (!DateTime.now().isBefore(deadline)) break;
-        await Future.delayed(const Duration(milliseconds: 1500));
+        await Future.delayed(const Duration(milliseconds: 700));
       }
     } else if (printerMac != null) {
       verifiedIp = await _findPrinterIpByMac(printerMac, oldIp, deadline);
@@ -3604,6 +3786,14 @@ class PrinterLabel {
                 'cho thiết bị khác khi máy in tắt — nên đặt DHCP reservation (giữ IP '
                 'theo MAC) trên router.',
     );
+  }
+
+  /// Máy Gprinter [mac] đang trả lời ở [ip] (dò lại bằng UDP broadcast, đúng MAC và IP).
+  static Future<bool> _gprinterAnswersAt(String ip, String mac) async {
+    final found = await GprinterUdp.search(
+      wait: const Duration(milliseconds: 900),
+    );
+    return found.any((g) => g.mac == mac && g.ip == ip);
   }
 
   /// Đổi IP máy in (API cũ, giữ để tương thích).

@@ -1,6 +1,7 @@
 library printer_label;
 
 export 'src/platform/printer_label.dart';
+export 'src/service/gprinter_udp.dart';
 
 // Export models
 export 'src/models/barcode_model.dart';
