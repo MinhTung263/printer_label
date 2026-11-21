@@ -298,6 +298,15 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                 return
             }
 
+            // Kết nối hiện có còn sống (VD lệnh in vừa nối xong): dùng luôn, không đóng —
+            // đóng ở đây là cắt ngang lệnh in đang gửi trên kết nối đó.
+            plugin.connections[deviceId]?.let { existing ->
+                if (existing.isConnect) {
+                    plugin.pendingConnects.remove(deviceId)?.complete(true)
+                    return
+                }
+            }
+
             runCatching { plugin.connections[deviceId]?.close() }
 
             val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_BLUETOOTH) ?: run {
@@ -307,7 +316,11 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             }
             plugin.connections[deviceId] = device
             plugin.connectionTypes[deviceId] = ConnectionType.BT
-            device.connect(plugin.rawId(deviceId), plugin.makeConnectListener(deviceId))
+            device.connect(
+                plugin.rawId(deviceId),
+                // owner: sự kiện lỗi của kết nối CŨ (đã bị thay) không được xoá kết nối mới.
+                plugin.makeConnectListener(deviceId) { device }
+            )
             plugin.scheduleConnectTimeout(deviceId)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -916,6 +929,9 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         return connectBtSync(mac, markBuiltIn = true)
     }
 
+    /** Chờ kết nối Bluetooth (kể cả chờ lệnh kết nối khác tới cùng máy) tối đa ngần này. */
+    private val CONNECT_WAIT_MS = 8_000L
+
     internal fun connectBtSync(macAddress: String, markBuiltIn: Boolean = false): Boolean {
         val deviceId = "BT:$macAddress"
         try {
@@ -927,6 +943,25 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             // Stop scanning if any
             runCatching { adapter.cancelDiscovery() }
 
+            // Đang có lệnh kết nối KHÔNG đồng bộ tới đúng máy này (khởi động app / trạm in
+            // kiểm tra máy tích hợp): chờ nó xong rồi dùng luôn, KHÔNG đóng kết nối nó đang
+            // mở — trước đây hai đường đóng kết nối của nhau nên cả hai cùng thất bại.
+            val waitUntil = android.os.SystemClock.elapsedRealtime() + CONNECT_WAIT_MS
+            while (plugin.pendingConnects.containsKey(deviceId) &&
+                android.os.SystemClock.elapsedRealtime() < waitUntil
+            ) {
+                Thread.sleep(100)
+            }
+            plugin.connections[deviceId]?.let { existing ->
+                if (existing.isConnect) {
+                    if (markBuiltIn) {
+                        plugin.builtInDeviceIds.add(deviceId)
+                        markBuiltInPrinterConfirmed()
+                    }
+                    return true
+                }
+            }
+
             runCatching { plugin.connections[deviceId]?.close() }
 
             val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_BLUETOOTH) ?: return false
@@ -935,13 +970,29 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
 
             val latch = java.util.concurrent.CountDownLatch(1)
             val listener = net.posprinter.IConnectListener { code, _, _ ->
+                // Kết nối hỏng / đứt về sau: bỏ khỏi danh sách để lần in sau nối lại, thay
+                // vì dùng tiếp kết nối chết. Chỉ đụng tới CHÍNH kết nối này (đã bị thay thì
+                // để yên kết nối mới).
+                if (code == POSConnect.CONNECT_FAIL || code == POSConnect.CONNECT_INTERRUPT) {
+                    if (plugin.connections[deviceId] === device) {
+                        plugin.connections.remove(deviceId)
+                        plugin.connectionTypes.remove(deviceId)
+                    }
+                    runCatching { device.close() }
+                }
                 latch.countDown()
             }
             device.connect(plugin.rawId(deviceId), listener)
 
-            // Chờ tối đa 3.5 giây cho việc kết nối hoàn tất
-            latch.await(3500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            // Bluetooth ảo của máy in tích hợp có lúc mất vài giây mới nối xong (máy vừa
+            // thức dậy, dịch vụ máy in vừa khởi động lại): 3,5s cũ hay hết hạn -> NO_CONNECTION.
+            latch.await(CONNECT_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             val connected = device.isConnect
+            if (!connected && plugin.connections[deviceId] === device) {
+                plugin.connections.remove(deviceId)
+                plugin.connectionTypes.remove(deviceId)
+                runCatching { device.close() }
+            }
             if (connected && markBuiltIn) {
                 plugin.builtInDeviceIds.add(deviceId)
                 markBuiltInPrinterConfirmed()

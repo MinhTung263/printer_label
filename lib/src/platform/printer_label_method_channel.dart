@@ -131,6 +131,15 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<List<UsbPrinterInfo>> getUsbPrinters() async {
+    if (!Platform.isAndroid) return const [];
+    final raw = await _channel.invokeListMethod<Map<dynamic, dynamic>>(
+      PrinterMethod.get_usb_printers.name,
+    );
+    return (raw ?? const []).map(UsbPrinterInfo.fromMap).toList();
+  }
+
+  @override
   Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission() async {
     if (!Platform.isAndroid) return const [];
     final raw = await _channel.invokeListMethod<Map<dynamic, dynamic>>(

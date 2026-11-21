@@ -103,6 +103,14 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     result.success(plugin.getUsbPrintersNeedingPermission())
                 }
 
+                "get_usb_printers" -> {
+                    // Đọc IEEE 1284 qua USB có thể mất tới ~1s mỗi máy: chạy nền.
+                    kotlin.concurrent.thread {
+                        val list = runCatching { plugin.getUsbPrinters() }.getOrDefault(emptyList())
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { result.success(list) }
+                    }
+                }
+
                 "request_usb_permissions" -> {
                     val deviceId = call.argument<String>("device_id")
                     plugin.requestUsbPermissions(result, deviceId)

@@ -151,6 +151,28 @@ class TcpPrinterPort implements PrinterPort {
     }
   });
 
+  /// Hỏi lần lượt [requests] trên MỘT kết nối (xếp hàng cùng các việc khác tới máy này):
+  /// máy in LAN giá rẻ chỉ nhận một kết nối, mở kết nối mới cho từng câu hỏi dễ đụng
+  /// nhau / bị từ chối. Câu trả lời theo đúng thứ tự; `null` = không trả lời câu đó.
+  Future<List<Uint8List?>> exchangeMany(
+    List<Uint8List> requests, {
+    Duration timeout = const Duration(milliseconds: 700),
+  }) => PortQueue.run(id, () async {
+    final conn = await _open();
+    try {
+      final replies = <Uint8List?>[];
+      for (final request in requests) {
+        conn.drain();
+        conn.socket.add(request);
+        await conn.socket.flush();
+        replies.add(await conn.readAny(timeout));
+      }
+      return replies;
+    } finally {
+      await conn.close();
+    }
+  });
+
   @override
   Future<PaperStatus> queryStatus() => PortQueue.run(id, () async {
     final conn = await _open();

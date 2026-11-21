@@ -11,6 +11,7 @@ enum PrinterMethod {
   set_hold_usb_permission_queue,
   release_usb_permission_queue,
   get_usb_printers_needing_permission,
+  get_usb_printers,
   request_usb_permissions,
   scan_bt,
   stop_scan_bt,

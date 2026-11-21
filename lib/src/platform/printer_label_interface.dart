@@ -91,6 +91,10 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// permission for yet (e.g. right after the device was rebooted).
   Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission();
 
+  /// Android only. Every plugged-in USB printer, with permission state and (when
+  /// permitted) its IEEE 1284 Device ID.
+  Future<List<UsbPrinterInfo>> getUsbPrinters() async => const [];
+
   /// Android only. Shows the system permission dialog for every USB printer
   /// returned by [getUsbPrintersNeedingPermission], or a specific printer if [deviceId] is specified.
   /// Completes after the user answered all of them, with how many were granted.

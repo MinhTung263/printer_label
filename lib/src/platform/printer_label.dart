@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show PlatformException;
+
 import '../desktop/lan_printer_scanner.dart' show LanPrinterScanner;
 import '../desktop/printer_language_probe.dart';
 import '../src.dart';
@@ -125,6 +127,11 @@ class PrinterLabel {
 
   /// Android only. USB printers currently plugged in that still need the user
   /// to grant permission (e.g. after the device was powered off and on).
+  /// Android only. Mọi máy in USB đang cắm, kèm trạng thái quyền và (khi đã có quyền)
+  /// chuỗi IEEE 1284 để nhận biết máy in tem / hoá đơn.
+  static Future<List<UsbPrinterInfo>> getUsbPrinters() =>
+      _platform.getUsbPrinters();
+
   static Future<List<UsbPrinterInfo>> getUsbPrintersNeedingPermission() =>
       _platform.getUsbPrintersNeedingPermission();
 
@@ -529,6 +536,9 @@ class PrinterLabel {
     // Giữ khớp với `LanPrinterProbe.kt`.
     '00BACB': 'KiotViet',
     '00617B': 'Xprinter', '00611B': 'Xprinter', '00616D': 'Xprinter',
+    // Gprinter — module mạng của máy thật tự khai MFC:GPRINTER qua gói `B[]G`
+    // (00:47:50:3D:B4:A4, 00:47:50:25:CC:BC, 2026-11-21). Giữ khớp với `LanPrinterProbe.kt`.
+    '004750': 'Gprinter',
   };
 
   /// Tra hãng máy in theo MAC (VD "00:1A:EF:CB:2C:B0" -> "PDIT"). Trả null nếu không biết.
@@ -1008,6 +1018,12 @@ class PrinterLabel {
     String ip, {
     Duration timeout = const Duration(milliseconds: 500),
   }) async {
+    // Gói tin truy vấn cấu hình mạng HPRT / Hanin
+    final hprtPackets = <List<int>>[
+      utf8.encode("HPRT_DISCOVER\r\n"),
+      utf8.encode("PRINTER_SEARCH\r\n"),
+      [0x00, 0x01, 0x00, 0x00, 0x48, 0x50, 0x52, 0x54], // Binary HPRT header
+    ];
     RawDatagramSocket? socket;
     try {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
@@ -1022,6 +1038,14 @@ class PrinterLabel {
             final text = String.fromCharCodes(
               dg.data.where((b) => b >= 0x20 && b < 0x7F),
             );
+            // Gói DỘI LẠI chính gói hỏi (module mạng Gprinter dội mọi gói UDP tới cổng
+            // 3000): trước đây chữ "HPRT" trong gói hỏi làm mọi máy Gprinter bị đặt tên
+            // "HPRT". Bỏ qua.
+            if (text.contains('HPRT_DISCOVER') ||
+                text.contains('PRINTER_SEARCH') ||
+                _isEcho(dg.data, hprtPackets)) {
+              return;
+            }
             final vendor = detectVendor(text);
             if (vendor != null) {
               final modelMatch = RegExp(
@@ -1043,17 +1067,13 @@ class PrinterLabel {
       );
 
       final dest = InternetAddress(ip);
-      // Gói tin truy vấn cấu hình mạng HPRT / Hanin
-      final hprtPackets = [
-        utf8.encode("HPRT_DISCOVER\r\n"),
-        utf8.encode("PRINTER_SEARCH\r\n"),
-        [0x00, 0x01, 0x00, 0x00, 0x48, 0x50, 0x52, 0x54], // Binary HPRT header
-      ];
-
+      // Máy đã biết là Gprinter: KHÔNG gửi gói lạ tới cổng 3000 (module dội lại mọi gói,
+      // hai máy có thể dội qua lại hàng nghìn gói — xem docs/PRINTER_NETWORK_CONFIG_GUIDE.md).
+      final ports = _isKnownGprinter(ip) ? const [8888, 50000] : const [3000, 8888, 50000];
       for (final p in hprtPackets) {
-        socket.send(p, dest, 3000);
-        socket.send(p, dest, 8888);
-        socket.send(p, dest, 50000);
+        for (final port in ports) {
+          socket.send(p, dest, port);
+        }
       }
 
       return await completer.future.timeout(timeout, onTimeout: () => null);
@@ -1806,6 +1826,10 @@ class PrinterLabel {
     int port = 9100,
     Duration timeout = const Duration(milliseconds: 800),
   }) async {
+    // Máy Gprinter đã tự khai tên model qua gói dò `B[]G`: dùng luôn, khỏi hỏi các nguồn
+    // khác (nhanh hơn và đúng tên — các nguồn khác không trả lời với module Gprinter).
+    final gprinterName = _gprinterNameByIp[ip.trim()];
+    if (gprinterName != null) return gprinterName;
     // Chạy song song tất cả các phương thức an toàn (HOÀN TOÀN KHÔNG GỬI DỮ LIỆU
     // TỚI PORT 9100), xếp theo thứ tự ưu tiên: SNMP trả đúng tên model ghi trên
     // nhãn máy -> HPRT UDP -> SSDP/UPnP -> mDNS -> NetBIOS -> HTTP -> DNS ngược.
@@ -2343,6 +2367,7 @@ class PrinterLabel {
     PrinterConnectionType? connectionType,
     required LabelModel labelModel,
   }) async {
+    await _guardTsplTarget(deviceId);
     return await _platform.printLabel(
       deviceId: deviceId,
       connectionType: connectionType,
@@ -2358,6 +2383,7 @@ class PrinterLabel {
     PrinterConnectionType? connectionType,
     required ImageModel imageModel,
   }) async {
+    await _guardTsplTarget(deviceId);
     return await _platform.printImage(
       deviceId: deviceId,
       connectionType: connectionType,
@@ -2391,6 +2417,7 @@ class PrinterLabel {
     bool openDrawer = false,
     int quantity = 1,
   }) async {
+    _guardEscTarget(deviceId);
     if (openDrawer) {
       try {
         // Gửi ESC p tới ĐÚNG MÁY ĐANG IN lượt này (deviceId ở trên), không phát tràn.
@@ -3005,8 +3032,201 @@ class PrinterLabel {
     return m == null ? null : normalizeMac(m.group(0));
   }
 
+  /// [data] là một trong các gói đã gửi bị dội lại nguyên vẹn.
+  static bool _isEcho(List<int> data, List<List<int>> sent) => sent.any(
+    (p) =>
+        p.length == data.length &&
+        Iterable<int>.generate(p.length).every((i) => p[i] == data[i]),
+  );
+
+  /// Máy [ip] đã biết là Gprinter (trả lời gói dò `B[]G`, hoặc MAC module Gprinter).
+  static bool _isKnownGprinter(String ip) {
+    if (_gprinterNameByIp.containsKey(ip)) return true;
+    final mac = normalizeMac(_lanDeviceCache[ip]?.mac);
+    return mac != null && (_gprinterMacs.contains(mac) || mac.startsWith('00:47:50'));
+  }
+
   /// MAC các máy in nói giao thức Gprinter (UDP `B[]G`), điền sau mỗi lần dò.
   static final Set<String> _gprinterMacs = <String>{};
+
+  /// Tên model module mạng Gprinter tự khai (`DEVICENAME`), theo MAC / IP — điền
+  /// sau mỗi lần dò, dùng để nhận ra máy hoá đơn (xem [detectLanPrinterLanguage]).
+  static final Map<String, String> _gprinterNameByMac = <String, String>{};
+  static final Map<String, String> _gprinterNameByIp = <String, String>{};
+
+  /// Ngôn ngữ máy in đã CHẮC CHẮN (máy trả lời, model tự khai, hoặc người dùng xác
+  /// nhận qua tem thử), theo MAC (ưu tiên) hoặc `ip:<ip>`.
+  static final Map<String, PrinterLanguage> _knownLanguages =
+      <String, PrinterLanguage>{};
+
+  /// Lần hỏi máy gần nhất KHÔNG có kết quả, theo IP: không hỏi lại trong
+  /// [_unknownLanguageTtl] (mỗi lần hỏi máy không trả lời mất ~1,4s).
+  static final Map<String, DateTime> _unknownLanguageAt = <String, DateTime>{};
+  static const Duration _unknownLanguageTtl = Duration(seconds: 60);
+
+  static String? _languageKey({String? mac, String? ip}) {
+    final m = normalizeMac(mac);
+    if (m != null) return m;
+    final i = ip?.trim();
+    return (i == null || i.isEmpty) ? null : 'ip:$i';
+  }
+
+  /// Ghi nhận ngôn ngữ của máy in LAN mà app đã biết chắc (VD người dùng xác nhận qua
+  /// tem thử, đọc lại từ bộ nhớ của app). [PrinterLanguage.unknown] = quên.
+  ///
+  /// Máy đã ghi nhận là máy hoá đơn thì [printLabel] / [printImage] tới nó báo lỗi
+  /// `PRINTER_NOT_LABEL` thay vì gửi TSPL — trên mọi nền tảng.
+  static void rememberPrinterLanguage({
+    String? mac,
+    String? ip,
+    required PrinterLanguage language,
+  }) {
+    final keys = {
+      _languageKey(mac: mac),
+      _languageKey(ip: ip),
+    }.whereType<String>();
+    for (final key in keys) {
+      if (language == PrinterLanguage.unknown) {
+        _knownLanguages.remove(key);
+      } else {
+        _knownLanguages[key] = language;
+      }
+    }
+  }
+
+  /// Máy in LAN [ip] là máy tem hay máy hoá đơn — chạy bằng Dart nên dùng được cả
+  /// Android lẫn iOS. Xét lần lượt, gặp kết luận chắc chắn thì dừng:
+  /// 1. đã ghi nhận ([rememberPrinterLanguage] / lần dò trước);
+  /// 2. thông tin dò mạng: hãng chỉ làm máy hoá đơn (theo MAC), hoặc model module mạng
+  ///    tự khai là máy hoá đơn (Gprinter `DEVICENAME`, VD "GP 80 Printer") — dùng được cả
+  ///    với máy KHÔNG trả lời câu hỏi trạng thái (module mạng chỉ nhận lệnh một chiều);
+  /// 3. hỏi máy in qua cổng in ([askPrinter]): `<ESC>!?` rồi `DLE EOT 4`.
+  ///
+  /// [PrinterLanguage.unknown]: không đủ bằng chứng — nơi gọi nên hỏi người dùng (in tem
+  /// thử chỉ có chữ, [PrinterLanguageProbe.sendLanTestLabel]) rồi
+  /// [rememberPrinterLanguage]. Đừng tự đoán: đoán "máy tem" là in ra rác + chạy hết cuộn
+  /// trên máy hoá đơn. Máy in HAI CHẾ ĐỘ (hiểu cả hai) trả [PrinterLanguage.both].
+  static Future<PrinterLanguage> detectLanPrinterLanguage({
+    required String ip,
+    String? mac,
+    int port = 9100,
+    bool askPrinter = true,
+  }) async {
+    final known = _knownLanguageOf(mac: mac, ip: ip);
+    if (known != null) return known;
+
+    PrinterLanguage remember(PrinterLanguage language) {
+      if (language != PrinterLanguage.unknown) {
+        rememberPrinterLanguage(mac: mac, ip: ip, language: language);
+      }
+      return language;
+    }
+
+    var fromScan = _languageFromDiscovery(mac: mac, ip: ip);
+    if (fromScan == PrinterLanguage.unknown &&
+        _gprinterModelOf(mac, ip) == null) {
+      // Chưa có tên model: dò Gprinter / Xprinter (dùng chung kết quả vài giây).
+      try {
+        await _sdkScanShared();
+      } catch (_) {}
+      fromScan = _languageFromDiscovery(mac: mac, ip: ip);
+    }
+    if (fromScan != PrinterLanguage.unknown) return remember(fromScan);
+
+    if (!askPrinter) return PrinterLanguage.unknown;
+    final asked = _unknownLanguageAt[ip];
+    if (asked != null &&
+        DateTime.now().difference(asked) < _unknownLanguageTtl) {
+      return PrinterLanguage.unknown;
+    }
+    PrinterLanguage answer;
+    try {
+      answer = await PrinterLanguageProbe.probeLan(ip, port: port);
+    } catch (_) {
+      answer = PrinterLanguage.unknown;
+    }
+    if (answer == PrinterLanguage.unknown) {
+      _unknownLanguageAt[ip] = DateTime.now();
+      return answer;
+    }
+    _unknownLanguageAt.remove(ip);
+    return remember(answer);
+  }
+
+  static PrinterLanguage? _knownLanguageOf({String? mac, String? ip}) {
+    final byMac = _languageKey(mac: mac);
+    final known = byMac == null ? null : _knownLanguages[byMac];
+    if (known != null) return known;
+    final byIp = _languageKey(ip: ip);
+    return byIp == null ? null : _knownLanguages[byIp];
+  }
+
+  static String? _gprinterModelOf(String? mac, String? ip) {
+    final m = normalizeMac(mac);
+    return (m == null ? null : _gprinterNameByMac[m]) ??
+        (ip == null ? null : _gprinterNameByIp[ip.trim()]);
+  }
+
+  static PrinterLanguage _languageFromDiscovery({String? mac, String? ip}) =>
+      PrinterLanguageProbe.fromDiscovery(
+        vendor:
+            vendorFromMac(mac) ??
+            (ip == null ? null : _lanDeviceCache[ip.trim()]?.vendor),
+        model: _gprinterModelOf(mac, ip),
+      );
+
+  /// Chốt chặn trước khi gửi HOÁ ĐƠN (ESC/POS) tới máy in LAN [deviceId]: máy đã biết
+  /// chắc là máy in TEM (hiểu lệnh tem — kể cả máy tem trả lời thêm câu hỏi trạng thái
+  /// hoá đơn như PDIT; máy hoá đơn không bao giờ hiểu lệnh tem) -> lỗi
+  /// `PRINTER_NOT_RECEIPT`, nơi gọi in hoá đơn dạng ảnh bằng lệnh tem. Chỉ dùng điều đã
+  /// biết (không hỏi máy).
+  static void _guardEscTarget(String? deviceId) {
+    if (deviceId == null ||
+        DeviceId.typeOf(deviceId) != PrinterConnectionType.lan) {
+      return;
+    }
+    final ip = deviceId.substring('LAN:'.length).split(':').first.trim();
+    if (ip.isEmpty) return;
+    final language = _knownLanguageOf(mac: _lanDeviceCache[ip]?.mac, ip: ip);
+    if (language == PrinterLanguage.label || language == PrinterLanguage.both) {
+      throw PlatformException(
+        code: 'PRINTER_NOT_RECEIPT',
+        message: 'Máy in tem không in được hoá đơn (ESC/POS)',
+        details: {'deviceId': deviceId},
+      );
+    }
+  }
+
+  /// Chốt chặn trước khi gửi lệnh tem TSPL tới máy in LAN [deviceId] (`LAN:<ip>[:port]`):
+  /// máy đã biết là máy hoá đơn -> lỗi `PRINTER_NOT_LABEL` (nơi gọi in tem dạng ảnh
+  /// ESC/POS), giống chốt chặn native trên Android nhưng chạy trên mọi nền tảng.
+  ///
+  /// Không dò mạng ở đây (để in nhanh): chỉ dùng điều đã biết. Riêng iOS (không có chốt
+  /// chặn native) hỏi máy in, nhớ kết quả. Không rõ thì đi tiếp như trước.
+  static Future<void> _guardTsplTarget(String? deviceId) async {
+    if (deviceId == null ||
+        DeviceId.typeOf(deviceId) != PrinterConnectionType.lan) {
+      return;
+    }
+    final parts = deviceId.substring('LAN:'.length).split(':');
+    final ip = parts.first.trim();
+    if (ip.isEmpty) return;
+    final port = parts.length > 1 ? int.tryParse(parts[1]) ?? 9100 : 9100;
+    final mac = _lanDeviceCache[ip]?.mac;
+    var language =
+        _knownLanguageOf(mac: mac, ip: ip) ??
+        _languageFromDiscovery(mac: mac, ip: ip);
+    if (language == PrinterLanguage.unknown && Platform.isIOS) {
+      language = await detectLanPrinterLanguage(ip: ip, mac: mac, port: port);
+    }
+    if (language == PrinterLanguage.receipt) {
+      throw PlatformException(
+        code: 'PRINTER_NOT_LABEL',
+        message: 'Máy in hoá đơn không in được lệnh tem (TSPL)',
+        details: {'deviceId': deviceId},
+      );
+    }
+  }
 
   static Future<List<Map<String, String>>>? _recentSdkScan;
   static DateTime _recentSdkScanAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -3050,6 +3270,13 @@ class PrinterLabel {
             for (final i in xp)
               if (i['ip'] != null) i['ip']!,
           };
+          for (final g in gp) {
+            final name = g.name?.trim();
+            if (name == null || name.isEmpty) continue;
+            _gprinterNameByIp[g.ip] = name;
+            final mac = normalizeMac(g.mac);
+            if (mac != null) _gprinterNameByMac[mac] = name;
+          }
           return [
             ...xp,
             for (final g in gp)

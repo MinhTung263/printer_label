@@ -5,6 +5,9 @@ import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import net.posprinter.IDeviceConnection
@@ -33,7 +36,7 @@ class PrinterThermal {
         // máy (nhiều chunk/nhiều job vào chung 1 connection) để byte không chèn vào
         // nhau gây in ra ký tự rác. Nhờ vậy in cùng lúc 2 máy không phải đợi nhau.
         @JvmStatic
-        val sendLocks = java.util.concurrent.ConcurrentHashMap<IDeviceConnection, Any>()
+        val sendLocks = java.util.concurrent.ConcurrentHashMap<IDeviceConnection, ReentrantLock>()
 
         // Khóa TOÀN CỤC riêng cho Bluetooth Classic — dùng chung cho MỌI connection
         // loại BT, kể cả máy in tích hợp (Sunmi/iMin/Pax connect qua Bluetooth nội bộ,
@@ -47,15 +50,90 @@ class PrinterThermal {
         // chạy tuần tự loại bỏ hoàn toàn khả năng ghi chồng lấn đó. LAN/USB không dùng
         // khóa này nên vẫn in song song với nhau và với Bluetooth như cũ.
         @JvmStatic
-        val bluetoothGlobalLock = Any()
+        val bluetoothGlobalLock = ReentrantLock()
 
+        /**
+         * Khoá gửi của [conn]. Là [ReentrantLock] (không phải `synchronized`) để lệnh in
+         * chờ khoá CÓ THỜI HẠN ([tryLockForPrint]): trước đây một lần ghi Bluetooth bị
+         * kẹt (máy in tích hợp ngừng nhận dữ liệu) giữ khoá chung mãi mãi, mọi lần in
+         * sau xếp hàng chờ khoá rồi đều hết hạn ở Dart -> "máy in đang bận" liên tục cho
+         * tới khi tắt hẳn app. Mọi chỗ dùng khoá phải đi qua `withLock` / [tryLockForPrint].
+         */
         @JvmStatic
-        fun lockFor(conn: IDeviceConnection): Any {
+        fun lockFor(conn: IDeviceConnection): ReentrantLock {
             if (conn.getConnectType() == POSConnect.DEVICE_TYPE_BLUETOOTH) {
                 return bluetoothGlobalLock
             }
-            return sendLocks.getOrPut(conn) { Any() }
+            return sendLocks.getOrPut(conn) { ReentrantLock() }
         }
+
+        /** Chờ khoá tối đa ngần này cho một lệnh in; quá thì báo bận thật. */
+        const val PRINT_LOCK_WAIT_MS = 20_000L
+
+        /**
+         * Lấy khoá gửi của [conn] để in, chờ tối đa [PRINT_LOCK_WAIT_MS]. Không lấy được
+         * (lệnh trước còn giữ quá lâu) -> [PrinterStatusException] `PRINTER_BUSY`.
+         */
+        @JvmStatic
+        fun <T> withPrintLock(conn: IDeviceConnection, block: () -> T): T {
+            val lock = lockFor(conn)
+            if (!lock.tryLock(PRINT_LOCK_WAIT_MS, TimeUnit.MILLISECONDS)) {
+                throw PrinterStatusException(
+                    "PRINTER_BUSY",
+                    "Máy in đang bận với lệnh in khác quá ${PRINT_LOCK_WAIT_MS / 1000}s"
+                )
+            }
+            try {
+                return block()
+            } finally {
+                lock.unlock()
+            }
+        }
+
+        /** Lệnh ghi không xong trong (gốc + theo số byte) thì coi là kẹt. */
+        private const val STALL_BASE_MS = 10_000L
+        private const val STALL_MIN_BYTES_PER_SEC = 8_000L
+
+        private val stallWatchdog = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "printer-send-watchdog").apply { isDaemon = true }
+        }
+
+        /**
+         * Chạy [block] (ghi [bytes] byte tới [conn]) có canh giờ: quá hạn thì ĐÓNG [conn]
+         * để lệnh ghi đang chặn thoát ra (đóng socket làm `write` ném lỗi) và báo
+         * `PRINTER_STALLED` — máy in ngừng nhận dữ liệu (hết giấy / mở nắp / dịch vụ máy
+         * in tích hợp khởi động lại). Kết nối đã đóng nên lần in sau tự nối lại.
+         *
+         * LAN đã có canh giờ riêng trong [LanSocketConnection]; dùng cho Bluetooth / máy in
+         * tích hợp / USB.
+         */
+        @JvmStatic
+        fun <T> withStallWatchdog(conn: IDeviceConnection, bytes: Int, block: () -> T): T {
+            val budgetMs = STALL_BASE_MS + bytes * 1000L / STALL_MIN_BYTES_PER_SEC
+            val fired = java.util.concurrent.atomic.AtomicBoolean(false)
+            val task = stallWatchdog.schedule({
+                fired.set(true)
+                Log.w("PRINT_SEND", "Gửi $bytes byte kẹt quá ${budgetMs}ms, đóng kết nối để thoát")
+                runCatching { conn.close() }
+            }, budgetMs, TimeUnit.MILLISECONDS)
+            try {
+                val result = block()
+                if (fired.get()) throw stalled(budgetMs)
+                return result
+            } catch (e: PrinterStatusException) {
+                throw e
+            } catch (e: Exception) {
+                if (fired.get()) throw stalled(budgetMs)
+                throw e
+            } finally {
+                task.cancel(false)
+            }
+        }
+
+        private fun stalled(budgetMs: Long) = PrinterStatusException(
+            "PRINTER_STALLED",
+            "Máy in không nhận dữ liệu sau ${budgetMs / 1000}s (hết giấy, mở nắp hoặc máy in đang lỗi)"
+        )
 
         /**
          * Gửi hết [data] theo từng gói [chunkSize] và KIỂM TRA số byte thật sự gửi được.
@@ -213,7 +291,14 @@ class PrinterThermal {
                 }
 
                 if (sent <= 0) {
-                    val reason = (conn as? LanSocketConnection)?.lastErrorMessage
+                    val lan = conn as? LanSocketConnection
+                    if (lan?.writeStalled == true) {
+                        throw PrinterStatusException(
+                            "PRINTER_STALLED",
+                            lan.lastErrorMessage ?: "Máy in không nhận dữ liệu"
+                        )
+                    }
+                    val reason = lan?.lastErrorMessage
                     throw java.io.IOException(
                         "Gửi dữ liệu tới máy in thất bại tại byte $offset/${data.size} " +
                             (reason?.let { "($it)." }
@@ -377,7 +462,8 @@ class PrinterThermal {
 
                 // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection).
                 // Các máy khác dùng khóa khác nên vẫn in song song, không đợi nhau.
-                synchronized(lockFor(curConnect)) {
+                // Chờ khoá có hạn: lệnh trước kẹt thì báo PRINTER_BUSY thay vì chờ mãi.
+                withPrintLock(curConnect) {
                     // Hết giấy / mở nắp: KHÔNG gửi phiếu. Nhiều máy vẫn nhận dữ liệu vào bộ
                     // nhớ rồi in khi thay giấy xong -> phiếu ra trễ, nhân viên đã in lại
                     // thì ra 2 phiếu. Báo lỗi ngay để người dùng xử lý rồi in lại.
@@ -413,6 +499,7 @@ class PrinterThermal {
                         // in ~50mm/s, chậm hơn nữa khi pin yếu) đã thử ở 20–30KB/s đều TRÀN
                         // bộ đệm -> mất byte -> lệnh ảnh lệch, in ra ký tự lạ giữa bill.
                         // ~11KB/s là mức an toàn đã kiểm chứng trên nhiều máy.
+                        withStallWatchdog(curConnect, allBytes.size) {
                         val startedAt = android.os.SystemClock.elapsedRealtime()
                         var offset = 0
                         while (offset < allBytes.size) {
@@ -439,6 +526,7 @@ class PrinterThermal {
                             val aheadMs = dueMs - (android.os.SystemClock.elapsedRealtime() - startedAt)
                             if (aheadMs > 0) Thread.sleep(aheadMs)
                         }
+                        }
                     } else {
                         // USB/LAN/máy in tích hợp: cũng phải chia gói. Gửi cả cục cho đơn
                         // dài (ảnh vài chục–trăm KB) làm tràn buffer máy in/socket:
@@ -446,7 +534,14 @@ class PrinterThermal {
                         // đợi cho đủ số byte mà lệnh GS v 0 đã khai báo nên treo luôn —
                         // ăn mất cả lệnh cắt và job in kế tiếp.
                         // Gói 4KB lớn hơn Bluetooth nhiều nên vẫn nhanh, không cần sleep.
-                        sendAllSync(curConnect, allBytes, 4096)
+                        if (curConnect is LanSocketConnection) {
+                            // LAN có canh giờ riêng (LanSocketConnection).
+                            sendAllSync(curConnect, allBytes, 4096)
+                        } else {
+                            withStallWatchdog(curConnect, allBytes.size) {
+                                sendAllSync(curConnect, allBytes, 4096)
+                            }
+                        }
                     }
                 }
 
@@ -537,7 +632,7 @@ class PrinterThermal {
         val printer = POSPrinter(curConnect)
         val text = call.argument<String>("text") ?: ""
         try {
-            synchronized(lockFor(curConnect)) {
+            lockFor(curConnect).withLock {
                 printer.initializePrinter()
                     .printText(text, 0, POSConst.ALIGNMENT_LEFT, 0)
                     .feedLine()
@@ -571,7 +666,7 @@ class PrinterThermal {
                 "CODE93" -> 72
                 else -> 73
             }
-            synchronized(lockFor(curConnect)) {
+            lockFor(curConnect).withLock {
                 printer.initializePrinter()
                     .printBarCode(code, type, width, height, 2)
                     .feedLine()
@@ -609,7 +704,7 @@ class PrinterThermal {
             // 5. Cut paper (GS V 66 1)
             stream.write(byteArrayOf(0x1D, 0x56, 0x42, 0x01))
 
-            synchronized(lockFor(curConnect)) {
+            lockFor(curConnect).withLock {
                 curConnect.sendData(stream.toByteArray())
             }
             result.success(true)
@@ -656,7 +751,7 @@ class PrinterThermal {
                 result.success(false)
                 return
             }
-            synchronized(lockFor(curConnect)) {
+            lockFor(curConnect).withLock {
                 sendAllSync(curConnect, bytes, bytes.size)
             }
             result.success(true)
@@ -675,7 +770,7 @@ class PrinterThermal {
             // ESC p 0 25 250 (Pin 2) & ESC p 1 25 250 (Pin 5)
             stream.write(byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA.toByte(), 0x1B, 0x70, 0x01, 0x19, 0xFA.toByte()))
             val bytes = stream.toByteArray()
-            synchronized(lockFor(curConnect)) {
+            lockFor(curConnect).withLock {
                 curConnect.sendData(bytes)
             }
             result.success(true)

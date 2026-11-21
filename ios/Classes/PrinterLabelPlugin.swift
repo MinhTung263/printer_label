@@ -419,8 +419,13 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             }
 
             // 2. Quét qua POS UDP Broadcast (XP0001FIND) cho Xprinter / POS Network Printers
+            // Quét UDP (XP0001FIND) trả kết quả MỘT LẦN ở cuối: chưa xong thì chưa được trả
+            // sớm, nếu không máy trả lời qua SDK sớm hơn làm quét kết thúc trước khi kết quả
+            // Xprinter về (đã gặp: máy Xprinter lệch dải không được sửa lúc bấm in).
+            var udpDone = false
             POSNetConfigHelper.scanUdpPrinters(timeout: scanTimeout - 0.2) { udpDevices in
                 queue.async {
+                    udpDone = true
                     for d in udpDevices {
                         let ip = d["ip"] as? String ?? ""
                         let mac = d["mac"] as? String ?? ""
@@ -434,7 +439,15 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + scanTimeout) {
+            // Trả sớm như Android: quét UDP đã xong, đã có máy trả lời, quét được >= 0,7s và
+            // 0,6s không có máy mới. Không có máy nào thì chờ đủ scanTimeout.
+            let startedAt = DispatchTime.now()
+            var answered = false
+            var lastCount = 0
+            var lastChangeAt = DispatchTime.now()
+            func finishScan() {
+                guard !answered else { return }
+                answered = true
                 queue.sync {
                     for device in devices {
                         if let mac = device["mac"] as? String, !mac.isEmpty,
@@ -445,6 +458,20 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
                     result(devices)
                 }
             }
+            func tick() {
+                guard !answered else { return }
+                let (count, udpFinished) = queue.sync { (devices.count, udpDone) }
+                let now = DispatchTime.now()
+                if count != lastCount { lastCount = count; lastChangeAt = now }
+                let elapsed = Double(now.uptimeNanoseconds - startedAt.uptimeNanoseconds) / 1e9
+                let quietFor = Double(now.uptimeNanoseconds - lastChangeAt.uptimeNanoseconds) / 1e9
+                if (udpFinished && count > 0 && elapsed >= 0.7 && quietFor >= 0.6) || elapsed >= scanTimeout {
+                    finishScan()
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { tick() }
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { tick() }
 
         case "set_net_ip":
             let args = call.arguments as? [String: Any]
@@ -729,6 +756,7 @@ public class PrinterLabelPlugin: NSObject, FlutterPlugin {
             case .partiallySent: code = "PRINT_ERROR"
             case .paperEnd: code = "PRINTER_OUT_OF_PAPER"
             case .coverOpen: code = "PRINTER_COVER_OPEN"
+            case .stalled: code = "PRINTER_STALLED"
             default: code = "NO_CONNECTION"
             }
             return FlutterError(code: code, message: e.errorDescription, details: ["reason": e.kind.rawValue])

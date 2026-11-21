@@ -2,6 +2,7 @@ library printer_label;
 
 export 'src/platform/printer_label.dart';
 export 'src/service/gprinter_udp.dart';
+export 'src/desktop/printer_language_probe.dart' show PrinterLanguage, PrinterLanguageProbe;
 
 // Export models
 export 'src/models/barcode_model.dart';

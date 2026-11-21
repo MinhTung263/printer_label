@@ -1,5 +1,6 @@
 package com.printer.printer_label
 
+import kotlin.concurrent.withLock
 import android.os.SystemClock
 import android.util.Log
 import net.posprinter.IDeviceConnection
@@ -78,7 +79,7 @@ object PrinterCapabilities {
     }
 
     fun probe(conn: IDeviceConnection, deviceId: String): Map<String, Any?> {
-        synchronized(PrinterThermal.lockFor(conn)) {
+        PrinterThermal.lockFor(conn).withLock {
             val startedMs = SystemClock.elapsedRealtime()
             fun ask(label: String, bytes: ByteArray, valid: (ByteArray) -> Boolean): Boolean {
                 // Discard stale unsolicited statuses before each distinct query.

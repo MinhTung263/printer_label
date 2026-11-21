@@ -32,6 +32,9 @@ public final class LANPrinterConnection {
         case paperEnd
         /// Máy in báo đang mở nắp — job CHƯA được gửi.
         case coverOpen
+        /// Máy in nhận kết nối nhưng KHÔNG nhận dữ liệu quá hạn (hết giấy / mở nắp / máy đang
+        /// lỗi / bộ đệm đầy): đã huỷ kết nối để lệnh sau không xếp hàng chờ mãi.
+        case stalled
     }
 
     public struct SendError: LocalizedError {
@@ -51,6 +54,8 @@ public final class LANPrinterConnection {
                 return "Máy in hết giấy"
             case .coverOpen:
                 return "Máy in đang mở nắp"
+            case .stalled:
+                return "Máy in không nhận dữ liệu (hết giấy, mở nắp, máy in đang lỗi hoặc mạng quá yếu)"
             }
         }
     }
@@ -87,6 +92,15 @@ public final class LANPrinterConnection {
     /// LAN tính thêm thời gian khứ hồi trên Wi-Fi đông. Máy không trả lời -> vẫn in.
     private let paperProbeTimeout: TimeInterval = 0.8
 
+    /// Lần gửi không xong trong (gốc + theo dung lượng) thì coi là kẹt — giữ khớp Android
+    /// (`LanSocketConnection` / `PrinterThermal.withStallWatchdog`).
+    private static let stallBaseSeconds: Double = 10
+    private static let stallMinBytesPerSecond: Double = 64_000
+    /// Đánh số từng lần gửi để canh giờ và completion của NWConnection không cùng xử lý
+    /// một lần gửi hai lần. Chỉ đọc / ghi trong `queue`.
+    private var sendSeq = 0
+    private var activeSendId: Int?
+
     // write queue
     private var writeQueue: [Job] = []
     private var isWriting: Bool = false
@@ -106,6 +120,9 @@ public final class LANPrinterConnection {
     // connection timeout — 6s (trước là 4s): Wi-Fi đông hay trễ vọt 1–2s, đủ để NWConnection
     // gửi lại SYN vài lần trong một lượt thử.
     private let connectionTimeout: TimeInterval = 6
+    /// Một lượt bắt tay tối đa ngần này rồi mở socket mới (xem `startConnectAttempt`).
+    private let connectAttemptTimeout: TimeInterval = 1.2
+    private var connectDeadline: DispatchTime = .now()
 
     // MARK: - Retry có giới hạn + backoff
     // TRƯỚC ĐÂY: send lỗi → đẩy data về đầu queue → connect() → lỗi nữa → lặp VÔ HẠN,
@@ -126,6 +143,30 @@ public final class LANPrinterConnection {
     /// thì tái dùng socket đang mở thay vì đóng/mở lại liên tục.
     private let idleCloseDelay: TimeInterval = 0.6
     private var idleCloseWork: DispatchWorkItem?
+    /// Số byte đã gửi trên socket hiện tại — để ước lượng thời gian máy in cần đọc hết
+    /// trước khi đóng hẳn socket (xem `scheduleIdleCloseIfNeeded`).
+    private var bytesOnSocket = 0
+
+    /// IP các máy in có lần gửi bị đứt giữa chừng (bộ đệm máy có thể còn dở lệnh ảnh) —
+    /// dùng chung mọi kết nối (manager có thể tạo kết nối mới cho cùng IP).
+    private static var dirtyIps = Set<String>()
+    private static let dirtyLock = NSLock()
+    /// Đủ lấp một dải `GS v 0` còn thiếu: 128 dòng × 80 byte.
+    private static let flushZeros = 128 * 80
+
+    private static func markDirty(_ ip: String) {
+        dirtyLock.lock(); dirtyIps.insert(ip); dirtyLock.unlock()
+    }
+
+    private static func takeDirty(_ ip: String) -> Bool {
+        dirtyLock.lock(); defer { dirtyLock.unlock() }
+        return dirtyIps.remove(ip) != nil
+    }
+    /// Chờ máy in đọc hết dữ liệu và tự đóng phía nó sau FIN: tối thiểu / tốc độ đọc tối
+    /// thiểu giả định / tối đa.
+    private static let drainBaseSeconds: TimeInterval = 3
+    private static let drainMinBytesPerSecond: Double = 16_000
+    private static let drainMaxSeconds: TimeInterval = 30
     /// true = tự đóng socket khi in xong. Tắt đi nếu muốn giữ kết nối độc quyền.
     public var releaseSocketWhenIdle: Bool = true
 
@@ -218,69 +259,94 @@ public final class LANPrinterConnection {
             self.lastConnectError = nil
             print("[LANPrinterConnection] 🔗 Connecting to \(self.ip):\(self.port)...")
 
-            let host = NWEndpoint.Host(self.ip)
-            let nwPort = NWEndpoint.Port(rawValue: self.port) ?? .init(integerLiteral: 9100)
-            let params = LANPrinterConnection.lanTcpParameters(for: self.ip)
-            params.allowLocalEndpointReuse = true
+            self.connectDeadline = .now() + self.connectionTimeout
+            self.startConnectAttempt()
+        }
+    }
 
-            let connection = NWConnection(host: host, port: nwPort, using: params)
-            self.connection = connection
+    /// Một lượt bắt tay TCP. Máy in vừa khởi động lại mạng (VD vừa đặt IP mới) hay bỏ qua
+    /// gói SYN đầu; TCP tự gửi lại SYN theo nhịp giãn dần (1s, 2s, 4s...) nên một kết nối
+    /// có thể chờ hết cả [connectionTimeout] dù máy đã sẵn sàng từ giây thứ 3 (đo được:
+    /// Gprinter vừa đổi IP mất 6s, lần nối kế tiếp được ngay). Chia thành các lượt ngắn
+    /// [connectAttemptTimeout], mỗi lượt một socket mới (SYN đi ngay), trong tổng hạn cũ.
+    /// Socket chưa bắt tay xong thì chưa có byte nào tới máy in nên bỏ đi không ảnh hưởng.
+    /// Phải gọi từ trong self.queue.
+    private func startConnectAttempt() {
+        let host = NWEndpoint.Host(self.ip)
+        let nwPort = NWEndpoint.Port(rawValue: self.port) ?? .init(integerLiteral: 9100)
+        let params = LANPrinterConnection.lanTcpParameters(for: self.ip)
+        params.allowLocalEndpointReuse = true
 
-            connection.stateUpdateHandler = { [weak self] newState in
-                guard let self = self else { return }
-                // Bỏ qua callback của socket đã bị thay thế — tránh một socket cũ
-                // đang tắt ghi đè state của socket mới vừa mở.
-                guard connection === self.connection else { return }
-                switch newState {
-                case .ready:
-                    self.state = .connected
-                    // Socket mới → job kế tiếp phải chèn `ESC @` để xóa bộ đệm còn sót.
-                    self.isFirstJobOnSocket = true
-                    print("[LANPrinterConnection] ✅ Connected to \(self.ip)")
-                    self.onConnected?()
-                    self.fireConnectCompletions(true)
-                    self.flushQueue()
-                case .failed(let error):
-                    self.handleConnectFailure(error)
-                case .waiting(let error):
-                    // NWConnection "chờ" = không kết nối được ngay (bị từ chối vì thiết bị khác
-                    // đang giữ máy in, hoặc không có đường mạng) và sẽ tự đợi mạng đổi. Trước
-                    // đây bỏ qua trạng thái này nên lần nào cũng chờ hết connectionTimeout mới
-                    // retry. Xử lý như lỗi để retry/backoff của ta quyết định ngay.
-                    guard self.state == .connecting else { break }
-                    print("[LANPrinterConnection] ⏳ \(self.ip) chưa kết nối được (\(error)), xử lý như lỗi")
-                    self.handleConnectFailure(error)
-                case .cancelled:
-                    self.state = .disconnected
-                    print("[LANPrinterConnection] ⏹️ Disconnected from \(self.ip)")
-                    self.onDisconnected?(nil)
-                    self.connection = nil
-                    self.fireConnectCompletions(false)
-                    // Socket đóng do rảnh là bình thường; chỉ báo lỗi khi còn job dở.
-                    self.scheduleRetryOrFail(error: nil)
-                default:
-                    break
-                }
-            }
+        let connection = NWConnection(host: host, port: nwPort, using: params)
+        self.connection = connection
 
-            connection.start(queue: self.queue)
-
-            // implement a simple connect timeout
-            self.queue.asyncAfter(deadline: .now() + self.connectionTimeout) { [weak self] in
-                guard let self = self else { return }
-                guard connection === self.connection, self.state == .connecting else { return }
-                print("[LANPrinterConnection] ⏱️ Connection timeout to \(self.ip)")
-                let timeoutError = NSError(
-                    domain: "LANPrinterConnection", code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Connection timeout"]
-                )
-                self.state = .failed
-                self.lastConnectError = timeoutError
-                self.onDisconnected?(timeoutError)
-                self.teardownConnection()
+        connection.stateUpdateHandler = { [weak self] newState in
+            guard let self = self else { return }
+            // Bỏ qua callback của socket đã bị thay thế — tránh một socket cũ
+            // đang tắt ghi đè state của socket mới vừa mở.
+            guard connection === self.connection else { return }
+            switch newState {
+            case .ready:
+                self.state = .connected
+                // Socket mới → job kế tiếp phải chèn `ESC @` để xóa bộ đệm còn sót.
+                self.isFirstJobOnSocket = true
+                self.bytesOnSocket = 0
+                print("[LANPrinterConnection] ✅ Connected to \(self.ip)")
+                self.onConnected?()
+                self.fireConnectCompletions(true)
+                self.flushQueue()
+            case .failed(let error):
+                self.handleConnectFailure(error)
+            case .waiting(let error):
+                // NWConnection "chờ" = không kết nối được ngay (bị từ chối vì thiết bị khác
+                // đang giữ máy in, hoặc không có đường mạng) và sẽ tự đợi mạng đổi. Trước
+                // đây bỏ qua trạng thái này nên lần nào cũng chờ hết connectionTimeout mới
+                // retry. Xử lý như lỗi để retry/backoff của ta quyết định ngay.
+                guard self.state == .connecting else { break }
+                print("[LANPrinterConnection] ⏳ \(self.ip) chưa kết nối được (\(error)), xử lý như lỗi")
+                self.handleConnectFailure(error)
+            case .cancelled:
+                self.state = .disconnected
+                print("[LANPrinterConnection] ⏹️ Disconnected from \(self.ip)")
+                self.onDisconnected?(nil)
+                self.connection = nil
                 self.fireConnectCompletions(false)
-                self.scheduleRetryOrFail(error: timeoutError)
+                // Socket đóng do rảnh là bình thường; chỉ báo lỗi khi còn job dở.
+                self.scheduleRetryOrFail(error: nil)
+            default:
+                break
             }
+        }
+
+        connection.start(queue: self.queue)
+
+        let remaining = max(0.1, connectDeadline.uptimeNanoseconds > DispatchTime.now().uptimeNanoseconds
+            ? Double(connectDeadline.uptimeNanoseconds - DispatchTime.now().uptimeNanoseconds) / 1e9
+            : 0)
+        let wait = min(connectAttemptTimeout, remaining)
+        self.queue.asyncAfter(deadline: .now() + wait) { [weak self] in
+            guard let self = self else { return }
+            guard connection === self.connection, self.state == .connecting else { return }
+            // Còn thời gian: bỏ socket đang chờ SYN, mở socket mới.
+            if DispatchTime.now() + 0.3 < self.connectDeadline {
+                print("[LANPrinterConnection] 🔁 \(self.ip) chưa trả lời bắt tay, mở lại kết nối")
+                connection.stateUpdateHandler = nil
+                connection.cancel()
+                self.connection = nil
+                self.startConnectAttempt()
+                return
+            }
+            print("[LANPrinterConnection] ⏱️ Connection timeout to \(self.ip)")
+            let timeoutError = NSError(
+                domain: "LANPrinterConnection", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Connection timeout"]
+            )
+            self.state = .failed
+            self.lastConnectError = timeoutError
+            self.onDisconnected?(timeoutError)
+            self.teardownConnection()
+            self.fireConnectCompletions(false)
+            self.scheduleRetryOrFail(error: timeoutError)
         }
     }
 
@@ -295,6 +361,8 @@ public final class LANPrinterConnection {
         // Job vừa đẩy xuống TCP nhưng máy in ĐÓNG NGAY → nó chưa được in (thiết
         // bị khác đang giữ kênh in). Đưa lại đầu hàng đợi để retry theo backoff,
         // thay vì báo thành công giả và mất job im lặng.
+        // Kết nối chết khi đang gửi / vừa gửi xong: máy in có thể còn dở một lệnh ảnh.
+        if self.pendingConfirmJob != nil || self.isWriting { Self.markDirty(self.ip) }
         if let unconfirmed = self.pendingConfirmJob {
             self.pendingConfirmJob = nil
             self.writeQueue.insert(unconfirmed, at: 0)
@@ -337,6 +405,7 @@ public final class LANPrinterConnection {
         queue.async { [weak self] in
             guard let self = self else { return }
             self.cancelIdleClose()
+            if self.pendingConfirmJob != nil || self.isWriting { Self.markDirty(self.ip) }
             self.teardownConnection()
             self.state = .disconnected
             // Đang connect dở mà bị ngắt -> timeout không còn fire (connection đã nil),
@@ -435,22 +504,58 @@ public final class LANPrinterConnection {
         // đệm đã sạch. Đúng triệu chứng "lần đầu kết nối lại in linh tinh, sau đó in bình
         // thường". `ESC @` hủy mọi lệnh dở và đưa máy in về trạng thái mặc định.
         let data: Data
+        //
+        // NHƯNG máy đang dở lệnh ảnh thì `ESC @` cũng bị nuốt làm dữ liệu ảnh (đã gặp: máy
+        // đóng kết nối giữa bill, native gửi lại cả bill -> nửa bill + rác). Lần gửi trước tới
+        // máy này đứt giữa chừng ([markDirty]) thì lấp trước bằng 0x00 đủ cho mọi dải ảnh
+        // còn thiếu (128 dòng × 80 byte) rồi mới `ESC @`; 0x00 thừa là lệnh rỗng, máy bỏ qua.
         if isFirstJobOnSocket {
             isFirstJobOnSocket = false
-            var prefixed = Data([0x1B, 0x40]) // ESC @
+            var prefixed = Data()
+            if Self.takeDirty(ip) {
+                prefixed.append(Data(count: Self.flushZeros))
+                print("[LANPrinterConnection] 🧽 Lần gửi trước tới \(ip) đứt giữa chừng: xả bộ đệm máy in")
+            }
+            prefixed.append(contentsOf: [0x1B, 0x40]) // ESC @
             prefixed.append(job.data)
             data = prefixed
             print("[LANPrinterConnection] 🧹 Thêm ESC @ đầu job để xóa bộ đệm còn sót của \(ip)")
         } else {
             data = job.data
         }
+        bytesOnSocket += data.count
         print("[LANPrinterConnection] 📨 Sending \(data.count) bytes to \(ip) (lần \(job.attempts))...")
+
+        // Canh giờ lần gửi: trước đây `send` không có hạn — máy in nhận kết nối mà ngừng
+        // nhận dữ liệu thì lần gửi treo mãi, `isWriting` giữ nguyên nên MỌI lệnh in sau tới
+        // máy này xếp hàng chờ mãi (Dart hết hạn và báo "máy in bận" cho tới khi tắt app).
+        sendSeq += 1
+        let sendId = sendSeq
+        activeSendId = sendId
+        let budget = Self.stallBaseSeconds + Double(data.count) / Self.stallMinBytesPerSecond
+        queue.asyncAfter(deadline: .now() + budget) { [weak self] in
+            guard let self = self, self.activeSendId == sendId else { return }
+            self.activeSendId = nil
+            print("[LANPrinterConnection] ⏱️ Gửi \(data.count) bytes tới \(self.ip) kẹt quá \(Int(budget))s, huỷ kết nối")
+            self.isWriting = false
+            Self.markDirty(self.ip)
+            self.teardownConnection()
+            self.state = .failed
+            DispatchQueue.main.async {
+                job.completion?(false, SendError(kind: .stalled, underlying: nil))
+            }
+            if !self.writeQueue.isEmpty { self.connect() }
+        }
 
         self.connection?.send(content: data, completion: .contentProcessed({ [weak self] error in
             guard let self = self else { return }
+            // Đã bị canh giờ xử lý (huỷ kết nối làm lần gửi kết thúc kèm lỗi): bỏ qua.
+            guard self.activeSendId == sendId else { return }
+            self.activeSendId = nil
             self.isWriting = false
             if let err = error {
                 print("[LANPrinterConnection] ❌ Send error: \(err)")
+                Self.markDirty(self.ip)
                 self.teardownConnection()
                 self.state = .failed
                 self.onDisconnected?(err)
@@ -645,17 +750,56 @@ public final class LANPrinterConnection {
             // lúc chờ FIN sẽ mở socket MỚI. Trước đây khi FIN xong lại teardown
             // `self.connection` — tức socket MỚI đang connecting — mà không fire completion,
             // timeout cũng bỏ qua (connection đã nil) -> connectLan treo vĩnh viễn.
+            //
+            // KHÔNG cancel() ngay khi FIN "contentProcessed": callback đó chỉ báo FIN đã xếp
+            // vào buffer gửi, trong buffer có thể còn hàng chục KB máy in chưa đọc (máy in
+            // chậm). cancel() lúc đó huỷ luôn phần chưa gửi -> máy in nhận lệnh ảnh `GS v 0`
+            // dở dang rồi in phần sau thành KÝ TỰ RÁC (đo được: 48240/98102 byte tới máy,
+            // socket sống đúng ~1s = 0.4s xác nhận + 0.6s chờ nhả). Chờ máy in đọc hết và tự
+            // đóng phía nó (receive báo isComplete / lỗi), có hạn theo dung lượng đã gửi.
+            let budget = min(Self.drainMaxSeconds,
+                             Self.drainBaseSeconds + Double(self.bytesOnSocket) / Self.drainMinBytesPerSecond)
             self.state = .disconnected
             self.connection = nil
-            closing.send(content: nil, contentContext: .finalMessage, isComplete: true,
-                         completion: .contentProcessed({ _ in
-                // FIN đã đi; giờ mới thực sự dọn socket.
+            self.receiveOutstanding = false
+            var closed = false
+            let finish: () -> Void = {
+                guard !closed else { return }
+                closed = true
                 closing.stateUpdateHandler = nil
                 closing.cancel()
+            }
+            closing.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                         completion: .contentProcessed({ [weak self] error in
+                guard let self = self, error == nil else {
+                    closing.stateUpdateHandler = nil
+                    closing.cancel()
+                    return
+                }
+                self.queue.async {
+                    Self.drainUntilPeerCloses(closing, finish: finish, queue: self.queue)
+                    self.queue.asyncAfter(deadline: .now() + budget, execute: finish)
+                }
             }))
         }
         idleCloseWork = work
         queue.asyncAfter(deadline: .now() + idleCloseDelay, execute: work)
+    }
+
+    /// Sau FIN: đọc (bỏ) mọi thứ máy in gửi về cho tới khi máy in đóng phía nó — lúc đó
+    /// máy đã đọc hết dữ liệu — rồi gọi [finish]. Chạy trên queue của connection.
+    private static func drainUntilPeerCloses(_ conn: NWConnection,
+                                             finish: @escaping () -> Void,
+                                             queue: DispatchQueue) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 1024) { _, _, isComplete, error in
+            queue.async {
+                if isComplete || error != nil {
+                    finish()
+                } else {
+                    drainUntilPeerCloses(conn, finish: finish, queue: queue)
+                }
+            }
+        }
     }
 
     private func cancelIdleClose() {

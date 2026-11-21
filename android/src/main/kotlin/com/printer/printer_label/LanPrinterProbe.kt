@@ -88,6 +88,10 @@ object LanPrinterProbe {
             // HPRT (Xiamen Hanin Electronic Technology)
             prefix6.startsWith("6CC147") -> "HPRT"
 
+            // Gprinter — module mạng của máy thật (00:47:50:3D:B4:A4, 00:47:50:25:CC:BC,
+            // tự khai MFC:GPRINTER qua gói B[]G, 2026-11-21). Giữ khớp với printer_label.dart.
+            prefix6.startsWith("004750") -> "Gprinter"
+
             // Rongta (Xiamen Rongta Technology) — mã duy nhất hãng này có trong
             // registry; là khối /28 nên 6 hex đầu không phân biệt tuyệt đối 100%
             prefix6.startsWith("480BB2") -> "Rongta"

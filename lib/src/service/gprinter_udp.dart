@@ -90,7 +90,13 @@ abstract final class GprinterUdp {
       if (p.isEmpty) continue;
       final i = p.indexOf(':');
       if (i <= 0) continue;
-      map[p.substring(0, i).trim().toUpperCase()] = p.substring(i + 1).trim();
+      // Giữ giá trị ĐẦU TIÊN: module mạng không xoá phần thừa của gói trả lời trước nên
+      // cuối gói có thể còn đuôi rác lặp khoá (đo được: `...;PRNPORT:9100;T:30;IP:1`).
+      // Lấy giá trị cuối thì IP thành "1" -> máy bị bỏ qua khi dò.
+      map.putIfAbsent(
+        p.substring(0, i).trim().toUpperCase(),
+        () => p.substring(i + 1).trim(),
+      );
     }
     return map;
   }
@@ -150,11 +156,16 @@ abstract final class GprinterUdp {
 
   /// Dò máy in Gprinter bằng UDP broadcast, chờ [wait] rồi trả mọi máy đã trả lời.
   /// Gửi gói dò hai lần cách nhau [wait]/3 để bù gói UDP bị mất.
+  static const Duration _minSearch = Duration(milliseconds: 700);
+  static const Duration _quiet = Duration(milliseconds: 600);
+
   static Future<List<GprinterNetInfo>> search({
     Duration wait = const Duration(milliseconds: 1500),
   }) async {
     RawDatagramSocket? socket;
     final found = <String, GprinterNetInfo>{};
+    final sw = Stopwatch()..start();
+    var lastFoundAt = -1;
     try {
       socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
       socket.broadcastEnabled = true;
@@ -163,7 +174,10 @@ abstract final class GprinterUdp {
         final dg = socket?.receive();
         if (dg == null) return;
         final info = parseDevice(dg.data);
-        if (info != null) found[info.mac] = info;
+        if (info != null) {
+          found[info.mac] = info;
+          lastFoundAt = sw.elapsedMilliseconds;
+        }
       }, onError: (Object _) {});
       // Hai lần gửi cách nhau (UDP có thể mất gói); máy trả lời bằng gói dữ liệu riêng chứ
       // không dội lại nên gửi lặp không gây vòng lặp gói.
@@ -176,7 +190,17 @@ abstract final class GprinterUdp {
         }
         if (i == 0) await Future<void>.delayed(wait ~/ 3);
       }
-      await Future<void>.delayed(wait - wait ~/ 3);
+      // Trả sớm như quét Xprinter trên Android: đã có máy trả lời, qua lần gửi thứ hai
+      // và [_quiet] không có máy mới (máy in trả lời trong vài trăm ms) — không chờ đủ
+      // [wait] mỗi lần bấm in. Không có máy nào thì vẫn chờ đủ.
+      while (sw.elapsed < wait) {
+        final quiet =
+            lastFoundAt >= 0 &&
+            sw.elapsedMilliseconds >= _minSearch.inMilliseconds &&
+            sw.elapsedMilliseconds - lastFoundAt >= _quiet.inMilliseconds;
+        if (quiet) break;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
       await sub.cancel();
     } catch (_) {
     } finally {

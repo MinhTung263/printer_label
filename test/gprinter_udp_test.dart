@@ -89,4 +89,19 @@ void main() {
       isNull,
     );
   });
+
+  test('đuôi rác lặp khoá cuối gói không đè giá trị thật', () {
+    // Gói thật của một máy GP 80: module còn sót phần thừa của gói trước.
+    final info = GprinterUdp.parseDevice(
+      ascii.encode(
+        'ID:002;VER:FV1.3  .  ;DEVICENAME:GP 80 Printer;MFC:GPRINTER;'
+        'SN:20130117;MAC:004750 3DB4A4;DHCP:Disabled;DTIMEOUT:30;'
+        'IP:192.168.1.247;SUBNETWORK:255.255.255.0;GATEWAY:192.168.1.1;'
+        'PRNPORT:9100;T:30;IP:1',
+      ),
+    );
+    expect(info, isNotNull);
+    expect(info!.ip, '192.168.1.247');
+    expect(info.mac, '00:47:50:3D:B4:A4');
+  });
 }

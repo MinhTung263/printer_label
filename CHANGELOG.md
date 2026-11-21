@@ -1,3 +1,26 @@
+## [2.5.3] - 2026-11-21
+
+* **Nhận biết máy in tem / máy in hoá đơn (LAN, USB):** `detectLanPrinterLanguage` (cùng quy tắc với trạm in trên máy
+  tính): điều đã biết, model tự khai qua gói dò (Gprinter `DEVICENAME`), hãng chỉ làm máy hoá đơn, rồi hỏi máy bằng
+  lệnh trạng thái TSPL / ESC/POS trên MỘT kết nối (`TcpPrinterPort.exchangeMany`). Máy hai chế độ (hiểu cả hai) trả
+  `PrinterLanguage.both`. `rememberPrinterLanguage` để app ghi nhận. Xuất `PrinterLanguage`, `PrinterLanguageProbe`.
+  USB: `getUsbPrinters()` kèm chuỗi IEEE 1284 máy tự khai (`CMD:TSPL` / `CMD:ESC/POS`) và trạng thái quyền.
+* **Cấu hình sai vẫn không in rác:** gửi TSPL tới máy đã biết là máy hoá đơn báo `PRINTER_NOT_LABEL`; gửi ESC/POS tới
+  máy đã biết là máy tem (kể cả máy hai chế độ) báo `PRINTER_NOT_RECEIPT` — nơi gọi in dạng ảnh bằng đúng lệnh.
+* **Không in ký tự rác khi kết nối đứt giữa bill:** lần gửi trước tới máy bị đứt giữa chừng thì lần sau xả bộ đệm
+  máy in bằng 10240 byte 0x00 (đủ lấp một dải `GS v 0` 128 dòng còn dở) rồi `ESC @` — iOS (mới) và Android (trước
+  chỉ 1024 byte). iOS: nhả socket sau khi in chờ máy in đọc hết rồi mới huỷ (trước huỷ ngay khi FIN xếp hàng, phần
+  chưa gửi bị bỏ -> máy chậm in nửa bill rồi rác).
+* **Nối máy in LAN nhanh hơn:** chia lượt bắt tay 6s thành các lượt 1,2s, mỗi lượt một socket mới (Android, iOS).
+  Máy Gprinter bỏ qua lượt bắt tay đầu (đo được) nên trước đây mỗi lần in mất thêm 2–3s; máy vừa khởi động lại mạng
+  (vừa đổi IP) cũng nối được sớm hơn.
+* **Quét broadcast trả sớm:** dò Gprinter (Dart) và quét trên iOS trả kết quả khi các máy đã trả lời xong (0,6s không
+  có máy mới), không chờ đủ 1,5s. Sửa đọc gói dò Gprinter có đuôi rác lặp khoá (`...;T:30;IP:1`) làm máy bị bỏ qua.
+  MAC `00:47:50` là Gprinter; tên model Gprinter lấy ngay từ gói dò; bỏ gói dội lại khi hỏi tên HPRT.
+* **Máy in không treo "đang bận":** Android dùng khoá có hạn (20s, báo `PRINTER_BUSY`) thay cho `synchronized`, canh
+  giờ lần gửi kẹt (`PRINTER_STALLED`) trên Android và iOS; kết nối Bluetooth chờ lượt đang nối thay vì mở trùng.
+* **Bỏ toast native:** thông báo từ native chỉ còn ghi log (`[native] ...`), app tự quyết định hiện gì.
+
 ## [2.5.2] - 2026-11-20
 
 * **Máy in Gprinter (module Ethernet):** `GprinterUdp` — dò máy (`B[]G`) và đổi IP / netmask / gateway / DHCP qua UDP

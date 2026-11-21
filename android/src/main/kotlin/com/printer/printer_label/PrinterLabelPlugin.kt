@@ -1,5 +1,6 @@
 package com.printer.printer_label
 
+import kotlin.concurrent.withLock
 import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -16,7 +17,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.annotation.RequiresApi
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -1229,6 +1229,56 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             usbManager.deviceList.values.filter { isUsbPrinter(it) && !usbManager.hasPermission(it) }
         }.getOrDefault(emptyList())
 
+    /**
+     * MỌI máy in USB đang cắm: `[{device_id, name, has_permission, ieee1284?}]`.
+     *
+     * `ieee1284`: chuỗi định danh IEEE 1284 máy tự khai (`MFG:..;CMD:TSPL;MDL:..;`) — chỉ đọc
+     * được khi ĐÃ có quyền. `CMD:` cho biết ngôn ngữ lệnh: TSPL -> máy in tem, ESC/POS -> máy
+     * in hoá đơn (Dart: `PrinterLanguageProbe.fromIeee1284`).
+     */
+    internal fun getUsbPrinters(): List<Map<String, Any?>> =
+        runCatching { usbManager.deviceList.values.filter { isUsbPrinter(it) } }
+            .getOrDefault(emptyList())
+            .map { device ->
+                val permitted = runCatching { usbManager.hasPermission(device) }.getOrDefault(false)
+                mapOf(
+                    "device_id" to stableUsbId(device),
+                    "name" to (runCatching { device.productName }.getOrNull()
+                        ?.takeIf { it.isNotBlank() } ?: device.deviceName),
+                    "has_permission" to permitted,
+                    "ieee1284" to if (permitted) readIeee1284(device) else null,
+                )
+            }
+
+    /**
+     * Đọc chuỗi IEEE 1284 Device ID (lệnh lớp máy in `GET_DEVICE_ID`). Chỉ ĐỌC, không gửi gì
+     * tới máy in; không đọc được (máy đang bị kết nối khác giữ, không hỗ trợ) -> null.
+     */
+    private fun readIeee1284(device: UsbDevice): String? {
+        val intf = (0 until device.interfaceCount)
+            .map { device.getInterface(it) }
+            .firstOrNull { it.interfaceClass == 7 } ?: return null
+        val conn = runCatching { usbManager.openDevice(device) }.getOrNull() ?: return null
+        return try {
+            val buf = ByteArray(1024)
+            val n = conn.controlTransfer(
+                0xA1, // IN | CLASS | INTERFACE
+                0x00, // GET_DEVICE_ID
+                0,
+                (intf.id shl 8) or intf.alternateSetting,
+                buf, buf.size, 1000
+            )
+            if (n < 2) return null
+            val len = (((buf[0].toInt() and 0xFF) shl 8) or (buf[1].toInt() and 0xFF))
+                .coerceIn(2, n)
+            String(buf, 2, len - 2, Charsets.US_ASCII).trim().takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { conn.close() }
+        }
+    }
+
     /** Máy in USB đang cắm nhưng chưa có quyền: `[{device_id, name}]`. */
     internal fun getUsbPrintersNeedingPermission(): List<Map<String, String>> =
         attachedUsbPrintersWithoutPermission().map { device ->
@@ -1561,7 +1611,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 // Tuần tự hóa việc gửi TRÊN CÙNG máy này (khóa theo connection), khớp
                 // với cơ chế khóa của luồng ESC. Các máy khác dùng khóa khác nên vẫn
                 // in song song, không đợi nhau.
-                synchronized(PrinterThermal.lockFor(conn)) {
+                PrinterThermal.lockFor(conn).withLock {
                     printer.sizeMm(sizeWidth.toDouble(), sizeHeight.toDouble())
                         .gapMm(gapWidth, gapHeight)
                         .reference(0, 0)
@@ -1908,7 +1958,15 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         }
     }
 
-    internal fun toast(str: String) = Toast.makeText(mContext, str, Toast.LENGTH_SHORT).show()
+    /**
+     * KHÔNG hiện Toast native nữa: thông báo cho người dùng do app (Dart) quyết định, theo
+     * đúng giao diện và chỉ khi thật cần (VD lỗi in sau khi đã tự phục hồi không được).
+     * Toast native trước đây bật liên tục ("Kết nối … thành công", "SEND_FAIL", "USB được
+     * gắn"…) cả khi app đang tự xử lý ngầm. Chỉ ghi log để gỡ lỗi: `adb logcat -s PRINTER_LOG`.
+     */
+    internal fun toast(str: String) {
+        Log.i("PRINTER_LOG", "[native] $str")
+    }
 
     companion object {
         /** Instance được tự kết nối USB, xem [isUsbOwner]. */

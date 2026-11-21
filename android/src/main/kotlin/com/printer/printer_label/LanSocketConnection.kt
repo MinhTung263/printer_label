@@ -67,6 +67,10 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         /** Đủ cho Android gửi SYN 3 lần (t=0, ~1s, ~3s) trước khi bỏ cuộc một lượt thử. */
         const val CONNECT_TIMEOUT_MS = 6_000
 
+        /** Một lượt bắt tay rồi mở socket mới (SYN mới đi ngay) — xem openSocket. Gprinter (đo
+         *  được) bỏ qua lượt bắt tay đầu cả khi bình thường, socket mới thì nối trong ~20ms. */
+        const val CONNECT_ATTEMPT_MS = 1_200
+
         /** Một gói (tối đa WRITE_CHUNK) ghi không xong trong khoảng này = coi như kết nối chết. */
         const val WRITE_STALL_TIMEOUT_MS = 10_000L
 
@@ -87,8 +91,18 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
          */
         private val dirty: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-        /** 1024 byte 0x00 (nuốt nốt phần ảnh còn thiếu) + `ESC @` (đưa máy về trạng thái đầu). */
-        private val FLUSH_BYTES = ByteArray(1026).also { it[1024] = 0x1B; it[1025] = 0x40 }
+        /**
+         * Byte 0x00 đủ lấp MỌI phần ảnh còn thiếu + `ESC @` (đưa máy về trạng thái đầu).
+         * Một dải `GS v 0` tối đa 128 dòng × 80 byte/dòng (máy 80mm 72 byte) = 10240 byte;
+         * trước đây chỉ 1024 byte nên dải dở còn thiếu nhiều hơn vẫn nuốt bill sau -> rác.
+         * 0x00 thừa sau khi lấp xong là lệnh rỗng, máy in bỏ qua. Tệ nhất ra một khoảng
+         * giấy trắng ≤ 16mm thay vì ký tự rác.
+         */
+        private const val FLUSH_ZEROS = 128 * 80
+        private val FLUSH_BYTES = ByteArray(FLUSH_ZEROS + 2).also {
+            it[FLUSH_ZEROS] = 0x1B
+            it[FLUSH_ZEROS + 1] = 0x40
+        }
 
         /** Chờ máy nuốt xong phần xả trước khi gửi bill. */
         private const val FLUSH_SETTLE_MS = 50L
@@ -183,6 +197,24 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         lastErrorMessage = null
         val host = info.substringBefore(':')
         val port = info.substringAfter(':', "").toIntOrNull() ?: DEFAULT_PORT
+        // Máy in vừa khởi động lại mạng (VD vừa đặt IP mới) hay bỏ qua gói SYN đầu; một
+        // connect() chờ cả CONNECT_TIMEOUT_MS chỉ gửi lại SYN ở ~1s, ~3s nên lỡ máy sẵn sàng
+        // ở giây thứ 3–6. Chia thành các lượt CONNECT_ATTEMPT_MS, mỗi lượt một socket mới
+        // (SYN đi ngay), trong tổng hạn cũ. Chỉ thử lại khi HẾT GIỜ (lỗi khác báo ngay).
+        val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
+        while (true) {
+            val left = (deadline - System.currentTimeMillis()).toInt()
+            val wait = minOf(CONNECT_ATTEMPT_MS, left).coerceAtLeast(500)
+            val ok = openSocketOnce(info, host, port, wait)
+            if (ok || lastFailure != Failure.TIMEOUT) return ok
+            if (deadline - System.currentTimeMillis() < 300) return false
+            Log.i(TAG, "$info chưa trả lời bắt tay sau ${wait}ms, mở lại kết nối")
+        }
+    }
+
+    private fun openSocketOnce(info: String, host: String, port: Int, timeoutMs: Int): Boolean {
+        lastFailure = null
+        lastErrorMessage = null
         val s = Socket()
         try {
             val address = InetAddress.getByName(host)
@@ -200,7 +232,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
             // 16KB: gửi xong ~65ms; TCP tự điều tiết theo bộ đệm máy in. Đã kiểm tra trên
             // Epson LAN: in đủ, không ký tự rác.
             s.sendBufferSize = 16 * 1024
-            s.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)
+            s.connect(InetSocketAddress(address, port), timeoutMs)
             s.soTimeout = 0
             socket = s
             output = s.getOutputStream()
@@ -308,7 +340,16 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
      * Ghi hết [data] theo từng gói nhỏ, mỗi gói có watchdog: kẹt quá
      * WRITE_STALL_TIMEOUT_MS thì đóng socket để `write` ném lỗi thay vì treo vô hạn.
      */
+    /**
+     * Lần ghi gần nhất bị KẸT (máy in nhận kết nối nhưng không nhận dữ liệu — hết giấy,
+     * mở nắp, máy đang lỗi, hoặc mạng quá yếu), khác với lỗi ghi thường.
+     */
+    @Volatile
+    var writeStalled: Boolean = false
+        private set
+
     private fun writeFully(data: ByteArray) {
+        writeStalled = false
         val out = output ?: throw IOException("Chưa kết nối")
         var offset = 0
         while (offset < data.size) {
@@ -317,7 +358,9 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
             val guard = watchdog.schedule({
                 Log.w(TAG, "Ghi tới $connectInfo kẹt quá ${WRITE_STALL_TIMEOUT_MS}ms, đóng kết nối")
                 lastFailure = Failure.SEND_FAILED
-                lastErrorMessage = "Gửi dữ liệu kẹt quá ${WRITE_STALL_TIMEOUT_MS / 1000}s (mạng tới máy in quá yếu)"
+                writeStalled = true
+                lastErrorMessage = "Máy in không nhận dữ liệu sau ${WRITE_STALL_TIMEOUT_MS / 1000}s " +
+                    "(hết giấy, mở nắp, máy in đang lỗi hoặc mạng quá yếu)"
                 abort(s)
             }, WRITE_STALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             try {
