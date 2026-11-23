@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'dirty_store.dart';
 import 'escpos_commands.dart';
 import 'lan_printer_scanner.dart';
 import 'paper_status.dart';
@@ -51,14 +52,33 @@ class TcpPrinterPort implements PrinterPort {
   static int retryJitterMs = 350;
   static final Random _jitter = Random();
 
-  /// Máy in có lần gửi bị đứt GIỮA CHỪNG (rút dây, mất Wi-Fi): bộ đệm máy còn dở dang một lệnh ảnh
-  /// nên phiếu kế tiếp in ra ký tự lạ / giấy dài. Lần gửi sau xả bằng [_flushBytes] trước.
-  static final Set<String> _dirty = {};
+  /// Số lần thử lại khi máy in BẬN (đang in cho thiết bị khác, từ chối socket này). Một bill chỉ in vài giây nên
+  /// chờ thêm gần như chắc chắn tới lượt; giãn dần nhưng chặn trên [busyMaxDelay], ngẫu nhiên cộng thêm để các
+  /// thiết bị cùng bị từ chối không thử lại đồng loạt. Tổng tối đa ~15s, dưới hạn giữ hàng đợi của [PortQueue].
+  static int busyMaxAttempts = 12;
+  static Duration busyMaxDelay = const Duration(milliseconds: 1500);
 
-  /// 1024 byte 0x00 (nuốt nốt phần dữ liệu ảnh còn thiếu của lệnh dở) + `ESC @` (đưa máy về ban đầu).
-  static final Uint8List _flushBytes = Uint8List(1026)
-    ..[1024] = 0x1B
-    ..[1025] = 0x40;
+  /// Chờ sau khi gửi phần xả để biết máy in có TỪ CHỐI socket này không (máy in nhiệt chỉ in MỘT socket, socket khác
+  /// bị reset ngay khi có byte tới). Phần xả vô hại nên bị từ chối ở bước này thì thử lại an toàn, chưa mất byte
+  /// bill nào.
+  static Duration busyProbe = const Duration(milliseconds: 30);
+
+  /// Sổ "máy in có thể đang dở một lệnh ảnh", LƯU BỀN xuống đĩa. Lần gửi trước đứt GIỮA CHỪNG (rút dây, mất Wi-Fi,
+  /// Agent bị tắt / crash) thì máy còn chờ nốt phần ảnh và NUỐT phiếu kế tiếp làm dữ liệu ảnh -> ký tự lạ, giấy dài.
+  /// Trước đây chỉ là `Set` trong bộ nhớ nên Agent khởi động lại là mất. Ghi sổ TRƯỚC byte đầu, chỉ xoá khi gửi xong.
+  static final DirtyStore dirtyStore = DirtyStore();
+
+  /// 16384 byte 0x00 (lấp MỌI phần ảnh còn thiếu của một dải `GS v 0`: tối đa 128 dòng x 128 byte) + `ESC @`.
+  /// Trước đây chỉ 1024 byte nên dải dở còn thiếu nhiều hơn vẫn nuốt phiếu sau. 0x00 thừa là lệnh rỗng, máy sạch bỏ qua.
+  static final Uint8List _flushBytes = Uint8List(16384 + 2)
+    ..[16384] = 0x1B
+    ..[16385] = 0x40;
+
+  /// Lệnh ESC/POS (bắt đầu bằng `ESC @` như [EscPosCommands.receipt] dựng) luôn được xả ở kết nối mới, KHÔNG phụ
+  /// thuộc Agent này có biết máy in còn dở hay không: một thiết bị KHÁC (điện thoại, Agent khác) có thể vừa để máy in
+  /// dở dang một lệnh ảnh mà sổ của Agent này không hề biết.
+  static bool _isEscPos(Uint8List data) =>
+      data.length >= 2 && data[0] == 0x1B && data[1] == 0x40;
 
   static Duration noStatusFor = const Duration(minutes: 10);
   static final Map<String, DateTime> _noStatusUntil = {};
@@ -97,42 +117,83 @@ class TcpPrinterPort implements PrinterPort {
     bool checkStatus = true,
     bool tsplStatus = false,
   }) => PortQueue.run(id, () async {
-    final conn = await _open();
-    try {
-      if (checkStatus && !_statusUnsupported(tspl: tsplStatus)) {
-        final status = tsplStatus
-            ? await _queryTsplOn(conn)
-            : await _queryOn(conn);
-        if (status == PaperStatus.unknown) {
-          _noStatusUntil[tsplStatus ? '$id#tspl' : id] = DateTime.now().add(
-            noStatusFor,
-          );
-        }
-        if (status.blocksPrinting) throw PrinterStatusException(status);
-      }
-      // Lần trước đứt giữa chừng: xả bộ đệm máy in hoá đơn rồi mới in (máy tem TSPL không cần).
-      if (!tsplStatus && _dirty.contains(id)) {
-        conn.socket.add(_flushBytes);
-        await conn.socket.flush();
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
+    for (var attempt = 0; ; attempt++) {
+      final conn = await _open();
       try {
-        for (var off = 0; off < data.length; off += chunkSize) {
-          final end = off + chunkSize < data.length
-              ? off + chunkSize
-              : data.length;
-          conn.socket.add(Uint8List.sublistView(data, off, end));
-          await conn.socket.flush();
+        await _sendOn(
+          conn,
+          data,
+          checkStatus: checkStatus,
+          tsplStatus: tsplStatus,
+        );
+        await conn.close();
+        // Đóng êm xong (FIN sau khi toàn bộ dữ liệu đã đẩy đi): mới xoá sổ "in dở".
+        dirtyStore.clear(id);
+        return;
+      } on _PrinterBusy {
+        // Máy in đang in cho thiết bị khác: CHƯA gửi byte bill nào, thử lại an toàn.
+        if (attempt >= busyMaxAttempts) {
+          throw const SocketException('Máy in đang bận (từ chối kết nối)');
         }
-        _dirty.remove(id);
-      } catch (_) {
-        _dirty.add(id);
-        rethrow;
+        final base = Duration(
+          milliseconds: min(
+            busyMaxDelay.inMilliseconds,
+            400 * (1 << min(attempt, 4)),
+          ),
+        );
+        // Ngẫu nhiên 0.7-1.4 lần: nhiều thiết bị cùng bị từ chối không thử lại ĐÚNG cùng lúc.
+        await Future<void>.delayed(base * (0.7 + _jitter.nextDouble() * 0.7));
+      } finally {
+        await conn.close();
       }
-    } finally {
-      await conn.close();
     }
   });
+
+  /// [tsplStatus]: hỏi trạng thái bằng `<ESC>!?` (máy tem TSPL) thay vì `DLE EOT` (máy hoá
+  /// đơn) — hết giấy / mở nắp / kẹt giấy / hết mực thì KHÔNG gửi (nơi gọi giữ lệnh, tự in
+  /// khi máy sẵn sàng); máy không trả lời thì in như thường.
+  Future<void> _sendOn(
+    _TcpConn conn,
+    Uint8List data, {
+    required bool checkStatus,
+    required bool tsplStatus,
+  }) async {
+    if (checkStatus && !_statusUnsupported(tspl: tsplStatus)) {
+      final status = tsplStatus
+          ? await _queryTsplOn(conn)
+          : await _queryOn(conn);
+      if (status == PaperStatus.unknown) {
+        _noStatusUntil[tsplStatus ? '$id#tspl' : id] = DateTime.now().add(
+          noStatusFor,
+        );
+      }
+      if (status.blocksPrinting) throw PrinterStatusException(status);
+    }
+    // Xả bộ đệm máy in hoá đơn trước khi in (máy tem TSPL không cần): lệnh ESC/POS luôn xả; lệnh khác chỉ khi sổ
+    // báo lần trước dở.
+    if (!tsplStatus && (_isEscPos(data) || dirtyStore.isDirty(id))) {
+      conn.socket.add(_flushBytes);
+      await conn.socket.flush();
+      // Phần xả vô hại nên cũng là "thăm dò": máy in bận (đang in cho thiết bị khác) reset socket này ngay khi có byte
+      // tới -> chưa gửi byte bill nào, nơi gọi thử lại.
+      await Future<void>.delayed(busyProbe);
+      if (conn.peerGone) throw const _PrinterBusy();
+    }
+    // Ghi sổ TRƯỚC byte đầu của bill (ghi đĩa ngay): Agent bị kill / mất điện giữa chừng thì lần sau vẫn biết.
+    dirtyStore.mark(id);
+    try {
+      for (var off = 0; off < data.length; off += chunkSize) {
+        final end = off + chunkSize < data.length
+            ? off + chunkSize
+            : data.length;
+        conn.socket.add(Uint8List.sublistView(data, off, end));
+        await conn.socket.flush();
+      }
+    } catch (_) {
+      // Giữ cờ: lần gửi sau xả trước.
+      rethrow;
+    }
+  }
 
   /// Gửi [request] rồi chờ máy in trả lời (tối đa [timeout]); `null` khi không có
   /// byte nào. Dùng để dò ngôn ngữ máy in ([PrinterLanguageProbe]).
@@ -217,7 +278,10 @@ class _TcpConn {
         _rx.addAll(data);
         _signal();
       },
-      onError: (_) => _signal(),
+      onError: (Object e) {
+        _error = e;
+        _signal();
+      },
       onDone: () {
         _closed = true;
         _signal();
@@ -237,6 +301,11 @@ class _TcpConn {
   final List<int> _rx = [];
   Completer<void>? _waiter;
   bool _closed = false;
+  Object? _error;
+  bool _closing = false;
+
+  /// Máy in đã đóng / reset kết nối này (VD từ chối vì đang in cho thiết bị khác).
+  bool get peerGone => _closed || _error != null;
 
   void _signal() {
     final w = _waiter;
@@ -294,6 +363,8 @@ class _TcpConn {
   }
 
   Future<void> close() async {
+    if (_closing) return;
+    _closing = true;
     try {
       await socket.flush();
       await socket.close();
@@ -302,4 +373,9 @@ class _TcpConn {
     }
     await _sub.cancel();
   }
+}
+
+/// Máy in từ chối kết nối này vì đang in cho thiết bị khác (chưa gửi byte bill nào).
+class _PrinterBusy implements Exception {
+  const _PrinterBusy();
 }

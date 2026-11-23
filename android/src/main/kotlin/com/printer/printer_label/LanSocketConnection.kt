@@ -84,37 +84,26 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
 
         private val mainHandler = Handler(Looper.getMainLooper())
 
-        /**
-         * Máy in có lần gửi bị đứt GIỮA CHỪNG (rút dây, rớt Wi-Fi, kẹt ghi): bộ đệm máy còn
-         * dở một lệnh ảnh (`GS v 0` / `BITMAP`) nên nó nuốt tiếp bill sau làm dữ liệu ảnh -> in
-         * ký tự lạ, giấy chạy dài. Lần kết nối sau tới máy đó xả bằng [FLUSH_BYTES] trước.
-         */
-        private val dirty: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-
-        /**
-         * Byte 0x00 đủ lấp MỌI phần ảnh còn thiếu + `ESC @` (đưa máy về trạng thái đầu).
-         * Một dải `GS v 0` tối đa 128 dòng × 80 byte/dòng (máy 80mm 72 byte) = 10240 byte;
-         * trước đây chỉ 1024 byte nên dải dở còn thiếu nhiều hơn vẫn nuốt bill sau -> rác.
-         * 0x00 thừa sau khi lấp xong là lệnh rỗng, máy in bỏ qua. Tệ nhất ra một khoảng
-         * giấy trắng ≤ 16mm thay vì ký tự rác.
-         */
-        private const val FLUSH_ZEROS = 128 * 80
-        private val FLUSH_BYTES = ByteArray(FLUSH_ZEROS + 2).also {
-            it[FLUSH_ZEROS] = 0x1B
-            it[FLUSH_ZEROS + 1] = 0x40
-        }
-
-        /** Chờ máy nuốt xong phần xả trước khi gửi bill. */
-        private const val FLUSH_SETTLE_MS = 50L
     }
 
     private val appContext = context?.applicationContext
+
+    init {
+        PrintDirtyStore.init(appContext)
+    }
 
     @Volatile private var socket: Socket? = null
     @Volatile private var output: OutputStream? = null
     @Volatile private var input: InputStream? = null
     @Volatile private var alive = false
     @Volatile private var connectInfo: String = ""
+
+    /**
+     * true từ lúc mở socket tới khi lệnh in ESC/POS đầu tiên lấy đi ([takeFreshSocket]). Lệnh đầu tiên trên
+     * socket mới phải xả bộ đệm máy in dù cờ "in dở" của THIẾT BỊ NÀY chưa bật: cờ nằm trên từng điện
+     * thoại, mà cửa hàng đông nhân viên thì điện thoại khác có thể vừa để máy in dở một lệnh ảnh.
+     */
+    @Volatile private var freshSocket = false
 
     /** Lý do thất bại gần nhất (null = chưa lỗi). Đọc sau connectSync/sendSync để phân loại. */
     @Volatile var lastFailure: Failure? = null
@@ -238,6 +227,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
             output = s.getOutputStream()
             input = s.getInputStream()
             alive = true
+            freshSocket = true
             acquireWifiLock()
             flushIfDirty(info)
             return true
@@ -321,15 +311,22 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         wifiLock = null
     }
 
+    /** Lấy cờ "socket vừa mở, chưa gửi lệnh ESC/POS nào" (trả true đúng MỘT lần cho mỗi socket). */
+    fun takeFreshSocket(): Boolean {
+        val fresh = freshSocket
+        freshSocket = false
+        return fresh
+    }
+
     // ─── Ghi ─────────────────────────────────────────────────────────────────
 
     /** Lần gửi trước tới [info] đứt giữa chừng -> xả bộ đệm máy in (lỗi xả không chặn việc in). */
     private fun flushIfDirty(info: String) {
-        if (!dirty.contains(info)) return
+        if (!PrintDirtyStore.isDirty(info)) return
         try {
-            synchronized(writeLock) { writeFully(FLUSH_BYTES) }
-            Thread.sleep(FLUSH_SETTLE_MS)
-            dirty.remove(info)
+            synchronized(writeLock) { writeFully(PrintDirtyStore.FLUSH_BYTES) }
+            Thread.sleep(PrintDirtyStore.SETTLE_MS)
+            PrintDirtyStore.clear(info)
             Log.i(TAG, "Đã xả bộ đệm $info sau lần gửi đứt giữa chừng")
         } catch (e: Exception) {
             Log.w(TAG, "Xả bộ đệm $info lỗi: ${e.message}")
@@ -509,7 +506,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         if (lastFailure == null || lastFailure == Failure.OTHER) lastFailure = reason
         if (lastErrorMessage == null) lastErrorMessage = e.message ?: e.javaClass.simpleName
         Log.w(TAG, "Kết nối $connectInfo lỗi (${lastFailure}): $lastErrorMessage")
-        if (reason == Failure.SEND_FAILED) dirty.add(connectInfo)
+        if (reason == Failure.SEND_FAILED) PrintDirtyStore.mark(connectInfo)
         abort(socket)
         val info = connectInfo
         val msg = lastErrorMessage ?: ""

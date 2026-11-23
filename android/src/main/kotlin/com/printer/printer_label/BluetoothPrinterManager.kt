@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel.Result
 import net.posprinter.IDeviceConnection
@@ -447,7 +448,17 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             val printerMac: String? = pickBuiltInMac(adapter.bondedDevices)
 
             val mac = printerMac ?: run {
-                result.success(false)
+                // Chưa thấy máy in ảo: Bluetooth vừa bật có thể chưa nạp xong danh sách ghép đôi -> đọc lại sau một
+                // nhịp rồi MỚI kết luận (không chặn luồng giao diện).
+                Handler(Looper.getMainLooper()).postDelayed({
+                    val again = try { pickBuiltInMac(adapter.bondedDevices) } catch (_: Exception) { null }
+                    if (again != null) {
+                        connectBt(again, result, markBuiltIn = true)
+                    } else {
+                        concludeNoVirtualPrinter(adapter)
+                        result.success(false)
+                    }
+                }, NO_VIRTUAL_PRINTER_RECHECK_MS)
                 return
             }
 
@@ -842,11 +853,30 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
     private fun pickBuiltInMac(paired: Set<BluetoothDevice>?): String? {
         val bonded = paired?.map { it.toBonded(printerLike = isPrinter(it)) } ?: return null
         val tier = builtInTier(plugin.mContext)
-        val picked = BuiltInPrinterRules.pick(bonded, tier) ?: return null
+        val picked = BuiltInPrinterRules.pick(bonded, tier, strictVirtual = requiresVirtualPrinter()) ?: return null
         // Máy chưa xác minh mà tìm được máy in ảo: từ giờ coi là có máy in tích
         // hợp (các chốt isBuiltInPrinter() trong plugin + khổ giấy).
-        if (tier != BuiltInPrinterRules.Tier.VERIFIED) markBuiltInPrinterConfirmed()
+        if (tier != BuiltInPrinterRules.Tier.VERIFIED || BuiltInPrinterRules.isStrong(picked)) {
+            markBuiltInPrinterConfirmed()
+        } else {
+            clearNoVirtualPrinterFound()
+        }
         return picked.mac
+    }
+
+    /** Chờ trước khi đọc lại danh sách ghép đôi để kết luận "không có máy in ảo". */
+    private val NO_VIRTUAL_PRINTER_RECHECK_MS = 1_500L
+
+    /**
+     * Hai lần đọc danh sách ghép đôi đều KHÔNG thấy máy in ảo -> máy này không có máy in tích hợp (xem
+     * [markNoVirtualPrinterFound]). Chỉ kết luận khi thật sự đọc được danh sách (Bluetooth bật, có quyền) và không
+     * phải máy Urovo (in bằng SDK riêng, không qua Bluetooth ảo).
+     */
+    private fun concludeNoVirtualPrinter(adapter: BluetoothAdapter) {
+        if (!adapter.isEnabled || !hasConnectPermission()) return
+        if (UrovoPrinterManager.isUrovoDevice()) return
+        Log.i("BUILTIN_PRINTER", "Không thấy máy in ảo trong danh sách ghép đôi: máy này không có máy in tích hợp")
+        markNoVirtualPrinterFound()
     }
 
     internal fun autoConnectBuiltInSync(): Boolean {
@@ -921,9 +951,17 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         } catch (_: SecurityException) {
             null
         }
-        val printerMac: String? = pickBuiltInMac(pairedDevices)
+        var printerMac: String? = pickBuiltInMac(pairedDevices)
 
-        val mac = printerMac ?: return false
+        if (printerMac == null) {
+            // Đọc lại sau một nhịp rồi mới kết luận (danh sách ghép đôi có thể chưa nạp xong). Đang ở luồng nền.
+            Thread.sleep(NO_VIRTUAL_PRINTER_RECHECK_MS)
+            printerMac = pickBuiltInMac(try { adapter.bondedDevices } catch (_: SecurityException) { null })
+        }
+        val mac = printerMac ?: run {
+            concludeNoVirtualPrinter(adapter)
+            return false
+        }
 
         // Kết nối đồng bộ và ĐÁNH DẤU đây là máy in tích hợp.
         return connectBtSync(mac, markBuiltIn = true)

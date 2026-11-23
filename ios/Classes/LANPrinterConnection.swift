@@ -79,6 +79,8 @@ public final class LANPrinterConnection {
         /// Hỏi cảm biến giấy/nắp trước khi gửi (chỉ bật cho bill / phiếu bếp).
         var checkPaper: Bool = false
         var paperChecked: Bool = false
+        /// Số thứ tự lúc đẩy xuống TCP, để hẹn xác nhận RIÊNG từng job (xem `pendingConfirmJobs`).
+        var ticket: Int = 0
     }
 
     /// Trạng thái cảm biến giấy/nắp đọc được bằng `DLE EOT 2` + `DLE EOT 4`.
@@ -109,9 +111,14 @@ public final class LANPrinterConnection {
     /// còn sót của lần in trước (xem `flushQueue`).
     private var isFirstJobOnSocket: Bool = true
 
-    /// Job đã đẩy xuống TCP và đang chờ xác nhận máy in không đóng kết nối.
-    /// Nếu máy in reset trong lúc chờ thì job này được coi là CHƯA in và đem retry.
-    private var pendingConfirmJob: Job?
+    /// Các job đã đẩy xuống TCP và đang chờ xác nhận máy in không đóng kết nối (theo thứ tự gửi).
+    /// Gửi dồn nhiều job thì NHIỀU job cùng chờ. Trước đây chỉ có MỘT ô (`pendingConfirmJob`) nên job
+    /// sau ghi đè job trước: completion của job trước không bao giờ được gọi (4 bill gửi dồn chỉ 1 bill
+    /// được báo xong, ba bill kia treo "đang in" tới khi hết hạn dù giấy đã ra) và nếu máy in reset thì
+    /// các job bị ghi đè cũng không được thử lại.
+    /// Nếu máy in reset trong lúc chờ thì TẤT CẢ được coi là CHƯA in và đem retry đúng thứ tự.
+    private var pendingConfirmJobs: [Job] = []
+    private var confirmSeq = 0
 
     /// Thời gian chờ sau khi đẩy xong dữ liệu để phát hiện máy in reset kết nối (do thiết
     /// bị khác đang giữ kênh in). Máy in từ chối gần như tức thì nên 400ms là đủ.
@@ -129,6 +136,13 @@ public final class LANPrinterConnection {
     // không giới hạn số lần, không giãn nhịp. Khi 2 điện thoại tranh socket 9100 thì cả
     // hai cùng rơi vào vòng này và liên tục đập vào máy in, càng làm nhau khó kết nối.
     private let maxAttempts = 4
+    /// Máy in BẬN (đang in cho điện thoại khác, từ chối socket này): thử nhiều lần hơn. Một bill chỉ in vài
+    /// giây, nên chờ thêm gần như chắc chắn tới lượt; bỏ cuộc sau ~3s khiến bill thứ 3-4 của cửa hàng đông
+    /// nhân viên báo lỗi dù máy in chỉ đang bận (đo trên bộ giả lập: ~9% bill lỗi dù mạng tốt). Khoảng
+    /// cách giữa các lần thử bị chặn trên (`maxBusyRetryDelay`) để không chờ thừa khi máy in đã rảnh.
+    /// Tổng thời gian tối đa ~15-20s, vẫn dưới hạn 60s của tầng Dart.
+    private let maxBusyAttempts = 12
+    private let maxBusyRetryDelay: TimeInterval = 1.5
     /// Hết giờ / không có đường tới máy in: tối đa 1 lần thử lại (mỗi lượt đã chờ cả
     /// `connectionTimeout`). Thử đủ `maxAttempts` như "máy in bận" làm bill bị treo ~30s.
     private let maxTimeoutRetries = 1
@@ -141,26 +155,20 @@ public final class LANPrinterConnection {
     // "tranh socket" thành "xếp hàng ngắn" — mô hình các POS nhiều thiết bị vẫn dùng.
     /// Chờ một nhịp ngắn trước khi đóng: nếu có job kế tiếp (in liên tiếp nhiều đơn)
     /// thì tái dùng socket đang mở thay vì đóng/mở lại liên tục.
-    private let idleCloseDelay: TimeInterval = 0.6
+    private let idleCloseDelay: TimeInterval = 0.25
     private var idleCloseWork: DispatchWorkItem?
     /// Số byte đã gửi trên socket hiện tại — để ước lượng thời gian máy in cần đọc hết
     /// trước khi đóng hẳn socket (xem `scheduleIdleCloseIfNeeded`).
     private var bytesOnSocket = 0
 
-    /// IP các máy in có lần gửi bị đứt giữa chừng (bộ đệm máy có thể còn dở lệnh ảnh) —
-    /// dùng chung mọi kết nối (manager có thể tạo kết nối mới cho cùng IP).
-    private static var dirtyIps = Set<String>()
-    private static let dirtyLock = NSLock()
-    /// Đủ lấp một dải `GS v 0` còn thiếu: 128 dòng × 80 byte.
-    private static let flushZeros = 128 * 80
+    /// Máy in có lần gửi bị đứt giữa chừng (bộ đệm máy có thể còn dở lệnh ảnh): dùng sổ LƯU BỀN
+    /// [PrintDirtyStore] (sống sót cả khi app bị kill) dùng chung mọi kết nối (manager có thể tạo
+    /// kết nối mới cho cùng IP).
+    /// Khoá trong sổ [PrintDirtyStore]: IP máy in (cổng 9100 như thực tế); cổng khác thì kèm cổng.
+    private var dirtyKey: String { port == 9100 ? ip : "\(ip):\(port)" }
 
-    private static func markDirty(_ ip: String) {
-        dirtyLock.lock(); dirtyIps.insert(ip); dirtyLock.unlock()
-    }
-
-    private static func takeDirty(_ ip: String) -> Bool {
-        dirtyLock.lock(); defer { dirtyLock.unlock() }
-        return dirtyIps.remove(ip) != nil
+    private static func markDirty(_ key: String) {
+        PrintDirtyStore.mark(key)
     }
     /// Chờ máy in đọc hết dữ liệu và tự đóng phía nó sau FIN: tối thiểu / tốc độ đọc tối
     /// thiểu giả định / tối đa.
@@ -201,7 +209,7 @@ public final class LANPrinterConnection {
         // phóng trước khi khối async (weak self) chạy. Caller đang chờ vẫn phải nhận kết quả.
         let pendingConnects = connectCompletions
         var pendingJobs = writeQueue
-        if let unconfirmed = pendingConfirmJob { pendingJobs.insert(unconfirmed, at: 0) }
+        pendingJobs.insert(contentsOf: pendingConfirmJobs, at: 0)
         if !pendingConnects.isEmpty || !pendingJobs.isEmpty {
             DispatchQueue.main.async {
                 for c in pendingConnects { c(false) }
@@ -362,11 +370,11 @@ public final class LANPrinterConnection {
         // bị khác đang giữ kênh in). Đưa lại đầu hàng đợi để retry theo backoff,
         // thay vì báo thành công giả và mất job im lặng.
         // Kết nối chết khi đang gửi / vừa gửi xong: máy in có thể còn dở một lệnh ảnh.
-        if self.pendingConfirmJob != nil || self.isWriting { Self.markDirty(self.ip) }
-        if let unconfirmed = self.pendingConfirmJob {
-            self.pendingConfirmJob = nil
-            self.writeQueue.insert(unconfirmed, at: 0)
-            print("[LANPrinterConnection] ↩️ Máy in \(self.ip) đóng ngay sau khi nhận — job chưa in, sẽ thử lại")
+        if !self.pendingConfirmJobs.isEmpty || self.isWriting { Self.markDirty(self.dirtyKey) }
+        if !self.pendingConfirmJobs.isEmpty {
+            self.writeQueue.insert(contentsOf: self.pendingConfirmJobs, at: 0)
+            print("[LANPrinterConnection] ↩️ Máy in \(self.ip) đóng ngay sau khi nhận — \(self.pendingConfirmJobs.count) job chưa in, sẽ thử lại")
+            self.pendingConfirmJobs.removeAll()
         }
         let hasPendingWork = !self.writeQueue.isEmpty || self.isWriting
         if hasPendingWork {
@@ -405,16 +413,16 @@ public final class LANPrinterConnection {
         queue.async { [weak self] in
             guard let self = self else { return }
             self.cancelIdleClose()
-            if self.pendingConfirmJob != nil || self.isWriting { Self.markDirty(self.ip) }
+            if !self.pendingConfirmJobs.isEmpty || self.isWriting { Self.markDirty(self.dirtyKey) }
             self.teardownConnection()
             self.state = .disconnected
             // Đang connect dở mà bị ngắt -> timeout không còn fire (connection đã nil),
             // phải trả kết quả cho caller đang chờ, nếu không connectLan treo vĩnh viễn.
             self.fireConnectCompletions(false)
             // Job chưa gửi bị hủy theo yêu cầu người dùng → trả lỗi cho caller đang chờ.
-            if let unconfirmed = self.pendingConfirmJob {
-                self.pendingConfirmJob = nil
-                self.writeQueue.insert(unconfirmed, at: 0)
+            if !self.pendingConfirmJobs.isEmpty {
+                self.writeQueue.insert(contentsOf: self.pendingConfirmJobs, at: 0)
+                self.pendingConfirmJobs.removeAll()
             }
             let dropped = self.writeQueue
             self.writeQueue.removeAll()
@@ -509,12 +517,24 @@ public final class LANPrinterConnection {
         // đóng kết nối giữa bill, native gửi lại cả bill -> nửa bill + rác). Lần gửi trước tới
         // máy này đứt giữa chừng ([markDirty]) thì lấp trước bằng 0x00 đủ cho mọi dải ảnh
         // còn thiếu (128 dòng × 80 byte) rồi mới `ESC @`; 0x00 thừa là lệnh rỗng, máy bỏ qua.
+        // Xả theo SỔ BỀN (sống sót cả khi app bị kill), nhưng CHỈ ở job đầu trên một socket mới: cùng một
+        // luồng TCP thì byte của job trước luôn tới máy in trước byte của job sau, nên job sau không cần xả
+        // (xả thừa mỗi job gửi dồn tốn thêm 16KB và chen một `ESC @` giữa các bill).
+        //
+        // Với lệnh ESC/POS (bắt đầu bằng `ESC @` như plugin dựng) thì xả LUÔN ở job đầu trên socket mới,
+        // không phụ thuộc điện thoại này có biết máy in còn dở hay không: sổ "in dở" nằm trên TỪNG điện
+        // thoại, mà cửa hàng đông nhân viên thì điện thoại khác có thể vừa để máy in dở dang một lệnh ảnh
+        // (rớt Wi-Fi, bị kill...). Chỉ điện thoại bị đứt biết cờ; điện thoại in kế tiếp không biết thì
+        // bill ra rác (đo trên bộ giả lập nhiều thiết bị). 0x00 là lệnh rỗng nên máy sạch bỏ qua. Lệnh
+        // khác (tem TSPL) vẫn chỉ xả khi chính điện thoại này biết là dở.
+        let isEscPos = job.data.starts(with: [0x1B, 0x40])
+        let needFlush = isFirstJobOnSocket && (isEscPos || PrintDirtyStore.isDirty(dirtyKey))
         if isFirstJobOnSocket {
             isFirstJobOnSocket = false
             var prefixed = Data()
-            if Self.takeDirty(ip) {
-                prefixed.append(Data(count: Self.flushZeros))
-                print("[LANPrinterConnection] 🧽 Lần gửi trước tới \(ip) đứt giữa chừng: xả bộ đệm máy in")
+            if needFlush {
+                prefixed.append(Data(count: PrintDirtyStore.flushZeros))
+                print("[LANPrinterConnection] 🧽 Xả bộ đệm máy in \(ip) trước job đầu trên socket mới")
             }
             prefixed.append(contentsOf: [0x1B, 0x40]) // ESC @
             prefixed.append(job.data)
@@ -523,6 +543,10 @@ public final class LANPrinterConnection {
         } else {
             data = job.data
         }
+        // Ghi sổ "đang in dở" TRƯỚC byte đầu (một lần cho cả job, ghi đĩa ngay): app bị kill /
+        // crash giữa chừng thì lần in sau vẫn biết mà xả. Chỉ xoá khi máy in đã nhận job
+        // (xem xác nhận bên dưới); mọi lỗi / gián đoạn ở giữa đều để lại cờ.
+        if job.data.count >= PrintDirtyStore.armThresholdBytes { Self.markDirty(dirtyKey) }
         bytesOnSocket += data.count
         print("[LANPrinterConnection] 📨 Sending \(data.count) bytes to \(ip) (lần \(job.attempts))...")
 
@@ -538,7 +562,7 @@ public final class LANPrinterConnection {
             self.activeSendId = nil
             print("[LANPrinterConnection] ⏱️ Gửi \(data.count) bytes tới \(self.ip) kẹt quá \(Int(budget))s, huỷ kết nối")
             self.isWriting = false
-            Self.markDirty(self.ip)
+            Self.markDirty(self.dirtyKey)
             self.teardownConnection()
             self.state = .failed
             DispatchQueue.main.async {
@@ -555,7 +579,7 @@ public final class LANPrinterConnection {
             self.isWriting = false
             if let err = error {
                 print("[LANPrinterConnection] ❌ Send error: \(err)")
-                Self.markDirty(self.ip)
+                Self.markDirty(self.dirtyKey)
                 self.teardownConnection()
                 self.state = .failed
                 self.onDisconnected?(err)
@@ -583,12 +607,28 @@ public final class LANPrinterConnection {
                 // coi như job CHƯA vào được máy in và cho retry (backoff sẽ đợi thiết bị kia
                 // in xong). Còn kết nối vẫn sống thì mới coi là gửi thành công.
                 print("[LANPrinterConnection] 📦 Đã đẩy xong xuống TCP, chờ xác nhận máy in nhận...")
-                self.pendingConfirmJob = job
+                var waiting = job
+                self.confirmSeq += 1
+                waiting.ticket = self.confirmSeq
+                self.pendingConfirmJobs.append(waiting)
+                let ticket = waiting.ticket
                 self.queue.asyncAfter(deadline: .now() + self.acceptConfirmDelay) { [weak self] in
                     guard let self = self else { return }
-                    guard let confirming = self.pendingConfirmJob else { return } // đã bị .failed xử lý
-                    self.pendingConfirmJob = nil
-                    guard self.state == .connected else { return }
+                    // Đã bị `.failed` / disconnect xử lý (đưa lại hàng đợi) thì không còn trong danh sách.
+                    guard let idx = self.pendingConfirmJobs.firstIndex(where: { $0.ticket == ticket }) else { return }
+                    let confirming = self.pendingConfirmJobs.remove(at: idx)
+                    guard self.state == .connected else {
+                        // Job còn trong danh sách mà socket không còn `connected` thì socket đã được NHẢ CÓ CHỦ ĐÍCH
+                        // (đóng êm sau khi gửi hết). Mất kết nối thật đã đi qua `.failed` / `disconnect()`, các
+                        // job chờ đã được đưa lại hàng đợi nên không còn ở đây. Báo xong, KHÔNG gửi lại (in trùng).
+                        DispatchQueue.main.async { confirming.completion?(true, nil) }
+                        return
+                    }
+                    // KHÔNG xoá sổ "in dở" ở đây: `contentProcessed` + 0.4s chỉ nghĩa là dữ liệu đã xuống
+                    // TCP của iOS và kết nối chưa bị reset, chưa phải máy in đã nhận HẾT (đơn dài còn hàng
+                    // chục KB trong bộ đệm gửi; máy in ngừng đọc vì hết giấy thì phần đuôi nằm đó mãi).
+                    // Sổ chỉ được xoá khi máy in tự đóng kết nối sau FIN, tức đã đọc hết (xem
+                    // `scheduleIdleCloseIfNeeded`).
                     print("[LANPrinterConnection] ✅ Máy in \(self.ip) đã nhận job")
                     DispatchQueue.main.async { confirming.completion?(true, nil) }
                     self.flushQueue()
@@ -662,7 +702,8 @@ public final class LANPrinterConnection {
         let attempts = writeQueue[0].attempts
 
         let noMoreRetries = (kind == .timeout || kind == .unreachable) && attempts >= maxTimeoutRetries
-        guard attempts < maxAttempts, !noMoreRetries else {
+        let attemptLimit = kind == .busy ? maxBusyAttempts : maxAttempts
+        guard attempts < attemptLimit, !noMoreRetries else {
             // Không tới được máy in (timeout / unreachable) -> các job còn lại cùng IP chắc
             // chắn cũng hỏng: báo lỗi CẢ hàng đợi ngay. Trước đây mỗi job tự chờ timeout
             // lại từ đầu (~12s/job), in N tem tới IP đã chết thì treo N x 12s không báo gì.
@@ -683,9 +724,14 @@ public final class LANPrinterConnection {
 
         // Backoff tăng dần theo số lần đã thử — nhường socket cho thiết bị đang in.
         // Cộng ngẫu nhiên 0–35%: nhiều thiết bị cùng thấy máy in bận không thử lại ĐÚNG cùng lúc.
-        let delay = retryBaseDelay * pow(2.0, Double(max(0, attempts - 1))) * Double.random(in: 1.0...1.35)
+        // Máy in bận: giãn dần nhưng chặn trên, và ngẫu nhiên rộng hơn (0.7-1.4) để nhiều điện thoại cùng bị
+        // từ chối không thử lại đồng loạt rồi lại va nhau. Lỗi khác giữ cách cũ.
+        let raw = retryBaseDelay * pow(2.0, Double(max(0, attempts - 1)))
+        let delay = kind == .busy
+            ? min(raw, maxBusyRetryDelay) * Double.random(in: 0.7...1.4)
+            : raw * Double.random(in: 1.0...1.35)
         writeQueue[0].attempts = attempts + 1
-        print("[LANPrinterConnection] 🔄 Thử lại \(ip) sau \(String(format: "%.1f", delay))s (lần \(attempts + 1)/\(maxAttempts), \(kind.rawValue))")
+        print("[LANPrinterConnection] 🔄 Thử lại \(ip) sau \(String(format: "%.1f", delay))s (lần \(attempts + 1)/\(attemptLimit), \(kind.rawValue))")
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self, !self.writeQueue.isEmpty else { return }
             guard self.state != .connected, self.state != .connecting else { return }
@@ -732,8 +778,11 @@ public final class LANPrinterConnection {
         idleCloseWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            guard self.writeQueue.isEmpty, !self.isWriting, self.state == .connected,
-                  let closing = self.connection else { return }
+            // Còn job đang chờ xác nhận thì CHƯA nhả: nhả lúc này làm socket đóng trước khi job được xác nhận
+            // (xác nhận xong sẽ gọi `flushQueue` -> hẹn nhả lại). Thiếu điều kiện này thì `idleCloseDelay`
+            // phải luôn lớn hơn `acceptConfirmDelay`, nếu không job bị gửi lại và in trùng.
+            guard self.writeQueue.isEmpty, !self.isWriting, self.pendingConfirmJobs.isEmpty,
+                  self.state == .connected, let closing = self.connection else { return }
             print("[LANPrinterConnection] 💤 Nhả socket \(self.ip) để thiết bị khác dùng")
             // Đóng NHẸ NHÀNG, KHÔNG dùng cancel(). `contentProcessed` chỉ báo dữ liệu đã
             // được đẩy xuống tầng TCP, KHÔNG phải máy in đã nhận/in xong. Với đơn dài
@@ -763,22 +812,38 @@ public final class LANPrinterConnection {
             self.connection = nil
             self.receiveOutstanding = false
             var closed = false
-            let finish: () -> Void = {
+            // [drained] true = máy in tự đóng phía nó sau FIN, tức đã đọc HẾT mọi byte đã gửi: lúc đó
+            // mới xoá sổ "in dở". Hết hạn chờ / lỗi (máy ngừng đọc vì hết giấy, rớt mạng...) thì phần
+            // đuôi lệnh ảnh có thể chưa tới máy -> GIỮ cờ để lần in sau xả trước.
+            let finish: (Bool) -> Void = { [weak self] drained in
                 guard !closed else { return }
                 closed = true
                 closing.stateUpdateHandler = nil
                 closing.cancel()
+                guard let self = self else { return }
+                self.queue.async {
+                    if drained {
+                        // Đang có job khác chạy trên socket mới thì sổ giờ thuộc về job đó (đã tự ghi sổ
+                        // lúc bắt đầu): không xoá của nó.
+                        if self.writeQueue.isEmpty, !self.isWriting, self.pendingConfirmJobs.isEmpty {
+                            PrintDirtyStore.clear(self.dirtyKey)
+                        }
+                    } else {
+                        Self.markDirty(self.dirtyKey)
+                    }
+                }
             }
             closing.send(content: nil, contentContext: .finalMessage, isComplete: true,
                          completion: .contentProcessed({ [weak self] error in
                 guard let self = self, error == nil else {
                     closing.stateUpdateHandler = nil
                     closing.cancel()
+                    Self.markDirty(self?.dirtyKey ?? "")
                     return
                 }
                 self.queue.async {
                     Self.drainUntilPeerCloses(closing, finish: finish, queue: self.queue)
-                    self.queue.asyncAfter(deadline: .now() + budget, execute: finish)
+                    self.queue.asyncAfter(deadline: .now() + budget) { finish(false) }
                 }
             }))
         }
@@ -789,12 +854,13 @@ public final class LANPrinterConnection {
     /// Sau FIN: đọc (bỏ) mọi thứ máy in gửi về cho tới khi máy in đóng phía nó — lúc đó
     /// máy đã đọc hết dữ liệu — rồi gọi [finish]. Chạy trên queue của connection.
     private static func drainUntilPeerCloses(_ conn: NWConnection,
-                                             finish: @escaping () -> Void,
+                                             finish: @escaping (Bool) -> Void,
                                              queue: DispatchQueue) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 1024) { _, _, isComplete, error in
             queue.async {
                 if isComplete || error != nil {
-                    finish()
+                    // isComplete không lỗi = máy in đóng bình thường sau khi đọc hết; có lỗi (RST...) = đứt.
+                    finish(error == nil)
                 } else {
                     drainUntilPeerCloses(conn, finish: finish, queue: queue)
                 }

@@ -1,3 +1,68 @@
+## [2.5.4] - 2026-11-23
+
+* **Hết in ký tự rác sau lần in dở (app bị kill, rớt mạng, tắt máy in giữa chừng):** cờ "máy in có thể đang dở một
+  lệnh ảnh" trước đây chỉ nằm trong bộ nhớ và chỉ bật ở đường lỗi ghi, nên app bị kill / crash / ANR / dừng khi
+  debug là mất cờ, bill kế tiếp bị máy in nuốt làm dữ liệu ảnh -> ký tự rác, giấy chạy dài. Giờ là sổ LƯU BỀN
+  (`PrintDirtyStore`: SharedPreferences trên Android, UserDefaults trên iOS) theo kiểu "ghi trước": ghi sổ TRƯỚC byte
+  đầu của lệnh in, chỉ xoá khi cả lệnh đã gửi / máy in đã nhận; mọi gián đoạn ở giữa đều để lại cờ, lần in sau xả
+  trước rồi mới gửi bill. Mỗi lệnh in chỉ ghi sổ một lần (không theo từng gói) nên không làm chậm; phần xả chỉ chạy khi
+  lần in trước dở.
+* **iOS: chỉ xoá sổ khi máy in đã đọc HẾT dữ liệu.** `contentProcessed` + 0,4s chỉ nghĩa là dữ liệu đã xuống TCP của
+  iPhone, chưa phải máy in đã nhận (đơn dài còn hàng chục KB trong bộ đệm gửi; máy in ngừng đọc vì hết giấy thì phần đuôi
+  nằm đó). Trước đây cờ bị xoá ở bước này nên rớt mạng sau đó vẫn làm bill sau ra rác. Giờ sổ chỉ xoá khi máy in tự đóng
+  kết nối sau FIN (`scheduleIdleCloseIfNeeded`); hết hạn chờ hoặc lỗi thì giữ cờ. Cùng một socket còn sống thì job kế
+  tiếp không xả thừa (`socketHasConfirmedJob`).
+* **iOS: gửi dồn nhiều bill không còn mất lệnh báo hoàn thành.** `LANPrinterConnection` chỉ có MỘT ô job chờ xác nhận
+  (`pendingConfirmJob`) nên job gửi sau ghi đè job gửi trước: 4 bill gửi dồn chỉ 1 bill được báo xong, 3 bill kia treo
+  "đang in" tới khi hết hạn dù giấy đã ra; máy in reset thì các job bị ghi đè cũng không được thử lại. Giờ là danh sách
+  `pendingConfirmJobs`, mỗi job hẹn xác nhận riêng, reset thì cả danh sách đưa lại hàng đợi đúng thứ tự.
+* **iOS / Android: xả ở lệnh ESC/POS đầu tiên trên mỗi socket mới, không cần cờ.** Sổ "in dở" nằm trên TỪNG điện thoại;
+  cửa hàng nhiều nhân viên thì điện thoại khác có thể vừa để máy in dở lệnh ảnh (rớt Wi-Fi, bị kill) mà điện thoại in
+  kế tiếp không hề biết -> rác. iOS: `LANPrinterConnection.flushQueue` (chỉ job ESC/POS, tức bắt đầu bằng `ESC @`; tem
+  TSPL vẫn chỉ xả khi chính thiết bị biết là dở). Android: `LanSocketConnection.takeFreshSocket` + `PrinterThermal`.
+  Khoá sổ của iOS kèm cổng khi cổng khác 9100.
+* **iOS: máy in bận được thử lại kiên nhẫn hơn.** Máy in nhiệt chỉ in MỘT socket, socket khác bị reset (`busy`). Trước đây
+  bỏ cuộc sau 4 lần / ~3s nên bill thứ 3-4 của cửa hàng đông báo lỗi dù máy chỉ đang bận. Giờ `busy` thử tối đa 12 lần,
+  khoảng cách giãn dần nhưng chặn trên 1,5s, ngẫu nhiên 0,7-1,4 để các điện thoại không thử lại đồng loạt.
+* **iOS: nhả socket nhanh hơn và an toàn hơn.** `idleCloseDelay` 0,6s -> 0,25s (kênh in được trả cho điện thoại khác
+  sớm hơn); `scheduleIdleCloseIfNeeded` không nhả khi còn job chờ xác nhận (trước đây phụ thuộc `idleCloseDelay` >
+  `acceptConfirmDelay`, nếu không job bị gửi lại và in trùng); xác nhận gặp socket đã được nhả có chủ đích thì báo xong,
+  không gửi lại.
+* **Android: lỗi in trên máy in tích hợp kèm trạng thái thật của dịch vụ máy in.** `PrinterThermal.printImageESC` đính
+  `details: {"printer_state": N}` (2 đang khởi động, 3 lỗi giao tiếp, 4 hết giấy, 5 quá nóng, 6 mở nắp, 7 lỗi dao cắt,
+  505 không có máy in, 507 lỗi cập nhật firmware; bỏ qua khi bình thường) để app báo đúng nguyên nhân thay vì "đang bận".
+  Chỉ thêm `details`, mã lỗi không đổi.
+* **Android: lỗi `PRINTER_BUSY` cho biết AI đang giữ khoá in và bao lâu** (`PrinterThermal.withPrintLock`, nhật ký tag
+  `PRINT_BUSY`). Khoá Bluetooth dùng chung cho máy in tích hợp và mọi máy Bluetooth ngoài, nên "bận" có thể do máy khác
+  hoặc một lệnh in kẹt chứ không phải chính máy này. Chỉ thêm thông tin chẩn đoán, hành vi không đổi.
+* **Android: máy KHÔNG có máy in tích hợp không còn bị coi là có.** Dòng máy "đã biết" (iMin, Sunmi, Pax...) trước đây được
+  nhận NGAY theo hãng, nhưng hãng bán cả dòng có máy in lẫn không có (VD iMin Swan 2 bản Standard / Dual Screen không máy
+  in): máy hiện mục "Máy in tích hợp" 80mm, tự bật Bluetooth, in vào máy in không tồn tại rồi báo "đang bận". Bằng chứng
+  thật là MÁY IN ẢO trong danh sách Bluetooth ghép đôi (đã kiểm chứng: Sunmi T1-G có `00:11:22:33:44:55 InnerPrinter`,
+  máy iMin-OS không máy in thì danh sách trống). Giờ: (1) với iMin (hãng đã xác nhận bán cả dòng không máy in,
+  `BuiltInPrinterRules.requiresVirtualPrinter`) `pick` chỉ nhận thiết bị TRÔNG NHƯ máy in ảo (`VIRTUAL_MIN_SCORE`), không
+  còn lấy máy in Bluetooth ngoài làm máy in tích hợp; các hãng khác (Sunmi, Pax, Urovo...) GIỮ cách cũ vì chưa có bằng chứng
+  để đổi; (2) đọc danh sách
+  ghép đôi hai lần cách 1,5s vẫn không thấy máy in ảo thì kết luận "không có máy in tích hợp"
+  (`BuiltInPrinterManager.markNoVirtualPrinterFound`), LƯU BỀN nên từ lần mở app sau biết ngay, không dò / chờ / hỏi lại;
+  (3) tự xoá kết luận khi thấy máy in ảo hoặc nối được. Không áp dụng cho Urovo (in bằng SDK riêng). App (`print_config`):
+  nối thất bại thì hỏi lại loại máy in và ẩn mục "Máy in tích hợp".
+* **Agent máy tính (`lib/desktop.dart`, `TcpPrinterPort`): cùng các sửa lỗi in rác / mất phiếu như native.** Đo trên máy in
+  giả: bản cũ ra rác khi (X) một thiết bị KHÁC để máy in dở lệnh ảnh rồi Agent in tiếp, và khi (K) Agent bị rớt giữa bill rồi
+  khởi động lại; còn khi tranh máy in thì bill của Agent BỊ MẤT mà vẫn báo "ok". Giờ: (1) sổ "in dở" LƯU BỀN xuống đĩa
+  (`DirtyStore`, đổi đường dẫn bằng `TcpPrinterPort.dirtyStore.path`), ghi TRƯỚC byte đầu, chỉ xoá sau khi đóng êm;
+  (2) phần xả 16384 byte `0x00` + `ESC @` (trước 1024 byte); (3) lệnh ESC/POS (mở đầu `ESC @`) LUÔN được xả ở kết nối
+  mới, không phụ thuộc Agent này có biết máy in còn dở hay không; (4) phần xả kiêm THĂM DÒ: máy in bận reset socket ngay khi
+  có byte tới -> chưa gửi byte bill nào nên thử lại an toàn, tối đa `busyMaxAttempts` (12) lần, giãn dần chặn trên
+  `busyMaxDelay` (1,5s), ngẫu nhiên 0,7-1,4 lần. Chi phí: mỗi lần in thêm `busyProbe` (30ms).
+* **Đổi tên hàm test sang tiếng Anh** (`RasterBinarizerTest`, `ThinStrokeBoosterTest`, `BuiltInPrinterRulesTest`).
+* **Xả cho cả Bluetooth và USB:** trước đây chỉ LAN có xả. Android: `PrinterThermal.flushPrinterIfDirty` chạy đầu lệnh
+  in, TRƯỚC cả lệnh hỏi trạng thái giấy (lệnh đó cũng bị máy đang kẹt nuốt); Bluetooth gửi phần xả theo đúng tốc độ in.
+  iOS: `BLEManager.writeData` xả trước khi gửi, `LANPrinterConnection` xả theo sổ bền ở mọi job (không chỉ job đầu
+  socket). Máy in tích hợp (Sunmi) không đi qua cổng ngoài nên không ghi sổ.
+* **Phần xả đủ lấp mọi dải ảnh:** 16384 byte 0x00 + `ESC @` (trước là 10240 byte), tính theo dải `GS v 0` tối đa
+  128 dòng × 128 byte/dòng (máy tới 112mm).
+
 ## [2.5.3] - 2026-11-21
 
 * **Nhận biết máy in tem / máy in hoá đơn (LAN, USB):** `detectLanPrinterLanguage` (cùng quy tắc với trạm in trên máy

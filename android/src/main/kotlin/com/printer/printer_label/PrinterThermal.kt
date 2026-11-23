@@ -74,18 +74,32 @@ class PrinterThermal {
          * Lấy khoá gửi của [conn] để in, chờ tối đa [PRINT_LOCK_WAIT_MS]. Không lấy được
          * (lệnh trước còn giữ quá lâu) -> [PrinterStatusException] `PRINTER_BUSY`.
          */
+        /** Ai đang giữ khoá in (khoá -> [thiết bị, thời điểm bắt đầu]) — chỉ để chẩn đoán lỗi `PRINTER_BUSY`. */
+        private val lockHolders = java.util.concurrent.ConcurrentHashMap<ReentrantLock, Pair<String, Long>>()
+
         @JvmStatic
         fun <T> withPrintLock(conn: IDeviceConnection, block: () -> T): T {
             val lock = lockFor(conn)
             if (!lock.tryLock(PRINT_LOCK_WAIT_MS, TimeUnit.MILLISECONDS)) {
+                // Báo rõ AI đang giữ khoá và giữ bao lâu: khoá Bluetooth dùng chung cho máy in tích hợp và mọi máy
+                // Bluetooth ngoài, nên "bận" có thể là do một máy khác (hoặc một lệnh in kẹt) chứ không phải máy này.
+                val holder = lockHolders[lock]
+                val detail = holder?.let {
+                    " (đang in cho ${it.first} đã ${(android.os.SystemClock.elapsedRealtime() - it.second) / 1000}s)"
+                } ?: ""
+                Log.w("PRINT_BUSY", "Chờ khoá in ${conn.getConnectInfo()} quá ${PRINT_LOCK_WAIT_MS / 1000}s$detail")
                 throw PrinterStatusException(
                     "PRINTER_BUSY",
-                    "Máy in đang bận với lệnh in khác quá ${PRINT_LOCK_WAIT_MS / 1000}s"
+                    "Máy in đang bận với lệnh in khác quá ${PRINT_LOCK_WAIT_MS / 1000}s$detail"
                 )
             }
+            // Khoá tái nhập (ReentrantLock): chỉ ghi / xoá ở lần giữ NGOÀI CÙNG để lệnh lồng nhau không xoá nhầm.
+            val outermost = lock.holdCount == 1
             try {
+                if (outermost) lockHolders[lock] = (conn.getConnectInfo() ?: "?") to android.os.SystemClock.elapsedRealtime()
                 return block()
             } finally {
+                if (outermost) lockHolders.remove(lock)
                 lock.unlock()
             }
         }
@@ -276,6 +290,50 @@ class PrinterThermal {
             return sent
         }
 
+        /**
+         * Lần in ảnh trước tới máy này bị dở (cờ [PrintDirtyStore]): xả bộ đệm máy in TRƯỚC khi gửi
+         * bất cứ gì khác — kể cả lệnh hỏi trạng thái giấy, vì máy đang kẹt giữa ảnh sẽ nuốt luôn
+         * những byte đó làm dữ liệu ảnh. Lỗi xả KHÔNG chặn việc in (lệnh in tự báo lỗi nếu kết
+         * nối hỏng). LAN đã xả lúc mở socket nên ở đây cờ thường đã xoá, bỏ qua.
+         *
+         * [paced]: máy Bluetooth ngoài nhận chậm (bộ đệm nhỏ) -> gửi phần xả theo đúng tốc độ in.
+         */
+        @JvmStatic
+        fun flushPrinterIfDirty(conn: IDeviceConnection, paced: Boolean) {
+            val key = conn.getConnectInfo()
+            if (!PrintDirtyStore.isDirty(key)) return
+            try {
+                val bytes = PrintDirtyStore.FLUSH_BYTES
+                if (paced) {
+                    withStallWatchdog(conn, bytes.size) { sendPaced(conn, bytes) }
+                } else {
+                    sendAllSync(conn, bytes, 4096)
+                }
+                Thread.sleep(PrintDirtyStore.SETTLE_MS)
+                PrintDirtyStore.clear(key)
+                Log.i("PRINT_FLUSH", "Đã xả bộ đệm $key sau lần in dở")
+            } catch (e: Exception) {
+                Log.w("PRINT_FLUSH", "Xả bộ đệm $key lỗi: ${e.message}")
+            }
+        }
+
+        /** Gửi [data] cho máy Bluetooth theo tốc độ mục tiêu (xem BT_TARGET_BYTES_PER_SEC). */
+        private fun sendPaced(conn: IDeviceConnection, data: ByteArray) {
+            val startedAt = android.os.SystemClock.elapsedRealtime()
+            var offset = 0
+            while (offset < data.size) {
+                val count = Math.min(BT_CHUNK_SIZE, data.size - offset)
+                val sent = conn.sendSync(data.copyOfRange(offset, offset + count))
+                if (sent <= 0) {
+                    throw java.io.IOException("Xả bộ đệm Bluetooth thất bại tại byte $offset/${data.size}")
+                }
+                offset += sent
+                val dueMs = offset * 1000L / BT_TARGET_BYTES_PER_SEC
+                val aheadMs = dueMs - (android.os.SystemClock.elapsedRealtime() - startedAt)
+                if (aheadMs > 0) Thread.sleep(aheadMs)
+            }
+        }
+
         @JvmStatic
         fun sendAllSync(conn: IDeviceConnection, data: ByteArray, chunkSize: Int) {
             var offset = 0
@@ -464,6 +522,19 @@ class PrinterThermal {
                 // Các máy khác dùng khóa khác nên vẫn in song song, không đợi nhau.
                 // Chờ khoá có hạn: lệnh trước kẹt thì báo PRINTER_BUSY thay vì chờ mãi.
                 withPrintLock(curConnect) {
+                    // Máy in tích hợp (Sunmi) không đi qua cổng ngoài nên không cần xả / ghi sổ.
+                    val trackDirty = !isTargetBuiltIn
+                    val dirtyKey = curConnect.getConnectInfo()
+                    if (trackDirty) flushPrinterIfDirty(curConnect, paced = isBluetooth)
+                    // LAN: socket vừa mở thì xả LUÔN (không cần cờ): điện thoại khác có thể vừa để máy in dở một
+                    // lệnh ảnh mà thiết bị này không hề biết. 0x00 là lệnh rỗng, máy sạch bỏ qua.
+                    if (trackDirty && curConnect is LanSocketConnection && curConnect.takeFreshSocket()) {
+                        try {
+                            sendAllSync(curConnect, PrintDirtyStore.FLUSH_BYTES, 4096)
+                        } catch (e: Exception) {
+                            Log.w("PRINT_FLUSH", "Xả bộ đệm socket mới lỗi: ${e.message}")
+                        }
+                    }
                     // Hết giấy / mở nắp: KHÔNG gửi phiếu. Nhiều máy vẫn nhận dữ liệu vào bộ
                     // nhớ rồi in khi thay giấy xong -> phiếu ra trễ, nhân viên đã in lại
                     // thì ra 2 phiếu. Báo lỗi ngay để người dùng xử lý rồi in lại.
@@ -492,6 +563,10 @@ class PrinterThermal {
                         )
                         else -> Unit
                     }
+                    // Ghi sổ "đang in dở" TRƯỚC byte đầu (ghi đĩa đồng bộ, một lần cho cả lệnh in):
+                    // app bị kill / crash giữa chừng thì lần in sau vẫn biết mà xả. Chỉ xoá sổ khi
+                    // cả lệnh đã gửi xong; mọi lỗi / gián đoạn ở giữa đều để lại cờ.
+                    if (trackDirty) PrintDirtyStore.mark(dirtyKey)
                     if (isBluetooth && !isTargetBuiltIn) {
                         // Máy in Bluetooth ngoài: gửi ĐỀU theo tốc độ mục tiêu (bản cũ: gói
                         // 120B, nghỉ 4ms mỗi gói + 80ms mỗi 1500B ≈ 11KB/s nhưng dồn cục).
@@ -543,6 +618,7 @@ class PrinterThermal {
                             }
                         }
                     }
+                    if (trackDirty) PrintDirtyStore.clear(dirtyKey)
                 }
 
                 Handler(Looper.getMainLooper()).post {
@@ -550,8 +626,15 @@ class PrinterThermal {
                 }
             } catch (e: Exception) {
                 val code = (e as? PrinterStatusException)?.code ?: "PRINT_ERROR"
+                // Máy in tích hợp (Sunmi): kèm trạng thái THẬT của dịch vụ máy in lúc lỗi (2 đang khởi động, 3 lỗi
+                // giao tiếp, 7 lỗi dao cắt, 505 không có máy in, 507 lỗi cập nhật...) để app báo đúng nguyên nhân.
+                // Trước đây app báo "đang bận" cho mọi lỗi này. Lỗi đã có mã riêng (hết giấy, mở nắp...) khỏi hỏi lại.
+                val state = if (isTargetBuiltIn && e !is PrinterStatusException) {
+                    runCatching { SunmiPrinterStatus.query() }.getOrNull()
+                } else null
+                val details = if (state != null && state != 1) mapOf("printer_state" to state) else null
                 Handler(Looper.getMainLooper()).post {
-                    result.error(code, e.message, null)
+                    result.error(code, e.message, details)
                 }
             }
         }

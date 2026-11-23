@@ -178,11 +178,32 @@ internal object BuiltInPrinterRules {
     fun isStrong(d: Bonded): Boolean =
         isSyntheticMac(d.mac) && (d.type == DEVICE_TYPE_UNKNOWN || isInnerPrinterName(d.name))
 
+    /**
+     * Điểm tối thiểu để một thiết bị đã ghép đôi được coi là "trông như máy in ảo": MAC giả (60), loại thiết bị
+     * "không rõ" (25), hoặc tên máy in nội bộ / tên hãng (40 / 30). Máy in Bluetooth NGOÀI thông thường (MAC thật,
+     * loại đã biết, tên thường) chỉ được 3-8 điểm nên không đạt.
+     */
+    const val VIRTUAL_MIN_SCORE = 25
+
+    /**
+     * Hãng bán cả dòng CÓ máy in tích hợp lẫn dòng KHÔNG có (đã xác nhận: iMin Swan 2 bản Standard / Dual Screen không
+     * máy in) và đã thấy máy in ảo là bằng chứng thật. Với các hãng này hãng KHÔNG đủ chứng minh có máy in: phải thấy máy
+     * in ảo. Các hãng khác giữ cách cũ (chưa có bằng chứng, không đổi để không làm hỏng máy đang in được).
+     */
+    private val VARIANT_MAKERS = listOf("imin")
+
+    fun requiresVirtualPrinter(manufacturer: String, model: String): Boolean {
+        val man = manufacturer.lowercase()
+        val mod = model.lowercase()
+        return VARIANT_MAKERS.any { man.contains(it) || mod.contains(it) }
+    }
+
     /** Ứng viên chấp nhận được theo mức thiết bị. */
-    private fun accepts(d: Bonded, tier: Tier): Boolean = when (tier) {
-        // Dòng máy đã biết: giữ cách cũ (máy in bất kỳ) làm lớp cuối, nhưng chọn
-        // theo ĐIỂM — không lấy nhầm máy in ngoài khi có máy in ảo.
-        Tier.VERIFIED -> score(d) > 0
+    private fun accepts(d: Bonded, tier: Tier, strictVirtual: Boolean): Boolean = when (tier) {
+        // Dòng máy đã biết: giữ cách cũ (máy in bất kỳ) làm lớp cuối, nhưng chọn theo ĐIỂM — không lấy nhầm máy in
+        // ngoài khi có máy in ảo. [strictVirtual] (hãng bán cả dòng không máy in, xem [requiresVirtualPrinter]):
+        // KHÔNG lấy máy in ngoài làm lớp cuối, chỉ nhận thiết bị trông như máy in ảo.
+        Tier.VERIFIED -> if (strictVirtual) score(d) >= VIRTUAL_MIN_SCORE else score(d) > 0
         Tier.LIKELY -> isSyntheticMac(d.mac) || isInnerPrinterName(d.name) ||
             (d.type == DEVICE_TYPE_UNKNOWN && (d.printerLike || d.imaging))
         Tier.UNKNOWN -> isStrong(d)
@@ -192,6 +213,6 @@ internal object BuiltInPrinterRules {
      * Chọn máy in tích hợp trong các thiết bị đã ghép đôi: điểm cao nhất trong
      * các ứng viên chấp nhận được với [tier]; `null` khi không có.
      */
-    fun pick(devices: Collection<Bonded>, tier: Tier): Bonded? =
-        devices.filter { accepts(it, tier) }.maxByOrNull { score(it) }
+    fun pick(devices: Collection<Bonded>, tier: Tier, strictVirtual: Boolean = false): Bonded? =
+        devices.filter { accepts(it, tier, strictVirtual) }.maxByOrNull { score(it) }
 }

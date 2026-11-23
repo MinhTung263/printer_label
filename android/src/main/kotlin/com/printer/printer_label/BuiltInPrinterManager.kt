@@ -25,9 +25,55 @@ private var virtualPrinterConfirmed = false
 @Volatile
 private var cachedPackages: List<String>? = null
 
+/**
+ * Đã đọc được danh sách Bluetooth ghép đôi (Bluetooth bật, có quyền) HAI lần cách nhau mà KHÔNG thấy máy in ảo:
+ * máy này KHÔNG có máy in tích hợp, dù hãng thuộc dòng "đã biết" (hãng bán cả dòng có máy in lẫn không có, VD iMin
+ * Swan 2 bản không máy in). Lưu BỀN (SharedPreferences) để từ lần mở app sau biết ngay, không phải dò / chờ lại; tự
+ * xoá khi thấy máy in ảo (xem [clearNoVirtualPrinterFound]).
+ */
+@Volatile
+private var noVirtualPrinter = false
+
+@Volatile
+private var prefsContext: Context? = null
+
+private const val STATE_PREFS = "printer_label_prefs"
+private const val KEY_NO_VIRTUAL_PRINTER = "no_virtual_printer"
+
+private fun persistNoVirtualPrinter(value: Boolean) {
+    runCatching {
+        prefsContext?.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean(KEY_NO_VIRTUAL_PRINTER, value)?.apply()
+    }
+}
+
+/** Gọi khi plugin gắn vào engine: nạp kết luận "không có máy in" đã lưu từ lần chạy trước. */
+internal fun loadBuiltInPrinterState(context: Context?) {
+    prefsContext = context?.applicationContext
+    noVirtualPrinter = runCatching {
+        prefsContext?.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            ?.getBoolean(KEY_NO_VIRTUAL_PRINTER, false)
+    }.getOrNull() ?: false
+}
+
+/** Máy này KHÔNG có máy in tích hợp (không thấy máy in ảo sau hai lần đọc). */
+internal fun markNoVirtualPrinterFound() {
+    if (noVirtualPrinter) return
+    noVirtualPrinter = true
+    persistNoVirtualPrinter(true)
+}
+
+/** Thấy máy in ảo (hoặc nối được máy in tích hợp): bỏ kết luận "không có máy in". */
+internal fun clearNoVirtualPrinterFound() {
+    if (!noVirtualPrinter) return
+    noVirtualPrinter = false
+    persistNoVirtualPrinter(false)
+}
+
 /** Đánh dấu máy này chắc chắn có máy in tích hợp (vừa kết nối được). */
 internal fun markBuiltInPrinterConfirmed() {
     virtualPrinterConfirmed = true
+    clearNoVirtualPrinterFound()
 }
 
 private fun installedPrinterPackages(context: Context?): List<String> {
@@ -38,6 +84,10 @@ private fun installedPrinterPackages(context: Context?): List<String> {
     cachedPackages = found
     return found
 }
+
+/** Hãng bán cả dòng không có máy in: phải thấy máy in ảo mới tin là có (xem [BuiltInPrinterRules.requiresVirtualPrinter]). */
+internal fun requiresVirtualPrinter(): Boolean =
+    BuiltInPrinterRules.requiresVirtualPrinter(Build.MANUFACTURER ?: "", Build.MODEL ?: "")
 
 /** Mức nhận diện của thiết bị (hãng, model, mã ROM, gói dịch vụ in). */
 internal fun builtInTier(context: Context? = null): BuiltInPrinterRules.Tier =
@@ -55,7 +105,7 @@ internal fun builtInTier(context: Context? = null): BuiltInPrinterRules.Tier =
  * (Không cần context — dùng ở các chốt trong plugin.)
  */
 fun isBuiltInPrinter(): Boolean =
-    builtInTier() == BuiltInPrinterRules.Tier.VERIFIED || virtualPrinterConfirmed
+    (builtInTier() == BuiltInPrinterRules.Tier.VERIFIED && !noVirtualPrinter) || virtualPrinterConfirmed
 
 /**
  * Máy này CÓ THỂ có máy in tích hợp — rộng hơn [isBuiltInPrinter]: gồm cả máy có
@@ -63,7 +113,7 @@ fun isBuiltInPrinter(): Boolean =
  * Bluetooth / thử tự kết nối không.
  */
 internal fun mayHaveBuiltInPrinter(context: Context?): Boolean =
-    builtInTier(context) != BuiltInPrinterRules.Tier.UNKNOWN ||
+    (builtInTier(context) != BuiltInPrinterRules.Tier.UNKNOWN && !noVirtualPrinter) ||
         virtualPrinterConfirmed ||
         findBuiltInBondedDevice(context) != null
 
@@ -116,9 +166,11 @@ internal fun findBuiltInBondedDevice(
         val bonded = bt.bondedDevices?.map { d ->
             d.toBonded(printerLike = looksLikePrinterName(try { d.name } catch (_: SecurityException) { null }))
         } ?: return null
-        val picked = BuiltInPrinterRules.pick(bonded, builtInTier(ctx))
+        val picked = BuiltInPrinterRules.pick(bonded, builtInTier(ctx), strictVirtual = requiresVirtualPrinter())
         // Máy lạ mà có máy in ảo "chắc" → từ giờ coi là máy có máy in tích hợp.
-        if (picked != null && BuiltInPrinterRules.isStrong(picked)) virtualPrinterConfirmed = true
+        if (picked != null && BuiltInPrinterRules.isStrong(picked)) markBuiltInPrinterConfirmed()
+        // Thấy máy in ảo: bỏ kết luận "không có máy in" đã lưu (máy vừa gắn / ghép lại máy in).
+        else if (picked != null) clearNoVirtualPrinterFound()
         picked
     } catch (_: Exception) {
         null
@@ -132,7 +184,9 @@ internal fun findBuiltInBondedDevice(
 fun getBuiltInPrinterPaperSize(context: Context?): Int {
     // Đọc gói dịch vụ in (cần context) + dò máy in ảo trước khi kết luận.
     val tier = builtInTier(context)
-    if (tier != BuiltInPrinterRules.Tier.VERIFIED &&
+    // Dòng máy "đã biết" chỉ được tin theo hãng khi CHƯA có kết luận "không thấy máy in ảo".
+    val trustedByTier = tier == BuiltInPrinterRules.Tier.VERIFIED && !noVirtualPrinter
+    if (!trustedByTier &&
         !virtualPrinterConfirmed &&
         findBuiltInBondedDevice(context)?.let { BuiltInPrinterRules.isStrong(it) } != true
     ) {

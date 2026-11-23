@@ -413,19 +413,34 @@ final class BLEManager: NSObject {
         writeQueue(for: identifier).async { [weak self] in
             guard let self = self else { return }
 
+            // Lần in trước tới máy này dở (sổ BỀN [PrintDirtyStore], sống sót cả khi app bị kill):
+            // máy đang kẹt giữa một lệnh ảnh sẽ nuốt bill này làm dữ liệu ảnh -> ký tự rác. Xả
+            // trước bằng 0x00 lấp phần ảnh còn thiếu rồi `ESC @`, đi chung đường gửi có nhịp.
+            let dirtyKey = "ble:\(identifier)"
+            var payload = data
+            if PrintDirtyStore.isDirty(dirtyKey) {
+                var flush = Data(count: PrintDirtyStore.flushZeros)
+                flush.append(contentsOf: [0x1B, 0x40]) // ESC @
+                payload = flush + data
+                print("[BLEManager] 🧽 Lần gửi trước tới \(identifier) dở: xả bộ đệm máy in")
+            }
+            // Ghi sổ TRƯỚC byte đầu (một lần cho cả lệnh); chỉ xoá khi gửi xong không lỗi.
+            let tracked = data.count >= PrintDirtyStore.armThresholdBytes
+            if tracked { PrintDirtyStore.mark(dirtyKey) }
+
             var offset = 0
             var bytesSentInBlock = 0
             var failure: FlutterError?
 
-            while offset < data.count {
+            while offset < payload.count {
                 // Máy in có thể bị rút/tắt giữa lúc in — dừng ngay thay vì ghi vào hư không.
                 guard peripheral.state == .connected else {
                     failure = FlutterError(code: "DISCONNECTED", message: "Peripheral \(identifier) disconnected while writing", details: nil)
                     break
                 }
 
-                let end = min(offset + chunkSize, data.count)
-                let chunk = data.subdata(in: offset..<end)
+                let end = min(offset + chunkSize, payload.count)
+                let chunk = payload.subdata(in: offset..<end)
 
                 if writeType == .withoutResponse {
                     // Chờ iOS báo còn chỗ trong bộ đệm. Đây là flow control THẬT: nó tự
@@ -462,6 +477,8 @@ final class BLEManager: NSObject {
                     }
                 }
             }
+
+            if tracked && failure == nil { PrintDirtyStore.clear(dirtyKey) }
 
             // Trả kết quả về Main Thread cho Flutter
             DispatchQueue.main.async {

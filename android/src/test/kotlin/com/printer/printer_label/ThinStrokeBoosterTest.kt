@@ -26,31 +26,31 @@ class ThinStrokeBoosterTest {
     private fun boost(vararg rows: String) = ThinStrokeBooster.boost(img(*rows), wb, w, rows.size)
 
     @Test
-    fun netMotChamDuocThemMotCham() {
+    fun oneDotStroke_getsExtraDot() {
         assertEquals(".##...", row(boost(".#....", ".#...."), 0, 6))
     }
 
     @Test
-    fun netTuHaiChamGiuNguyen() {
+    fun strokeOfTwoDotsOrMore_unchanged() {
         val src = img(".##..###..", ".##..###..")
         assertArrayEquals(src, ThinStrokeBooster.boost(src, wb, w, 2))
     }
 
     @Test
-    fun khongBitKheTrangMotCham() {
+    fun doesNotFillOneDotWhiteGap() {
         // Hai nét cách nhau 1 chấm trắng (lỗ chữ "e", "a"): nét trái giữ nguyên.
         assertEquals(".#.##.", row(boost(".#.#.."), 0, 6))
     }
 
     @Test
-    fun vachDocCaoKhongDung() {
+    fun tallVerticalBar_untouched() {
         val rows = Array(ThinStrokeBooster.MAX_STEM_ROWS + 5) { "..#....." }
         val src = img(*rows)
         assertArrayEquals(src, ThinStrokeBooster.boost(src, wb, w, rows.size))
     }
 
     @Test
-    fun khongSuaAnhGoc() {
+    fun doesNotModifySourceImage() {
         val src = img(".#....")
         val copy = src.copyOf()
         ThinStrokeBooster.boost(src, wb, w, 1)

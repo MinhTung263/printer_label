@@ -136,6 +136,8 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         isDetached = false
         mContext = flutterPluginBinding.applicationContext
         SunmiPrinterStatus.init(mContext)
+        PrintDirtyStore.init(mContext)
+        loadBuiltInPrinterState(mContext)
         POSConnect.init(mContext)
         usbReceiver = UsbConnectionReceiver(channel, this)
         val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED)

@@ -72,22 +72,22 @@ class RasterBinarizerTest {
         assertEquals((height + RasterBinarizer.STRIP_ROWS - 1) / RasterBinarizer.STRIP_ROWS, calls)
     }
 
-    @Test fun khoGiay80mm_cao_khong_chia_het_cho_dai() = check(576, 1000, 1)
-    @Test fun khoGiay58mm() = check(384, 641, 2)
-    @Test fun rongKhongChiaHetCho8() = check(37, 130, 3)
-    @Test fun matDoThap_mot_dai() = check(100, 10, 4)
-    @Test fun dungBoiSoCuaDai() = check(64, 128, 5)
-    @Test fun anhRatCao() = check(576, 5000, 6)
+    @Test fun paper80mm_heightNotMultipleOfStrip() = check(576, 1000, 1)
+    @Test fun paper58mm() = check(384, 641, 2)
+    @Test fun widthNotMultipleOf8() = check(37, 130, 3)
+    @Test fun lowImage_singleStrip() = check(100, 10, 4)
+    @Test fun heightExactMultipleOfStrip() = check(64, 128, 5)
+    @Test fun veryTallImage() = check(576, 5000, 6)
 
     @Test
-    fun anhRong_khongLoi() {
+    fun emptyImage_noError() {
         val r = RasterBinarizer.binarize(0, 0) { _, _, _ -> throw AssertionError("không được đọc") }
         assertEquals(0, r.bits.size)
         assertEquals(0, r.blankRow.size)
     }
 
     @Test
-    fun anhTrang_moiDongLaTrang_vaChiDocTheoDai() {
+    fun blankImage_allRowsBlank_readsPerStripOnly() {
         var calls = 0
         val r = RasterBinarizer.binarize(16, 200) { _, n, buf ->
             calls++

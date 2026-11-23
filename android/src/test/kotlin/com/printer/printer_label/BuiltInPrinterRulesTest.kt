@@ -13,7 +13,7 @@ class BuiltInPrinterRulesTest {
     private val classic = 1
 
     @Test
-    fun macGiaTheoDaySo() {
+    fun syntheticMacByPattern() {
         for (mac in listOf(
             "00:11:22:33:44:55", // Sunmi / iMin
             "66:11:22:33:44:55", // B68 / ZCS
@@ -33,7 +33,7 @@ class BuiltInPrinterRulesTest {
     }
 
     @Test
-    fun mucThietBi() {
+    fun deviceTier() {
         fun tier(
             man: String,
             model: String,
@@ -64,7 +64,7 @@ class BuiltInPrinterRulesTest {
      * thành máy in tích hợp.
      */
     @Test
-    fun khongNhanNhamDienThoaiThuong() {
+    fun doesNotMistakeRegularPhone() {
         val t = BuiltInPrinterRules.tierOf(
             "samsung", "SM-G991B", listOf("samsung", "o1sxxx", "paxton_device"), "TP1A.2208", emptyList(),
         )
@@ -73,7 +73,7 @@ class BuiltInPrinterRulesTest {
 
     /** Đúng tình huống máy BLESSX T4SMODELX: máy in ảo + một máy in ngoài đã ghép đôi. */
     @Test
-    fun chonMayInAoKhongChonMayInNgoai() {
+    fun picksVirtualPrinterNotExternal() {
         val inner = Bonded("66:11:22:33:44:55", "BluetoothPrint", unknown, printerLike = true)
         val external = Bonded("86:67:7A:25:90:AF", "mini-printer_90AF", 3, printerLike = true)
         val headset = Bonded("58:64:C4:D9:50:55", "AirPods", classic)
@@ -83,7 +83,7 @@ class BuiltInPrinterRulesTest {
     }
 
     @Test
-    fun mayLaChiNhanMayInAoChac() {
+    fun unknownDeviceOnlyAcceptsDefinitelyVirtualPrinter() {
         // Điện thoại thường ghép đôi máy in ngoài: không coi là máy in tích hợp.
         val cheap = Bonded("DC:0D:30:12:34:99", "BlueTooth Printer", classic, printerLike = true)
         val named = Bonded("DC:0D:30:12:34:99", "InnerPrinter", classic, printerLike = true)
@@ -98,9 +98,9 @@ class BuiltInPrinterRulesTest {
     }
 
     @Test
-    fun dongMayDaBietGiuCachCu() {
-        // Sunmi: InnerPrinter thắng máy in ngoài; không có máy in ảo thì vẫn lấy
-        // máy in đang ghép đôi (cách cũ), thiết bị không phải máy in thì bỏ.
+    fun knownDevice_keepsLegacyBehavior() {
+        // Sunmi: InnerPrinter wins over an external printer; with no virtual printer the paired printer is still
+        // taken (legacy behaviour, unchanged for makers we have no evidence about).
         val inner = Bonded("00:11:22:33:44:55", "InnerPrinter", unknown, printerLike = true)
         val external = Bonded("DC:0D:30:12:34:99", "XP-58", classic, printerLike = true)
         val headset = Bonded("58:64:C4:D9:50:55", "AirPods", classic)
@@ -110,7 +110,32 @@ class BuiltInPrinterRulesTest {
     }
 
     @Test
-    fun tenMayInTichHop() {
+    fun requiresVirtualPrinter_onlyForMakersSellingPrinterlessModels() {
+        assertTrue(BuiltInPrinterRules.requiresVirtualPrinter("iMin", "Swan 2"))
+        assertTrue(BuiltInPrinterRules.requiresVirtualPrinter("IMIN", "I24D02"))
+        for ((man, model) in listOf(
+            "SUNMI" to "V2s", "SUNMI" to "T1-G", "PAX" to "A920", "Urovo" to "i9100",
+            "BLESSX" to "T4SMODELX", "samsung" to "SM-A546E", "neostra" to "D2",
+        )) assertFalse("$man $model", BuiltInPrinterRules.requiresVirtualPrinter(man, model))
+    }
+
+    @Test
+    fun printerlessImin_isNotMistakenForHavingPrinter() {
+        // iMin Swan 2 without the printer module: nothing virtual is paired. An external Bluetooth printer
+        // (real MAC, known type) the shop paired must not be mistaken for a built-in one.
+        val tier = BuiltInPrinterRules.tierOf("iMin", "Swan 2", listOf("iMin"), "", emptyList())
+        assertEquals(Tier.VERIFIED, tier)
+        val external = Bonded("DC:0D:30:12:34:99", "XP-58", classic, printerLike = true)
+        val imaging = Bonded("DC:0D:30:12:34:98", "Receipt", classic, imaging = true, printerLike = true)
+        assertNull(BuiltInPrinterRules.pick(emptyList(), tier, strictVirtual = true))
+        assertNull(BuiltInPrinterRules.pick(listOf(external, imaging), tier, strictVirtual = true))
+        // The model with the printer module pairs the virtual "BluetoothPrinter": that one is picked.
+        val virtual = Bonded("00:11:22:33:44:55", "BluetoothPrinter", unknown, printerLike = true)
+        assertEquals(virtual, BuiltInPrinterRules.pick(listOf(external, virtual), tier, strictVirtual = true))
+    }
+
+    @Test
+    fun builtInPrinterName() {
         for (n in listOf("InnerPrinter", "BluetoothPrinter", "BluetoothPrint", "IposPrinter", "SUNMI V2"))
             assertTrue(n, BuiltInPrinterRules.isBuiltInName(n))
         for (n in listOf("mini-printer_90AF", "XP-58", "", null))

@@ -8,6 +8,7 @@
 library;
 
 export 'src/desktop/arp_table.dart';
+export 'src/desktop/dirty_store.dart';
 export 'src/desktop/escpos_commands.dart';
 export 'src/desktop/escpos_printer.dart';
 export 'src/desktop/escpos_raster.dart';
