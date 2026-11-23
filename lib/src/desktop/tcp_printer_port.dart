@@ -132,9 +132,7 @@ class TcpPrinterPort implements PrinterPort {
         return;
       } on _PrinterBusy {
         // Máy in đang in cho thiết bị khác: CHƯA gửi byte bill nào, thử lại an toàn.
-        if (attempt >= busyMaxAttempts) {
-          throw const SocketException('Máy in đang bận (từ chối kết nối)');
-        }
+        if (attempt >= busyMaxAttempts) throw const PrinterBusyException();
         final base = Duration(
           milliseconds: min(
             busyMaxDelay.inMilliseconds,
@@ -181,6 +179,7 @@ class TcpPrinterPort implements PrinterPort {
     }
     // Ghi sổ TRƯỚC byte đầu của bill (ghi đĩa ngay): Agent bị kill / mất điện giữa chừng thì lần sau vẫn biết.
     dirtyStore.mark(id);
+    var sent = 0;
     try {
       for (var off = 0; off < data.length; off += chunkSize) {
         final end = off + chunkSize < data.length
@@ -188,9 +187,12 @@ class TcpPrinterPort implements PrinterPort {
             : data.length;
         conn.socket.add(Uint8List.sublistView(data, off, end));
         await conn.socket.flush();
+        sent = end;
       }
-    } catch (_) {
-      // Giữ cờ: lần gửi sau xả trước.
+    } on SocketException catch (e) {
+      // Giữ cờ: lần gửi sau xả trước. Đã gửi một phần bill thì phiếu CÓ THỂ ra dở: báo bằng lỗi riêng để nơi gọi KHÔNG
+      // tự in lại (sẽ ra hai bản).
+      if (sent > 0) throw PrinterSendInterrupted(e, sent);
       rethrow;
     }
   }
@@ -378,4 +380,50 @@ class _TcpConn {
 /// Máy in từ chối kết nối này vì đang in cho thiết bị khác (chưa gửi byte bill nào).
 class _PrinterBusy implements Exception {
   const _PrinterBusy();
+}
+
+/// Máy in BẬN mãi (đang in cho thiết bị khác, từ chối kết nối) sau [TcpPrinterPort.busyMaxAttempts] lần thử: CHƯA gửi
+/// byte bill nào nên nơi gọi có thể thử lại sau. Vẫn là [SocketException] để mã cũ bắt như trước.
+class PrinterBusyException implements SocketException {
+  const PrinterBusyException();
+
+  @override
+  String get message => 'Máy in đang bận (từ chối kết nối)';
+
+  @override
+  OSError? get osError => null;
+
+  @override
+  InternetAddress? get address => null;
+
+  @override
+  int? get port => null;
+
+  @override
+  String toString() => 'PrinterBusyException: $message';
+}
+
+/// Đứt kết nối khi ĐANG gửi bill (đã gửi [bytesSent] byte): phiếu có thể đã ra một phần. Nơi gọi KHÔNG nên tự in lại
+/// (có thể ra hai bản). Vẫn là [SocketException] để mã cũ bắt như trước.
+class PrinterSendInterrupted implements SocketException {
+  const PrinterSendInterrupted(this.cause, this.bytesSent);
+
+  final SocketException cause;
+  final int bytesSent;
+
+  @override
+  String get message =>
+      'Đứt kết nối khi đang gửi ($bytesSent byte đã gửi): ${cause.message}';
+
+  @override
+  OSError? get osError => cause.osError;
+
+  @override
+  InternetAddress? get address => cause.address;
+
+  @override
+  int? get port => cause.port;
+
+  @override
+  String toString() => 'PrinterSendInterrupted: $message';
 }

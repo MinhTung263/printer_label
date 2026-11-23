@@ -299,9 +299,45 @@ void main() {
           '127.0.0.1',
           port: server.port,
         ).send(Uint8List.fromList([0x1B, 0x40, 1]), checkStatus: false),
-        throwsA(isA<SocketException>()),
+        throwsA(isA<PrinterBusyException>()),
       );
       expect(n, 3, reason: '1 lần đầu + 2 lần thử lại');
+    },
+  );
+
+  test(
+    'đứt khi đang gửi bill: báo PrinterSendInterrupted (đã gửi một phần)',
+    () async {
+      // Máy in nhận phần xả + vài gói đầu rồi cắt: bill đã đi một phần.
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((s) {
+        var got = 0;
+        s.listen((d) {
+          got += d.length;
+          if (got > 16386 + 3000) s.destroy();
+        }, onError: (_) {});
+      });
+      addTearDown(server.close);
+      Object? error;
+      try {
+        await TcpPrinterPort(
+          '127.0.0.1',
+          port: server.port,
+          chunkSize: 1000,
+        ).send(
+          Uint8List.fromList([0x1B, 0x40, ...List.filled(3 * 1024 * 1024, 7)]),
+          checkStatus: false,
+        );
+      } catch (e) {
+        error = e;
+      }
+      expect(error, isA<PrinterSendInterrupted>());
+      expect((error as PrinterSendInterrupted).bytesSent, greaterThan(0));
+      expect(
+        error,
+        isA<SocketException>(),
+        reason: 'mã cũ vẫn bắt được như SocketException',
+      );
     },
   );
 }
