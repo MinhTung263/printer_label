@@ -263,6 +263,9 @@ class PrinterThermal {
         // số lần thử rồi mới ném lỗi như cũ.
         private const val FIRST_CHUNK_MAX_RETRY = 8
 
+        /** Chờ giữa các lần nối lại socket LAN khi gói đầu gửi hỏng (tổng ~11s). */
+        private val LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS = longArrayOf(300, 700, 1200, 2000, 3000, 4000)
+
         /** Hạn chờ một tem gửi xong qua LAN tự quản (watchdog ghi tự cắt sớm hơn nếu kẹt). */
         private const val LAN_LABEL_SEND_TIMEOUT_MS = 30_000L
         private const val FIRST_CHUNK_RETRY_BASE_DELAY_MS = 150L
@@ -346,6 +349,19 @@ class PrinterThermal {
                 // là kết nối đã chết thật (đã đóng) — thử lại chỉ tốn ~2.4s vô ích.
                 if (sent <= 0 && offset == 0 && conn !is LanSocketConnection) {
                     sent = retryFirstChunkSync(conn::sendSync, chunk, "PRINT_SEND")
+                }
+
+                // Máy in LAN nhận kết nối rồi đóng ngay (hay gặp khi máy vừa bật / đổi IP / có thiết
+                // bị khác đang in): byte đầu tiên hỏng. CHƯA có byte nào vào máy in nên mở lại socket
+                // mới và gửi lại là an toàn — thử nhiều lần với thời gian chờ tăng dần thay vì báo lỗi.
+                if (sent <= 0 && offset == 0 && conn is LanSocketConnection && !conn.writeStalled) {
+                    for ((i, delay) in LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS.withIndex()) {
+                        Log.w("PRINT_SEND", "Gói đầu gửi hỏng, nối lại lần ${i + 1}/${LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS.size} sau ${delay}ms")
+                        Thread.sleep(delay)
+                        if (!conn.reopen()) continue
+                        sent = conn.sendSync(chunk)
+                        if (sent > 0) break
+                    }
                 }
 
                 if (sent <= 0) {

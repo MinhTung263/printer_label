@@ -311,6 +311,23 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         wifiLock = null
     }
 
+    /**
+     * Máy in nhận TCP rồi tự đóng ngay (đã đo: đóng sau ~1–2s khi chưa có dữ liệu, hoặc đang có
+     * phiên khác) làm byte đầu tiên đã hỏng ("Broken pipe"). Đóng cứng socket hỏng, mở lại socket
+     * MỚI tới cùng máy. Chỉ dùng khi CHƯA gửi byte nào của lệnh in — không dính lệnh dở.
+     */
+    fun reopen(): Boolean {
+        val info = connectInfo
+        abort(socket)
+        socket = null
+        output = null
+        input = null
+        // Lệnh in chưa gửi byte nào: không có dữ liệu dở trong bộ đệm máy in cần xả.
+        PrintDirtyStore.clear(info)
+        writeStalled = false
+        return openSocket(info)
+    }
+
     /** Lấy cờ "socket vừa mở, chưa gửi lệnh ESC/POS nào" (trả true đúng MỘT lần cho mỗi socket). */
     fun takeFreshSocket(): Boolean {
         val fresh = freshSocket
