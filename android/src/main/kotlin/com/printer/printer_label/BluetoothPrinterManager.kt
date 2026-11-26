@@ -2,6 +2,7 @@ package com.printer.printer_label
 
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
@@ -24,6 +25,9 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
 
     // Biến điều khiển bộ lọc scan: true = chỉ hiển thị máy in, false = tất cả thiết bị BT
     private var filterPrinterOnly: Boolean = true
+    // MAC đã gửi lên Flutter trong lượt quét hiện tại (một máy có thể tới cả qua
+    // ACTION_FOUND lẫn ACTION_NAME_CHANGED). Chỉ đọc/ghi trên main thread.
+    private val emittedScanMacs = mutableSetOf<String>()
     private val scanHandler = Handler(Looper.getMainLooper())
 
     internal val btScanStreamHandler = object : EventChannel.StreamHandler {
@@ -76,27 +80,68 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         }
     }
 
-    // Kiểm tra xem thiết bị Bluetooth có phải là máy in hay không dựa trên tên thiết bị
-    // kiểm tra theo danh sách từ khóa dài và tiền tố ngắn, cũng như các từ khóa "InnerPrinter" và "Printer"
-    internal fun isPrinter(device: BluetoothDevice): Boolean {
+    /**
+     * Thiết bị có phải máy in không — dựa vào Class of Device (loại thiết bị máy tự
+     * khai báo) trước, tên sau:
+     *  0. Thiết bị CHỈ có BLE → loại: Android in qua SPP (Classic) bằng POSConnect,
+     *     không có đường in BLE. Máy dual-mode (MJ5803...) phát thêm một địa chỉ BLE
+     *     riêng (vd C0:15:83:.. bên cạnh 00:15:83:..) → không loại thì hiện 2 lần, chọn
+     *     nhầm địa chỉ BLE sẽ không kết nối được.
+     *  1. Lớp IMAGING (máy in/máy quét) → nhận.
+     *  2. Tên khớp từ khoá máy in → nhận.
+     *  3. Lớp chắc chắn không phải máy in (điện thoại, máy tính, tai nghe/loa/TV,
+     *     đồng hồ, chuột/bàn phím, sức khoẻ, đồ chơi, mạng) → loại.
+     *  4. Máy THUẦN Bluetooth Classic không khai lớp (UNCATEGORIZED/MISC) và có tên → nhận.
+     *     Máy in giá rẻ (MJ5803...) hay khai lớp này. Chỉ áp dụng cho Classic/Dual:
+     *     thiết bị chỉ có BLE tìm thấy qua discovery luôn mang lớp UNCATEGORIZED
+     *     (vòng tay, đồng hồ...) nên với BLE chỉ dựa vào tên.
+     *
+     * [btClass]/[nameOverride]: lấy từ intent lúc quét (EXTRA_CLASS/EXTRA_NAME) vì
+     * `device.bluetoothClass`/`device.name` có thể chưa kịp cập nhật.
+     */
+    internal fun isPrinter(
+        device: BluetoothDevice,
+        btClass: BluetoothClass? = null,
+        nameOverride: String? = null,
+    ): Boolean {
         try {
-            val name = device.name ?: ""
+            val type = device.type
+            if (type == BluetoothDevice.DEVICE_TYPE_LE) return false
+
+            val major = (btClass ?: device.bluetoothClass)?.majorDeviceClass
+            if (major == BluetoothClass.Device.Major.IMAGING) return true
+
+            val name = nameOverride ?: device.name ?: ""
+            if (name.isEmpty()) return false
+            if (matchesPrinterName(name)) return true
+
+            if (major in NON_PRINTER_MAJORS) return false
+
+            // Chỉ máy THUẦN Classic: máy dual-mode (tai nghe, TV box... Bluetooth 5.x) dò qua sóng
+            // BLE cũng mang lớp UNCATEGORIZED nên lọt vào danh sách (đã gặp: "ZE8000", "A9 Pro Box").
+            // Máy in Classic thật (MJ5803...) khi dò Classic tự khai IMAGING/PRINTER -> nhận ở bước 1.
+            return type == BluetoothDevice.DEVICE_TYPE_CLASSIC &&
+                (major == BluetoothClass.Device.Major.UNCATEGORIZED ||
+                    major == BluetoothClass.Device.Major.MISC)
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    // Tên có giống máy in không: danh sách từ khóa dài và tiền tố ngắn (giống iOS),
+    // cũng như các từ khóa "InnerPrinter" và "Printer".
+    private fun matchesPrinterName(name: String): Boolean {
+        try {
             val lowerName = name.lowercase()
             if (lowerName.isEmpty()) return false
 
-            // Danh sách từ khóa dài tự động khớp nếu xuất hiện ở bất kỳ đâu trong tên (giống iOS)
-            val longKeywords = listOf(
-                "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
-                "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
-                "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang"
-            )
-            val matchesLong = longKeywords.any { lowerName.contains(it) }
+            // Từ khóa dài khớp ở bất kỳ đâu trong tên; model MINJCODE trần (MJ5803...) — xem
+            // PRINTER_NAME_KEYWORDS / MJ_MODEL (tạo một lần, hàm này chạy cho mỗi thiết bị quét thấy).
+            val matchesLong = PRINTER_NAME_KEYWORDS.any { lowerName.contains(it) } ||
+                MJ_MODEL.containsMatchIn(lowerName)
 
-            // Danh sách tiền tố ngắn (khớp ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới - giống iOS)
-            val shortPrefixes = listOf(
-                "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc"
-            )
-            val matchesShort = shortPrefixes.any { prefix ->
+            // Tiền tố ngắn: khớp ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới (giống iOS)
+            val matchesShort = PRINTER_NAME_PREFIXES.any { prefix ->
                 lowerName.startsWith(prefix) ||
                 lowerName.contains("$prefix-") ||
                 lowerName.contains("$prefix ") ||
@@ -206,7 +251,10 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    BluetoothDevice.ACTION_FOUND -> {
+                    // ACTION_FOUND thường tới khi CHƯA có tên; tên tới sau qua
+                    // ACTION_NAME_CHANGED → xét lại ở đó, không thì máy tên lạ bị bỏ sót.
+                    BluetoothDevice.ACTION_FOUND,
+                    BluetoothDevice.ACTION_NAME_CHANGED -> {
                         val device: BluetoothDevice? =
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 intent.getParcelableExtra(
@@ -217,9 +265,29 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                                 @Suppress("DEPRECATION")
                                 intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                             }
+                        val btClass: BluetoothClass? =
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                intent.getParcelableExtra(
+                                    BluetoothDevice.EXTRA_CLASS,
+                                    BluetoothClass::class.java
+                                )
+                            } else {
+                                @Suppress("DEPRECATION")
+                                intent.getParcelableExtra(BluetoothDevice.EXTRA_CLASS)
+                            }
+                        val extraName = intent.getStringExtra(BluetoothDevice.EXTRA_NAME)
                         device?.let {
-                            if (!filterPrinterOnly || isPrinter(it)) {
-                                val map = mapOf("name" to (it.name ?: "Unknown"), "mac" to it.address)
+                            val mac = it.address
+                            if (mac in emittedScanMacs) return@let
+                            val name = extraName ?: it.name
+                            if (!filterPrinterOnly || isPrinter(it, btClass, name)) {
+                                // Chưa có tên thì chờ ACTION_NAME_CHANGED (trừ khi đang
+                                // hiện tất cả) để danh sách không có dòng "Unknown".
+                                if (name.isNullOrEmpty() && filterPrinterOnly &&
+                                    btClass?.majorDeviceClass != BluetoothClass.Device.Major.IMAGING
+                                ) return@let
+                                emittedScanMacs.add(mac)
+                                val map = mapOf("name" to (name ?: "Unknown"), "mac" to mac)
                                 scanHandler.post {
                                     scanEventSink?.success(map)
                                 }
@@ -237,8 +305,10 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             }
         }
         val filter = IntentFilter(BluetoothDevice.ACTION_FOUND).apply {
+            addAction(BluetoothDevice.ACTION_NAME_CHANGED)
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
+        emittedScanMacs.clear()
         plugin.mContext?.registerReceiver(receiver, filter)
         btScanReceiver = receiver
 
@@ -835,6 +905,34 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
     companion object {
         internal const val REQUEST_ENABLE_BT = 1001
 
+        /** Từ khóa tên máy in, khớp ở bất kỳ đâu trong tên (giống iOS). */
+        private val PRINTER_NAME_KEYWORDS = listOf(
+            "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
+            "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
+            "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang",
+            "minjcode"
+        )
+
+        /** MINJCODE phát tên model trần (MJ5803, MJ-8001...); "mj" + số để không dính Xiaomi Mijia (MJYD...). */
+        private val MJ_MODEL = Regex("^mj[-_ ]?\\d")
+
+        /** Tiền tố tên máy in ngắn (giống iOS). */
+        private val PRINTER_NAME_PREFIXES = listOf(
+            "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc"
+        )
+
+        /** Lớp thiết bị chắc chắn không phải máy in (xem [isPrinter]). */
+        private val NON_PRINTER_MAJORS = setOf(
+            BluetoothClass.Device.Major.PHONE,
+            BluetoothClass.Device.Major.COMPUTER,
+            BluetoothClass.Device.Major.AUDIO_VIDEO,
+            BluetoothClass.Device.Major.WEARABLE,
+            BluetoothClass.Device.Major.PERIPHERAL,
+            BluetoothClass.Device.Major.HEALTH,
+            BluetoothClass.Device.Major.TOY,
+            BluetoothClass.Device.Major.NETWORKING,
+        )
+
         /**
          * Tên Bluetooth [name] có khớp mẫu máy in tích hợp không — LỚP DỰ PHÒNG
          * (nguồn chính là builtInDeviceIds được đánh dấu lúc kết nối). Danh sách
@@ -851,7 +949,11 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
      * in đầu tiên" theo thứ tự ngẫu nhiên.
      */
     private fun pickBuiltInMac(paired: Set<BluetoothDevice>?): String? {
-        val bonded = paired?.map { it.toBonded(printerLike = isPrinter(it)) } ?: return null
+        // Chỉ theo tên (không theo lớp như isPrinter): BuiltInPrinterRules đã chấm lớp
+        // IMAGING riêng, nới thêm ở đây sẽ làm lệch điểm chọn máy in tích hợp.
+        val bonded = paired?.map {
+            it.toBonded(printerLike = matchesPrinterName(runCatching { it.name }.getOrNull() ?: ""))
+        } ?: return null
         val tier = builtInTier(plugin.mContext)
         val picked = BuiltInPrinterRules.pick(bonded, tier, strictVirtual = requiresVirtualPrinter()) ?: return null
         // Máy chưa xác minh mà tìm được máy in ảo: từ giờ coi là có máy in tích

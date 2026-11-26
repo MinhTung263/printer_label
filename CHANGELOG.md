@@ -1,5 +1,17 @@
 ## [2.5.4] - 2026-11-23
 
+* **Android: nhận diện máy in Bluetooth chắc hơn (MINJCODE MJ5803...).** Máy in tự khai lớp IMAGING/PRINTER (Class of
+  Device) được nhận ngay; tên có `minjcode` hoặc model trần `mj` + số (không dính Xiaomi Mijia `MJYD`...) cũng được nhận.
+  Loại bỏ bản BLE trùng của máy dual-mode, thiết bị chắc chắn không phải máy in (điện thoại, máy tính, tai nghe, đồng hồ…)
+  và máy dual-mode lớp UNCATEGORIZED (tai nghe, TV box). Máy chưa có tên lúc quét thấy được giữ lại, hiện khi
+  `ACTION_NAME_CHANGED` báo tên. Từ khoá / regex tạo một lần (không tạo lại cho mỗi thiết bị quét thấy).
+* **iOS: cùng quy tắc tên** (`minjcode`, `mj` + số) và nhận máy quảng bá dịch vụ BLE 0x18F0 dù tên lạ.
+* **Android: hết máy in "bận mãi" sau khi nối LAN quá hạn.** Kết nối bị huỷ do quá hạn vẫn có thể nối xong muộn và giữ
+  máy in (máy in nhiệt chỉ nhận MỘT kết nối) -> mọi lần in sau báo bận. Giờ `close()` đánh dấu huỷ, vòng nối dừng lại và
+  socket nối xong muộn bị đóng ngay. `reopen()` đánh dấu sổ "in dở" để lần gửi sau xả trước.
+* **Android: khai báo `BLUETOOTH` / `BLUETOOTH_ADMIN` (maxSdkVersion 30)** cho máy Android 11 trở xuống — trước đây
+  nhờ plugin khác khai hộ, gỡ plugin đó là mất quyền quét / nối Bluetooth.
+
 * **Hết in ký tự rác sau lần in dở (app bị kill, rớt mạng, tắt máy in giữa chừng):** cờ "máy in có thể đang dở một
   lệnh ảnh" trước đây chỉ nằm trong bộ nhớ và chỉ bật ở đường lỗi ghi, nên app bị kill / crash / ANR / dừng khi
   debug là mất cờ, bill kế tiếp bị máy in nuốt làm dữ liệu ảnh -> ký tự rác, giấy chạy dài. Giờ là sổ LƯU BỀN

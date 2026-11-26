@@ -105,6 +105,16 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
      */
     @Volatile private var freshSocket = false
 
+    /**
+     * Nơi sở hữu đã gọi [close] (nhả sau khi in, hoặc HẾT GIỜ nối ở
+     * PrinterLabelPlugin.scheduleConnectTimeout) trong khi [openSocket] có thể vẫn đang thử nối ở
+     * luồng khác. Bật cờ này để vòng nối dừng và đóng ngay socket nối được muộn — trước đây socket
+     * đó sống tiếp ngoài danh sách kết nối, chiếm kết nối duy nhất của máy in (Gprinter/HPRT
+     * không nhận kết nối thứ 2) nên lượt nối lại của chính app thất bại, bill không in.
+     * Xoá khi có yêu cầu nối mới (connectSync) hoặc nối lại khi đang gửi ([reopen]).
+     */
+    @Volatile private var closedByOwner = false
+
     /** Lý do thất bại gần nhất (null = chưa lỗi). Đọc sau connectSync/sendSync để phân loại. */
     @Volatile var lastFailure: Failure? = null
         private set
@@ -130,6 +140,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
     // — makeConnectListener gọi Toast nên bắt buộc chạy trên main.
     override fun connect(info: String, listener: IConnectListener) {
         connectListener = listener
+        closedByOwner = false
         Thread({
             val ok = openSocket(info)
             val msg = lastErrorMessage ?: ""
@@ -143,6 +154,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun connect(info: String, listener: IPOSListener) {
+        closedByOwner = false
         Thread({
             val ok = openSocket(info)
             val msg = lastErrorMessage ?: info
@@ -157,6 +169,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun connectSync(info: String, listener: IPOSListener): Boolean {
+        closedByOwner = false
         val ok = openSocket(info)
         runCatching {
             listener.onStatus(
@@ -169,6 +182,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
 
     override fun connectSync(info: String, listener: IConnectListener): Boolean {
         connectListener = listener
+        closedByOwner = false
         val ok = openSocket(info)
         runCatching {
             listener.onStatus(
@@ -192,6 +206,9 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         // (SYN đi ngay), trong tổng hạn cũ. Chỉ thử lại khi HẾT GIỜ (lỗi khác báo ngay).
         val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
         while (true) {
+            // Nơi gọi đã bỏ lượt nối này (hết giờ ở scheduleConnectTimeout -> close()): dừng,
+            // KHÔNG nối tiếp ở nền — xem [closedByOwner].
+            if (closedByOwner) return false
             val left = (deadline - System.currentTimeMillis()).toInt()
             val wait = minOf(CONNECT_ATTEMPT_MS, left).coerceAtLeast(500)
             val ok = openSocketOnce(info, host, port, wait)
@@ -222,6 +239,15 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
             // Epson LAN: in đủ, không ký tự rác.
             s.sendBufferSize = 16 * 1024
             s.connect(InetSocketAddress(address, port), timeoutMs)
+            if (closedByOwner) {
+                // Nối được nhưng nơi gọi đã bỏ (hết giờ) trong lúc chờ bắt tay: đóng ngay. Giữ lại
+                // thì socket "mồ côi" này chiếm kết nối DUY NHẤT của máy in nhiệt -> lượt nối kế
+                // tiếp của chính app bị máy in từ chối tới khi máy tự đóng socket (~10s).
+                Log.i(TAG, "$info nối được sau khi đã bị huỷ, đóng ngay")
+                runCatching { s.close() }
+                lastFailure = Failure.OTHER
+                return false
+            }
             s.soTimeout = 0
             socket = s
             output = s.getOutputStream()
@@ -313,8 +339,15 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
 
     /**
      * Máy in nhận TCP rồi tự đóng ngay (đã đo: đóng sau ~1–2s khi chưa có dữ liệu, hoặc đang có
-     * phiên khác) làm byte đầu tiên đã hỏng ("Broken pipe"). Đóng cứng socket hỏng, mở lại socket
-     * MỚI tới cùng máy. Chỉ dùng khi CHƯA gửi byte nào của lệnh in — không dính lệnh dở.
+     * phiên khác) làm gói đầu gửi hỏng ("Broken pipe"). Đóng cứng socket hỏng, mở lại socket
+     * MỚI tới cùng máy.
+     *
+     * "Gói đầu gửi hỏng" KHÔNG có nghĩa máy in chưa nhận byte nào: lỗi TCP báo trễ (byte đã vào
+     * máy in, lần ghi sau mới thấy đứt), và trước gói đầu socket này còn đã gửi phần xả / lệnh hỏi
+     * giấy. Máy in có thể đang kẹt giữa lệnh ảnh `GS v 0` -> phải XẢ trước khi gửi lại, nếu không
+     * nó nuốt `ESC @` + đầu lệnh ảnh mới làm dữ liệu ảnh cũ và phần ảnh còn lại in ra chữ rác ở đầu
+     * bill (lỗi khi nhiều máy cùng in / máy in vừa khởi động lại). Đánh dấu "in dở" để
+     * [openSocket] -> [flushIfDirty] xả ngay trên socket mới.
      */
     fun reopen(): Boolean {
         val info = connectInfo
@@ -322,9 +355,9 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
         socket = null
         output = null
         input = null
-        // Lệnh in chưa gửi byte nào: không có dữ liệu dở trong bộ đệm máy in cần xả.
-        PrintDirtyStore.clear(info)
+        PrintDirtyStore.mark(info)
         writeStalled = false
+        closedByOwner = false
         return openSocket(info)
     }
 
@@ -547,6 +580,7 @@ class LanSocketConnection(context: Context?) : IDeviceConnection {
      * còn trong buffer rồi FIN — không dùng RST, nếu không máy in có thể mất đuôi bill.
      */
     override fun close() {
+        closedByOwner = true
         alive = false
         writer?.interrupt()
         queue.clear()

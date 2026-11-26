@@ -19,6 +19,12 @@
     <uses-permission android:name="smartpos.deviceservice.permission.Printer" />
     <!-- In LAN: gắn socket vào đúng mạng Wi-Fi chứa máy in (ConnectivityManager) và giữ
          Wi-Fi không ngủ trong lúc in (WifiLock). Đều là quyền thường, không hỏi người dùng. -->
+    <!-- Quét / kết nối máy in Bluetooth. Android 11 trở xuống cần BLUETOOTH + BLUETOOTH_ADMIN
+         (startDiscovery); Android 12+ dùng BLUETOOTH_SCAN / BLUETOOTH_CONNECT (app khai + xin lúc chạy).
+         Trước đây hai quyền cũ đi kèm các thư viện in khác (print_bluetooth_thermal, pos_ticket_b68...)
+         — nay app chỉ dùng plugin này nên phải tự khai. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 

@@ -589,26 +589,25 @@ extension BLEManager: CBCentralManagerDelegate {
         
         let nameLower = name.lowercased()
         
-        // Danh sách từ khóa dài tự động khớp nếu xuất hiện ở bất kỳ đâu trong tên
-        let longKeywords = [
-            "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
-            "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
-            "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang"
-        ]
-        let matchesLong = longKeywords.contains { nameLower.contains($0) }
+        // Từ khóa dài khớp ở bất kỳ đâu trong tên; model MINJCODE trần (MJ5803...). Hằng tạo một
+        // lần ở cuối file — hàm này chạy cho MỖI gói quảng bá BLE.
+        let matchesLong = printerNameKeywords.contains { nameLower.contains($0) } ||
+            mjModelRegex.firstMatch(
+                in: nameLower, range: NSRange(nameLower.startIndex..., in: nameLower)) != nil
         
-        // Danh sách tiền tố ngắn (chỉ khớp nếu ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới)
-        let shortPrefixes = [
-            "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc"
-        ]
-        let matchesShort = shortPrefixes.contains { prefix in
+        // Tiền tố ngắn (chỉ khớp nếu ở đầu tên hoặc đi kèm khoảng trắng/gạch ngang/gạch dưới)
+        let matchesShort = printerNamePrefixes.contains { prefix in
             nameLower.hasPrefix(prefix) ||
             nameLower.contains("\(prefix)-") ||
             nameLower.contains("\(prefix) ") ||
             nameLower.contains("_\(prefix)")
         }
         
-        guard matchesLong || matchesShort || !filterPrinterOnly else { return }
+        // Rất nhiều máy in nhiệt BLE quảng bá dịch vụ 0x18F0 (ghi qua 0x2AF1) dù tên lạ.
+        let advertisedServices = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        let matchesService = advertisedServices.contains(printerServiceUUID)
+
+        guard matchesLong || matchesShort || matchesService || !filterPrinterOnly else { return }
         
         // ⭐ Chỉ lưu thiết bị vào danh sách phát hiện nếu thỏa mãn bộ lọc máy in
         withState { discoveredPeripherals[identifier] = peripheral }
@@ -738,3 +737,24 @@ extension BLEManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverDescriptorsFor characteristic: CBCharacteristic, error: Error?) {}
 }
+
+// MARK: - Nhận diện tên / dịch vụ máy in (tạo một lần, dùng cho mọi gói quảng bá)
+
+/// Từ khóa tên máy in, khớp ở bất kỳ đâu trong tên (giống Android).
+private let printerNameKeywords = [
+    "print", "pos", "thermal", "spp", "label", "barcode", "receipt", "ticket",
+    "epson", "star", "citizen", "bixolon", "sewoo", "brother", "tsc", "sprt",
+    "hprt", "goojprt", "kiotviet", "sapo", "sunmi", "paperang", "peripage", "niimbot", "zijiang",
+    "minjcode",
+]
+
+/// MINJCODE phát tên model trần (MJ5803, MJ-8001...); "mj" + số để không dính Xiaomi Mijia (MJYD...).
+private let mjModelRegex = try! NSRegularExpression(pattern: "^mj[-_ ]?[0-9]")
+
+/// Tiền tố tên máy in ngắn (giống Android).
+private let printerNamePrefixes = [
+    "mpt", "rpp", "rt", "pt", "xp", "gp", "zj", "qs", "nt", "mtp", "cc", "dl", "jc",
+]
+
+/// Nhiều máy in nhiệt BLE quảng bá dịch vụ 0x18F0 (ghi qua 0x2AF1) dù tên lạ.
+private let printerServiceUUID = CBUUID(string: "18F0")

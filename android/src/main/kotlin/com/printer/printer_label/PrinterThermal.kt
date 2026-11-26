@@ -352,8 +352,9 @@ class PrinterThermal {
                 }
 
                 // Máy in LAN nhận kết nối rồi đóng ngay (hay gặp khi máy vừa bật / đổi IP / có thiết
-                // bị khác đang in): byte đầu tiên hỏng. CHƯA có byte nào vào máy in nên mở lại socket
-                // mới và gửi lại là an toàn — thử nhiều lần với thời gian chờ tăng dần thay vì báo lỗi.
+                // bị khác đang in): gói đầu gửi hỏng. Mở lại socket mới và gửi lại — thử nhiều lần với
+                // thời gian chờ tăng dần thay vì báo lỗi. Máy in CÓ THỂ đã nhận một phần (lỗi TCP báo
+                // trễ) nên reopen() đánh dấu "in dở" để socket mới xả bộ đệm trước khi gửi lại.
                 if (sent <= 0 && offset == 0 && conn is LanSocketConnection && !conn.writeStalled) {
                     for ((i, delay) in LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS.withIndex()) {
                         Log.w("PRINT_SEND", "Gói đầu gửi hỏng, nối lại lần ${i + 1}/${LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS.size} sau ${delay}ms")
