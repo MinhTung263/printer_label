@@ -266,6 +266,9 @@ class PrinterThermal {
         /** Chờ giữa các lần nối lại socket LAN khi gói đầu gửi hỏng (tổng ~11s). */
         private val LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS = longArrayOf(300, 700, 1200, 2000, 3000, 4000)
 
+        /** Tổng thời gian tối đa cho các lần nối lại gói đầu (mỗi lần mở lại còn tự thử ~6s). */
+        private const val LAN_FIRST_CHUNK_BUDGET_MS = 15_000L
+
         /** Hạn chờ một tem gửi xong qua LAN tự quản (watchdog ghi tự cắt sớm hơn nếu kẹt). */
         private const val LAN_LABEL_SEND_TIMEOUT_MS = 30_000L
         private const val FIRST_CHUNK_RETRY_BASE_DELAY_MS = 150L
@@ -356,7 +359,14 @@ class PrinterThermal {
                 // thời gian chờ tăng dần thay vì báo lỗi. Máy in CÓ THỂ đã nhận một phần (lỗi TCP báo
                 // trễ) nên reopen() đánh dấu "in dở" để socket mới xả bộ đệm trước khi gửi lại.
                 if (sent <= 0 && offset == 0 && conn is LanSocketConnection && !conn.writeStalled) {
+                    val startedAt = android.os.SystemClock.elapsedRealtime()
                     for ((i, delay) in LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS.withIndex()) {
+                        // Có hạn: máy in đang bị thiết bị khác giữ (Gprinter chỉ nhận MỘT kết nối, có lúc
+                        // không nhận kết nối mới cả ~45s sau khi hai máy cùng in) thì thử mãi tới quá hạn
+                        // phía Dart (60s) -> app báo "không phản hồi" và bỏ phiếu, trong khi native vẫn
+                        // chạy tiếp và có thể in muộn (log 27/11 15:19–15:20). Hết hạn thì báo
+                        // PRINTER_BUSY: phiếu CHƯA vào máy, app giữ phiếu và tự in lại khi máy rảnh.
+                        if (android.os.SystemClock.elapsedRealtime() - startedAt + delay > LAN_FIRST_CHUNK_BUDGET_MS) break
                         Log.w("PRINT_SEND", "Gói đầu gửi hỏng, nối lại lần ${i + 1}/${LAN_FIRST_CHUNK_RECONNECT_DELAYS_MS.size} sau ${delay}ms")
                         Thread.sleep(delay)
                         if (!conn.reopen()) continue
@@ -371,6 +381,13 @@ class PrinterThermal {
                         throw PrinterStatusException(
                             "PRINTER_STALLED",
                             lan.lastErrorMessage ?: "Máy in không nhận dữ liệu"
+                        )
+                    }
+                    if (lan != null && offset == 0) {
+                        throw PrinterStatusException(
+                            "PRINTER_BUSY",
+                            "Máy in chưa nhận kết nối (đang bận với thiết bị khác?): " +
+                                (lan.lastErrorMessage ?: "gửi gói đầu thất bại")
                         )
                     }
                     val reason = lan?.lastErrorMessage
@@ -442,6 +459,21 @@ class PrinterThermal {
     }
 
     enum class PaperStatus { OK, NEAR_END, PAPER_END, COVER_OPEN, UNKNOWN }
+
+    /**
+     * Trạng thái giấy máy in báo ở lần in gần nhất, theo `device_id` của lệnh in — app đọc qua
+     * `paper_status` để báo "sắp hết giấy" (cảm biến gần hết của máy in) mà không phải hỏi máy in
+     * thêm lần nào. `UNKNOWN`: máy không trả lời lệnh hỏi (không biết có cảm biến hay không).
+     */
+    object PaperStatusStore {
+        private val last = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        fun record(deviceId: String?, status: PaperStatus) {
+            if (!deviceId.isNullOrEmpty()) last[deviceId] = status.name
+        }
+
+        fun get(deviceId: String): String? = last[deviceId]
+    }
 
     /** Lỗi do trạng thái máy in (hết giấy, mở nắp) — mang mã lỗi riêng lên Dart. */
     class PrinterStatusException(val code: String, message: String) : Exception(message)
@@ -571,7 +603,9 @@ class PrinterThermal {
                             else -> Unit
                         }
                     }
-                    when (queryPaperStatus(curConnect)) {
+                    val paper = queryPaperStatus(curConnect)
+                    PaperStatusStore.record(call.argument<String>("device_id"), paper)
+                    when (paper) {
                         PaperStatus.PAPER_END -> throw PrinterStatusException(
                             "PRINTER_OUT_OF_PAPER", "Máy in hết giấy"
                         )

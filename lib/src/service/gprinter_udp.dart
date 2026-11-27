@@ -209,6 +209,46 @@ abstract final class GprinterUdp {
     return found.values.toList();
   }
 
+  /// Máy Gprinter đang ở [ip] (MAC...) — hỏi THẲNG IP đó (unicast) kèm broadcast (máy chỉ trả
+  /// lời broadcast vẫn thấy), lấy câu trả lời đầu tiên ĐÚNG IP rồi trả ngay (thường < 100ms).
+  /// `null` khi hết [timeout] mà không máy Gprinter nào ở [ip] trả lời. Dùng để kiểm tra nhanh
+  /// "IP này còn đúng máy in này không" trước khi in, thay vì chờ cả lượt dò (~1,5s).
+  static Future<GprinterNetInfo?> queryAt(
+    String ip, {
+    Duration timeout = const Duration(milliseconds: 500),
+  }) async {
+    final target = ip.trim();
+    if (!_isIpv4(target)) return null;
+    RawDatagramSocket? socket;
+    final done = Completer<GprinterNetInfo?>();
+    try {
+      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket.broadcastEnabled = true;
+      final sub = socket.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final dg = socket?.receive();
+        if (dg == null) return;
+        final info = parseDevice(dg.data);
+        if (info != null && info.ip == target && !done.isCompleted) {
+          done.complete(info);
+        }
+      }, onError: (Object _) {});
+      final dests = [InternetAddress(target), ...await _targets()];
+      for (final d in dests) {
+        try {
+          socket.send(searchPacket, d, port);
+        } catch (_) {}
+      }
+      final result = await done.future.timeout(timeout, onTimeout: () => null);
+      await sub.cancel();
+      return result;
+    } catch (_) {
+      return null;
+    } finally {
+      socket?.close();
+    }
+  }
+
   /// Gửi lần lượt các gói [packets] (broadcast) cách nhau [gap].
   static Future<bool> _sendAll(
     List<List<int>> packets, {

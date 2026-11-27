@@ -1,3 +1,26 @@
+## [2.5.5] - chưa phát hành pub.dev (dùng qua git master)
+
+* **`lastPaperStatus(deviceId)` (Android): trạng thái giấy máy in báo ở lần in gần nhất** (`PaperSensorState`: còn,
+  gần hết, hết, mở nắp, không trả lời). Native vốn hỏi `DLE EOT 4` trước mỗi lần in, giờ ghi lại để app báo "sắp hết
+  giấy" mà không hỏi thêm. **Máy in LAN chưa nhận kết nối sau ~15s báo `PRINTER_BUSY`** (phiếu chưa vào máy) thay
+  vì thử tới quá hạn phía app.
+* **Android: biết máy in Bluetooth tắt sau ~2s thay vì ~20s.** Bắt `ACTION_ACL_DISCONNECTED` để đóng kết nối ngay, và
+  thêm `probeBluetooth(macAddress)`: hỏi trạng thái ESC/POS (DLE EOT, không in ra giấy). Máy từng trả lời mà nay im
+  lặng thì đóng kết nối chết và trả `false`. Các nền tảng khác dùng `checkConnect`.
+* **Android: nhả socket LAN đúng một lần cho mỗi kết nối.** Đếm lệnh in theo từng kết nối, không còn rò bộ đếm làm máy in
+  "đã nối mà không in". Kết nối mồ côi được đóng, kể cả kết nối cũ bị thay giữa hai lô in. Máy Bluetooth chưa từng trả
+  lời lệnh hỏi trạng thái chỉ bị hỏi một lần mỗi lượt.
+* **Dò máy in LAN (`scanXpPrinters`): bỏ dòng trùng theo MAC, không theo IP.** Hai máy in khác nhau bị đặt trùng một IP
+  giờ đều có mặt trong kết quả dò (trước đây máy Gprinter trùng IP với máy Xprinter bị bỏ), nên app nhận ra được trùng IP.
+* **`GprinterUdp.queryAt(ip)`: hỏi nhanh máy Gprinter ở một IP** (thường < 100ms). Dùng để kiểm tra "IP này còn
+  đúng máy in này không" trước khi in.
+* **`discoverLanDevices`: mỗi máy chỉ chờ hỏi tên / MAC tối đa 4s, bản quét SDK tối đa 3s.** Trước đây một máy không
+  trả lời giữ cả lượt dò tới 30s.
+* **`discoverLanDevices` ổn định hơn: máy in đang bận vẫn hiện.** Máy in trả lời broadcast (Xprinter `XP0001FIND`,
+  Gprinter `B[]G`, Epson / Star) mà cùng dải với thiết bị được thêm vào kết quả, kể cả khi cổng 9100 đang bận nên lượt dò
+  TCP bỏ sót. Gọi lại trong lúc đang dò thì dùng chung lượt đó (nhận lại máy đã thấy) thay vì chạy hai lượt tranh nhau
+  kết nối tới máy in.
+
 ## [2.5.4] - 2026-11-23
 
 * **Android: nhận diện máy in Bluetooth chắc hơn (MINJCODE MJ5803...).** Máy in tự khai lớp IMAGING/PRINTER (Class of

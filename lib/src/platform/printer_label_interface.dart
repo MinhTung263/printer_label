@@ -44,6 +44,14 @@ abstract class PrinterLabelPlatform extends PlatformInterface {
   /// Returns a [PrinterStatus] value.
   Future<PrinterStatus> checkPrinterStatus({String? deviceId, String? type});
 
+  /// Android: máy in Bluetooth [macAddress] đang nối có thật sự còn sống không — xem
+  /// [PrinterLabel.probeBluetooth].
+  Future<bool> probeBluetooth({required String macAddress});
+
+  /// Android: trạng thái giấy máy in [deviceId] báo ở lần in gần nhất — xem
+  /// [PrinterLabel.lastPaperStatus].
+  Future<String?> lastPaperStatus({required String deviceId}) async => null;
+
   /// Gets a map of all currently active printer connections (only supported on Android).
   ///
   /// Returns a [Map] containing `deviceId` as keys and their connection states (`true`/`false`) as values.

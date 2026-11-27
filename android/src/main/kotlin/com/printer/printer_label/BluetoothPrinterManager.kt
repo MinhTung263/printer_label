@@ -377,6 +377,16 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
                     return
                 }
             }
+            // Lệnh nối trước (đã hết hạn chờ) vẫn đang nối dở: chờ chính nó, KHÔNG mở kết nối mới —
+            // xem PrinterLabelPlugin.btConnectingSince.
+            if (plugin.btStillConnecting(deviceId)) {
+                plugin.scheduleConnectTimeout(
+                    deviceId,
+                    PrinterLabelPlugin.BT_CONNECT_TIMEOUT_MS,
+                    keepConnecting = true
+                )
+                return
+            }
 
             runCatching { plugin.connections[deviceId]?.close() }
 
@@ -387,12 +397,17 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             }
             plugin.connections[deviceId] = device
             plugin.connectionTypes[deviceId] = ConnectionType.BT
+            plugin.btConnectingSince[deviceId] = android.os.SystemClock.elapsedRealtime()
             device.connect(
                 plugin.rawId(deviceId),
                 // owner: sự kiện lỗi của kết nối CŨ (đã bị thay) không được xoá kết nối mới.
                 plugin.makeConnectListener(deviceId) { device }
             )
-            plugin.scheduleConnectTimeout(deviceId)
+            plugin.scheduleConnectTimeout(
+                deviceId,
+                PrinterLabelPlugin.BT_CONNECT_TIMEOUT_MS,
+                keepConnecting = true
+            )
         } catch (e: Exception) {
             e.printStackTrace()
             plugin.connections.remove(deviceId)
@@ -1087,7 +1102,8 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             // kiểm tra máy tích hợp): chờ nó xong rồi dùng luôn, KHÔNG đóng kết nối nó đang
             // mở — trước đây hai đường đóng kết nối của nhau nên cả hai cùng thất bại.
             val waitUntil = android.os.SystemClock.elapsedRealtime() + CONNECT_WAIT_MS
-            while (plugin.pendingConnects.containsKey(deviceId) &&
+            while ((plugin.pendingConnects.containsKey(deviceId) ||
+                    plugin.btStillConnecting(deviceId)) &&
                 android.os.SystemClock.elapsedRealtime() < waitUntil
             ) {
                 Thread.sleep(100)
@@ -1107,12 +1123,18 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             val device = POSConnect.createDevice(POSConnect.DEVICE_TYPE_BLUETOOTH) ?: return false
             plugin.connections[deviceId] = device
             plugin.connectionTypes[deviceId] = ConnectionType.BT
+            plugin.btConnectingSince[deviceId] = android.os.SystemClock.elapsedRealtime()
 
             val latch = java.util.concurrent.CountDownLatch(1)
             val listener = net.posprinter.IConnectListener { code, _, _ ->
                 // Kết nối hỏng / đứt về sau: bỏ khỏi danh sách để lần in sau nối lại, thay
                 // vì dùng tiếp kết nối chết. Chỉ đụng tới CHÍNH kết nối này (đã bị thay thì
                 // để yên kết nối mới).
+                if (code == POSConnect.CONNECT_SUCCESS || code == POSConnect.CONNECT_FAIL ||
+                    code == POSConnect.CONNECT_INTERRUPT
+                ) {
+                    plugin.btConnectingSince.remove(deviceId)
+                }
                 if (code == POSConnect.CONNECT_FAIL || code == POSConnect.CONNECT_INTERRUPT) {
                     if (plugin.connections[deviceId] === device) {
                         plugin.connections.remove(deviceId)
@@ -1128,11 +1150,8 @@ class BluetoothPrinterManager(private val plugin: PrinterLabelPlugin) {
             // thức dậy, dịch vụ máy in vừa khởi động lại): 3,5s cũ hay hết hạn -> NO_CONNECTION.
             latch.await(CONNECT_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
             val connected = device.isConnect
-            if (!connected && plugin.connections[deviceId] === device) {
-                plugin.connections.remove(deviceId)
-                plugin.connectionTypes.remove(deviceId)
-                runCatching { device.close() }
-            }
+            // Chưa nối xong trong hạn: GIỮ kết nối đang nối dở (nối xong muộn thì lần sau dùng
+            // luôn) — đóng ở đây là để máy in bị nối / đóng dồn dập. Quá BT_CONNECTING_MAX_MS mới bỏ.
             if (connected && markBuiltIn) {
                 plugin.builtInDeviceIds.add(deviceId)
                 markBuiltInPrinterConfirmed()

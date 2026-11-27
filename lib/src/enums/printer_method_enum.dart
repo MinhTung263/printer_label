@@ -28,6 +28,8 @@ enum PrinterMethod {
   print_barcode_esc,
   print_qrcode_esc,
   check_printer_status,
+  probe_bluetooth,
+  paper_status,
   auto_connect_built_in,
   has_built_in_printer,
   get_built_in_printer_paper_size,

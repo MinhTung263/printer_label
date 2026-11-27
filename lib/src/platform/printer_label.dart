@@ -57,6 +57,38 @@ class PrinterLabel {
     return await _platform.checkConnect(deviceId: deviceId);
   }
 
+  /// Máy in Bluetooth [macAddress] đang nối có thật sự còn sống không (Android).
+  ///
+  /// Android chỉ báo mất liên kết sau thời gian giám sát (~20s) khi máy in tắt đột ngột, nên
+  /// [checkConnect] vẫn `true` suốt lúc đó. Hàm này gửi lệnh hỏi trạng thái ESC/POS (DLE EOT —
+  /// KHÔNG in ra giấy) qua kết nối đang mở: máy từng trả lời mà nay im lặng (2 lần × 1,5s) thì
+  /// đóng kết nối đó (lần in sau nối lại từ đầu) và trả `false`. Máy chưa từng trả lời (không hỗ
+  /// trợ lệnh) thì theo trạng thái kết nối. Chưa nối -> `false`.
+  ///
+  /// KHÔNG gọi cho máy in tem (lệnh TSPL) và lúc máy đang in. iOS: như [checkConnect].
+  static Future<bool> probeBluetooth({required String macAddress}) async {
+    if (!Platform.isAndroid) {
+      return checkConnect(deviceId: DeviceId.bluetooth(macAddress));
+    }
+    return _platform.probeBluetooth(macAddress: macAddress);
+  }
+
+  /// Trạng thái giấy máy in [deviceId] báo ở lần in GẦN NHẤT của thiết bị này (Android, máy in
+  /// LAN / USB — native hỏi `DLE EOT 4` ngay trước mỗi lần in nên đọc lại không tốn gì).
+  /// `null`: chưa in lần nào từ khi mở app, hoặc nền tảng không hỗ trợ.
+  static Future<PaperSensorState?> lastPaperStatus({
+    required String deviceId,
+  }) async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return PaperSensorState.parse(
+        await _platform.lastPaperStatus(deviceId: deviceId),
+      );
+    } on Object catch (_) {
+      return null;
+    }
+  }
+
   /// Queries the operational status of a specific printer by its [deviceId].
   ///
   /// Specify [type] as either "TSPL" or "ESC" to check specific protocols.
@@ -1069,7 +1101,9 @@ class PrinterLabel {
       final dest = InternetAddress(ip);
       // Máy đã biết là Gprinter: KHÔNG gửi gói lạ tới cổng 3000 (module dội lại mọi gói,
       // hai máy có thể dội qua lại hàng nghìn gói — xem docs/PRINTER_NETWORK_CONFIG_GUIDE.md).
-      final ports = _isKnownGprinter(ip) ? const [8888, 50000] : const [3000, 8888, 50000];
+      final ports = _isKnownGprinter(ip)
+          ? const [8888, 50000]
+          : const [3000, 8888, 50000];
       for (final p in hprtPackets) {
         for (final port in ports) {
           socket.send(p, dest, port);
@@ -1973,11 +2007,47 @@ class PrinterLabel {
   /// IP mà chờ tối đa chừng ấy để có tên / hãng — UI hiện máy in là có tên luôn,
   /// không nháy "Máy in LAN 143" rồi mới đổi. Hết giờ (hoặc không nhận diện được)
   /// thì phát bản theo IP. Máy đã nhớ tên ([rememberLanDevices]) phát ngay.
+  static const Duration _resolveDetailsCap = Duration(seconds: 4);
+
+  static _SharedLanDiscovery? _activeDiscovery;
+
   static Stream<LanDeviceModel> discoverLanDevices({
     int port = 9100,
     Duration? timeout,
     bool queryDeviceName = true,
     List<String> extraSubnets = const [],
+    Duration? nameWait,
+  }) {
+    // Đang có lượt dò: dùng CHUNG lượt đó (nhận lại máy đã thấy + máy thấy tiếp). Hai lượt chạy
+    // song song (VD hai màn cùng quét) tranh nhau kết nối tới máy in — máy in nhiệt chỉ nhận một
+    // kết nối nên mỗi lượt sót một nửa, có lượt treo tới hết hạn mà không thấy máy nào (log
+    // 27/11 14:20: 0 máy sau 30s).
+    final _SharedLanDiscovery? active = _activeDiscovery;
+    if (active != null) return active.join();
+    final shared = _SharedLanDiscovery();
+    _activeDiscovery = shared;
+    _discoverLanDevicesOnce(
+      port: port,
+      timeout: timeout,
+      queryDeviceName: queryDeviceName,
+      extraSubnets: extraSubnets,
+      nameWait: nameWait,
+    ).listen(
+      shared.add,
+      onError: shared.addError,
+      onDone: () {
+        if (identical(_activeDiscovery, shared)) _activeDiscovery = null;
+        shared.close();
+      },
+    );
+    return shared.join();
+  }
+
+  static Stream<LanDeviceModel> _discoverLanDevicesOnce({
+    required int port,
+    Duration? timeout,
+    required bool queryDeviceName,
+    required List<String> extraSubnets,
     Duration? nameWait,
   }) {
     // ignore: close_sinks
@@ -1996,14 +2066,21 @@ class PrinterLabel {
     // Quét song song qua SDK độc quyền (Xprinter/POS UDP broadcast) — nguồn MAC
     // đáng tin cậy nhất hiện có cho các máy in đó, dùng làm fallback cho từng IP bên dưới.
     final Map<String, String> sdkMacByIp = {};
+    // Máy trả lời broadcast (UDP) — cả khi cổng in đang bận với thiết bị khác.
+    final Set<String> sdkIps = <String>{};
+    // Có hạn: bản quét SDK đôi khi không trả về (log 27/11: cả lượt dò treo tới 30s).
     final Future<void> sdkScanDone = scanNetPrinters()
+        .timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => const <Map<String, String>>[],
+        )
         .then((list) {
           for (final item in list) {
             final ip = item['ip'];
             final mac = item['mac'];
-            if (ip != null && ip.isNotEmpty && mac != null && mac.isNotEmpty) {
-              sdkMacByIp[ip] = mac;
-            }
+            if (ip == null || ip.isEmpty) continue;
+            sdkIps.add(ip);
+            if (mac != null && mac.isNotEmpty) sdkMacByIp[ip] = mac;
           }
         })
         .catchError((_) {});
@@ -2084,35 +2161,60 @@ class PrinterLabel {
       } catch (_) {}
     }
 
+    void onIp(String ip) {
+      if (!emitted.add(ip) || controller.isClosed) return;
+
+      // 1. Máy đã gặp (nhớ tên) thì hiện ngay tên đã nhớ, vẫn hỏi lại bên dưới để
+      // cập nhật nếu đổi máy. Máy mới: phát ngay với IP (< 100ms), hoặc chờ có
+      // tên nếu đặt [nameWait].
+      final cached = _lanDeviceCache[ip];
+      if (cached != null) {
+        controller.add(cached);
+      } else if (nameWait == null || !queryDeviceName) {
+        controller.add(LanDeviceModel.fromIp(ip, port: port));
+      } else {
+        waitingName[ip] = Timer(nameWait, () => emitIpOnly(ip));
+      }
+
+      if (!queryDeviceName) return;
+
+      // 2. Tự động truy vấn tên model, hãng và MAC ở chế độ nền. Mỗi máy tối đa
+      // [_resolveDetailsCap]: một máy không trả lời (VD máy in tem bỏ qua SNMP/HTTP) không
+      // được giữ cả lượt dò — trước đây stream chỉ đóng khi MỌI máy hỏi xong (đã gặp 30s).
+      // Thông tin về muộn vẫn được phát nếu stream còn mở, và vẫn vào bộ nhớ tên đã biết.
+      pending.add(
+        resolveDetails(ip).timeout(_resolveDetailsCap, onTimeout: () {}),
+      );
+    }
+
+    // Máy in trả lời broadcast mà CÙNG dải với thiết bị: là máy in dùng được, kể cả khi lượt dò
+    // cổng 9100 bỏ sót (máy in nhiệt chỉ nhận một kết nối — đang in / đang bị thiết bị khác giữ
+    // thì từ chối, kết quả quét "lúc thấy lúc không": log 27/11 14:19–14:20 cùng một máy lần thấy
+    // 3, lần 1, lần 2 máy). Máy khác dải là việc của mục "máy lệch dải", không thêm ở đây.
+    final Future<void> sdkFeed = sdkScanDone
+        .then((_) async {
+          if (sdkIps.isEmpty) return;
+          final Set<String> mySubnets = {
+            for (final ip in await _localPrivateIpv4s())
+              ip.split('.').take(3).join('.'),
+          };
+          for (final ip in sdkIps) {
+            if (mySubnets.contains(ip.split('.').take(3).join('.'))) onIp(ip);
+          }
+        })
+        .catchError((_) {});
+
     discoverLanPrinters(
       port: port,
       timeout: timeout,
       extraSubnets: extraSubnets,
     ).listen(
-      (ip) {
-        if (!emitted.add(ip) || controller.isClosed) return;
-
-        // 1. Máy đã gặp (nhớ tên) thì hiện ngay tên đã nhớ, vẫn hỏi lại bên dưới để
-        // cập nhật nếu đổi máy. Máy mới: phát ngay với IP (< 100ms), hoặc chờ có
-        // tên nếu đặt [nameWait].
-        final cached = _lanDeviceCache[ip];
-        if (cached != null) {
-          controller.add(cached);
-        } else if (nameWait == null || !queryDeviceName) {
-          controller.add(LanDeviceModel.fromIp(ip, port: port));
-        } else {
-          waitingName[ip] = Timer(nameWait, () => emitIpOnly(ip));
-        }
-
-        if (!queryDeviceName) return;
-
-        // 2. Tự động truy vấn tên model, hãng và MAC ở chế độ nền
-        pending.add(resolveDetails(ip));
-      },
+      onIp,
       onError: (err) {
         if (!controller.isClosed) controller.addError(err);
       },
       onDone: () async {
+        await sdkFeed;
         await Future.wait(pending);
         // Máy không nhận diện được tên vẫn phải hiện ra.
         for (final ip in waitingName.keys.toList()) {
@@ -3043,7 +3145,8 @@ class PrinterLabel {
   static bool _isKnownGprinter(String ip) {
     if (_gprinterNameByIp.containsKey(ip)) return true;
     final mac = normalizeMac(_lanDeviceCache[ip]?.mac);
-    return mac != null && (_gprinterMacs.contains(mac) || mac.startsWith('00:47:50'));
+    return mac != null &&
+        (_gprinterMacs.contains(mac) || mac.startsWith('00:47:50'));
   }
 
   /// MAC các máy in nói giao thức Gprinter (UDP `B[]G`), điền sau mỗi lần dò.
@@ -3266,9 +3369,13 @@ class PrinterLabel {
         ]).then((r) {
           final xp = r[0] as List<Map<String, String>>;
           final gp = r[1] as List<GprinterNetInfo>;
-          final xpIps = {
+          // Bỏ dòng Gprinter trùng theo MAC (cùng máy trả lời cả hai giao thức). KHÔNG bỏ theo IP:
+          // hai máy in KHÁC nhau bị đặt trùng một IP thì cả hai phải có mặt — app mới nhận ra trùng
+          // IP (trước đây máy Gprinter bị bỏ, coi như "mất" máy).
+          final xpMacs = {for (final i in xp) ?normalizeMac(i['mac'])};
+          final xpIpsNoMac = {
             for (final i in xp)
-              if (i['ip'] != null) i['ip']!,
+              if (i['ip'] != null && normalizeMac(i['mac']) == null) i['ip']!,
           };
           for (final g in gp) {
             final name = g.name?.trim();
@@ -3280,7 +3387,8 @@ class PrinterLabel {
           return [
             ...xp,
             for (final g in gp)
-              if (!xpIps.contains(g.ip))
+              if (!xpMacs.contains(normalizeMac(g.mac)) &&
+                  !xpIpsNoMac.contains(g.ip))
                 {
                   'ip': g.ip,
                   'mac': g.mac,
@@ -4106,5 +4214,43 @@ class PrinterLabel {
       client.close();
     } catch (_) {}
     return false;
+  }
+}
+
+/// Một lượt [PrinterLabel.discoverLanDevices] dùng chung cho mọi nơi gọi trong lúc nó chạy: người
+/// vào sau nhận lại các máy đã thấy rồi theo tiếp.
+class _SharedLanDiscovery {
+  final List<LanDeviceModel> _seen = [];
+  final StreamController<LanDeviceModel> _live =
+      StreamController<LanDeviceModel>.broadcast();
+  bool _done = false;
+
+  void add(LanDeviceModel d) {
+    _seen.add(d);
+    _live.add(d);
+  }
+
+  void addError(Object e) => _live.addError(e);
+
+  void close() {
+    _done = true;
+    unawaited(_live.close());
+  }
+
+  Stream<LanDeviceModel> join() {
+    // Phát lại + nghe tiếp ĐỒNG BỘ (không có khoảng hở nào để sót máy thấy giữa hai bước).
+    final out = StreamController<LanDeviceModel>();
+    _seen.forEach(out.add);
+    if (_done) {
+      unawaited(out.close());
+      return out.stream;
+    }
+    final StreamSubscription<LanDeviceModel> sub = _live.stream.listen(
+      out.add,
+      onError: out.addError,
+      onDone: out.close,
+    );
+    out.onCancel = sub.cancel;
+    return out.stream;
   }
 }

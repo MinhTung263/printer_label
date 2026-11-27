@@ -120,6 +120,122 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     @Volatile internal var isDetached = false
 
     private lateinit var usbReceiver: UsbConnectionReceiver
+
+    /** Lúc (elapsedRealtime) kết nối Bluetooth theo deviceId vừa nối xong — xem [onBluetoothLinkLost]. */
+    private val btConnectedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Lúc bắt đầu lệnh nối Bluetooth đang chạy (theo deviceId). Nối Bluetooth cổ điển tới máy vừa
+     * bật lại có thể mất vài giây; trước đây hết hạn 3s là đóng kết nối và lệnh sau mở kết nối MỚI
+     * trong khi kết nối cũ vẫn đang nối ngầm -> nối được lại bị đóng ngay ("kết nối cũ"), máy in
+     * bị nối / đóng dồn dập tới mức tự ngắt và treo cả chục giây (log 27/11 16:22, MJ5803).
+     * Giờ lệnh đang nối được GIỮ cho tới khi xong; lệnh sau chờ chính nó thay vì mở cái mới.
+     */
+    internal val btConnectingSince = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Kết nối Bluetooth [deviceId] đang nối dở (chưa quá [BT_CONNECTING_MAX_MS]). */
+    internal fun btStillConnecting(deviceId: String): Boolean {
+        val since = btConnectingSince[deviceId] ?: return false
+        val conn = connections[deviceId] ?: return false
+        return !conn.isConnect &&
+            android.os.SystemClock.elapsedRealtime() - since < BT_CONNECTING_MAX_MS
+    }
+
+    /**
+     * Android báo đã NGẮT liên kết Bluetooth với một máy (tắt máy in, ra khỏi vùng sóng). Kết nối
+     * của SDK vẫn tự báo "đang nối" tới khi lần gửi sau lỗi -> danh sách máy in hiện "Đã kết nối"
+     * hàng chục giây sau khi tắt máy, và lệnh in đầu tiên gửi vào kết nối chết rồi mới nối lại.
+     */
+    private val btLinkReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != BluetoothDevice.ACTION_ACL_DISCONNECTED) return
+            val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            }
+            val mac = runCatching { device?.address }.getOrNull() ?: return
+            onBluetoothLinkLost(mac)
+        }
+    }
+
+    /**
+     * Đóng kết nối Bluetooth tới [mac] khi hệ thống báo mất liên kết — như khi SDK báo
+     * CONNECT_INTERRUPT: lần kiểm tra / lần in sau thấy "chưa nối" và nối lại từ đầu. Bỏ qua (giữ
+     * nguyên) khi: đang có lệnh nối tới máy đó; kết nối vừa nối xong < 1,5s (tín hiệu ngắt của
+     * liên kết CŨ tới muộn); máy in tích hợp (máy in ảo của máy POS, tự nối lại riêng).
+     */
+    internal fun onBluetoothLinkLost(mac: String) {
+        val deviceId = btDeviceId(mac) ?: return
+        if (pendingConnects.containsKey(deviceId) || builtInDeviceIds.contains(deviceId)) return
+        if (btStillConnecting(deviceId)) return
+        val since = android.os.SystemClock.elapsedRealtime() - (btConnectedAt[deviceId] ?: 0L)
+        if (since < 1500L) return
+        closeBtConnection(deviceId, connections[deviceId] ?: return, "hệ thống báo mất liên kết")
+    }
+
+    /** deviceId (khoá trong [connections]) của kết nối Bluetooth tới [mac], nếu có. */
+    private fun btDeviceId(mac: String): String? = connections.keys.firstOrNull {
+        connectionTypes[it] == ConnectionType.BT && rawId(it).equals(mac, ignoreCase = true)
+    }
+
+    /** Đóng kết nối Bluetooth [conn] (chỉ khi nó vẫn là kết nối hiện tại của [deviceId]). */
+    private fun closeBtConnection(deviceId: String, conn: IDeviceConnection, reason: String) {
+        if (!connections.remove(deviceId, conn)) return
+        connectionTypes.remove(deviceId)
+        btConnectedAt.remove(deviceId)
+        Log.d("BT_LINK", "Mất liên kết Bluetooth [$deviceId] ($reason) -> đóng kết nối")
+        // close() của socket Bluetooth có thể chặn vài trăm ms: không làm trên main thread.
+        kotlin.concurrent.thread { runCatching { conn.close() } }
+    }
+
+    /** Máy Bluetooth (deviceId) đã từng trả lời lệnh hỏi trạng thái — xem [probeBluetooth]. */
+    private val btAnswered = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Máy in Bluetooth [mac] đang nối có thật sự còn sống không: hỏi trạng thái ESC/POS (DLE EOT,
+     * không in ra giấy) qua kết nối đang mở, tối đa 2 lần × 1,5s. Máy từng trả lời mà nay im lặng
+     * -> đóng kết nối (lần in sau nối lại từ đầu, không gửi vào kết nối chết) và trả false. Máy
+     * chưa từng trả lời (không hỗ trợ lệnh) -> theo trạng thái kết nối. Chạy trên luồng nền.
+     */
+    internal fun probeBluetooth(mac: String, result: Result) {
+        kotlin.concurrent.thread {
+            val deviceId = btDeviceId(mac)
+            val conn = deviceId?.let { connections[it] }
+            val alive: Boolean = when {
+                deviceId == null || conn == null || !isConnectionActive(deviceId) -> false
+                // Đang có lệnh nối lại tới máy này: không hỏi chen vào.
+                pendingConnects.containsKey(deviceId) -> true
+                else -> {
+                    // Hỏi lần 2 chỉ có ý nghĩa với máy TỪNG trả lời (im lặng mới đóng kết nối);
+                    // máy chưa từng trả lời thì kết quả như nhau — khỏi chờ thêm 1,5s mỗi lượt.
+                    val answered = askEscStatus(conn) ||
+                        (btAnswered.contains(deviceId) && askEscStatus(conn))
+                    when {
+                        answered -> { btAnswered.add(deviceId); true }
+                        btAnswered.contains(deviceId) && !builtInDeviceIds.contains(deviceId) -> {
+                            closeBtConnection(deviceId, conn, "không trả lời hỏi trạng thái")
+                            false
+                        }
+                        else -> true
+                    }
+                }
+            }
+            Handler(Looper.getMainLooper()).post { result.success(alive) }
+        }
+    }
+
+    /** Gửi DLE EOT qua [conn], chờ trả lời tối đa [timeoutMs]; true khi máy trả lời. */
+    private fun askEscStatus(conn: IDeviceConnection, timeoutMs: Long = 1500L): Boolean {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        return try {
+            POSPrinter(conn).printerStatus { latch.countDown() }
+            latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (e: Exception) {
+            false
+        }
+    }
     internal var printThermal = PrinterThermal()
     private lateinit var methodCallHandler: PrinterMethodCallHandler
 
@@ -144,6 +260,16 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         flutterPluginBinding.applicationContext.registerReceiver(usbReceiver, filter)
         registerUsbPermissionReceiver()
+        // Tín hiệu hệ thống (không cần export); Android 12+ cần quyền BLUETOOTH_CONNECT mới nhận —
+        // chưa cấp thì chỉ là không nhận, như trước.
+        val btFilter = IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 33) {
+                flutterPluginBinding.applicationContext.registerReceiver(btLinkReceiver, btFilter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                flutterPluginBinding.applicationContext.registerReceiver(btLinkReceiver, btFilter)
+            }
+        }
         synchronized(Companion) { if (usbOwner == null) usbOwner = this }
         // Người dùng bấm "dừng" trên thông báo chạy nền -> báo Dart để app tắt chế độ trạm.
         PrintKeepAliveService.onStoppedByUser = {
@@ -165,6 +291,14 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         pendingConnects.clear()
         runCatching { binding.applicationContext.unregisterReceiver(usbReceiver) }
         runCatching { binding.applicationContext.unregisterReceiver(permissionReceiver) }
+        runCatching { binding.applicationContext.unregisterReceiver(btLinkReceiver) }
+        btConnectedAt.clear()
+        btConnectingSince.clear()
+        btAnswered.clear()
+        synchronized(lanJobs) {
+            lanJobs.clear()
+            lanKeys.clear()
+        }
         synchronized(Companion) { if (usbOwner === this) usbOwner = null }
     }
 
@@ -545,6 +679,10 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
 
             when (code) {
                 POSConnect.CONNECT_SUCCESS -> {
+                    if (connectionTypes[deviceId] == ConnectionType.BT) {
+                        btConnectedAt[deviceId] = android.os.SystemClock.elapsedRealtime()
+                        btConnectingSince.remove(deviceId)
+                    }
                     // remove() nguyên tử ngay từ đầu: đọc rồi remove ở cuối là hai bước
                     // rời nhau, timeout handler có thể xen vào giữa và đóng kết nối này.
                     val pending = pendingConnects.remove(deviceId)
@@ -556,7 +694,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                         // trước đây giữ mãi tới lần in sau -> thiết bị khác báo "máy in bận".
                         // Hẹn nhả như sau một lần in; job in ngay sau đó (đã retain) giữ lại socket.
                         if (releaseLanSocketAfterPrint) {
-                            connections[deviceId]?.let { releaseLanSocket(it) }
+                            connections[deviceId]?.let { releaseLanSocket(it, retained = false) }
                         }
                     }
                     if (!isBuiltIn) {
@@ -599,6 +737,7 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
                 }
 
                 POSConnect.CONNECT_FAIL, POSConnect.CONNECT_INTERRUPT -> {
+                    btConnectingSince.remove(deviceId)
                     val pending = pendingConnects.remove(deviceId)
                     runCatching { connections[deviceId]?.close() }
                     connections.remove(deviceId)
@@ -735,7 +874,15 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         return id == model && (deviceId == model || deviceId.startsWith("${model}_s"))
     }
 
-    internal fun scheduleConnectTimeout(deviceId: String, timeoutMs: Long = CONNECT_TIMEOUT_MS) {
+    /**
+     * [keepConnecting]: hết hạn chỉ báo "chưa nối được" cho người gọi, KHÔNG đóng kết nối đang nối
+     * dở (Bluetooth — xem [btConnectingSince]); nối xong muộn thì kết nối vẫn được dùng.
+     */
+    internal fun scheduleConnectTimeout(
+        deviceId: String,
+        timeoutMs: Long = CONNECT_TIMEOUT_MS,
+        keepConnecting: Boolean = false,
+    ) {
         Handler(Looper.getMainLooper()).postDelayed({
             if (isDetached) return@postDelayed
 
@@ -745,9 +892,11 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
             // thành công — lỗi này lộ ra khi kết nối nhiều máy in song song.
             val pending = pendingConnects.remove(deviceId) ?: return@postDelayed
 
-            runCatching { connections[deviceId]?.close() }
-            connections.remove(deviceId)
-            connectionTypes.remove(deviceId)
+            if (!keepConnecting) {
+                runCatching { connections[deviceId]?.close() }
+                connections.remove(deviceId)
+                connectionTypes.remove(deviceId)
+            }
             pending.complete(false)
 
             if (!isBuiltInPrinter()) {
@@ -870,15 +1019,32 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     /// cũng đóng socket ngay thì các job còn lại đang gửi dở bị cắt kết nối, phải mở lại
     /// và đụng đúng socket vừa bị chiếm -> "Máy in đang bận, thử lại sau ..." rồi hai dòng
     /// "Đã nhả socket" cho cùng một IP. Chỉ nhả khi job CUỐI CÙNG trên IP đó kết thúc.
-    private val lanJobCount = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
+    /// Số job đang in trên TỪNG kết nối (theo đối tượng, không theo IP) + IP của kết nối đó.
+    ///
+    /// Trước đây đếm theo IP và tìm kết nối bằng `connections[ip] === conn`: kết nối bị thay giữa
+    /// chừng (mở lại, ngắt, Dart hết hạn) thì lần nhả `return` mà KHÔNG trừ bộ đếm -> IP đó bị coi
+    /// là "còn job" mãi, socket không bao giờ nhả, điện thoại khác in vào thì máy in giữ dữ liệu
+    /// không ra giấy (phải Ping máy in mới chạy). Đếm theo kết nối: kết nối nào xong thì chính nó
+    /// được nhả, kể cả khi đã bị thay (kết nối mồ côi vẫn đang chiếm máy in).
+    private val lanJobs = java.util.IdentityHashMap<IDeviceConnection, Int>()
+    private val lanKeys = java.util.IdentityHashMap<IDeviceConnection, String>()
+
+    private fun lanKeyOf(conn: IDeviceConnection): String? = synchronized(lanJobs) {
+        lanKeys[conn]
+    } ?: connections.entries.firstOrNull { it.value === conn }?.key
+        ?.takeIf { connectionTypes[it] == ConnectionType.LAN }
+
+    private fun lanJobsOf(conn: IDeviceConnection): Int = synchronized(lanJobs) { lanJobs[conn] ?: 0 }
 
     /// Đánh dấu bắt đầu một job LAN trên [conn] (nếu đó là kết nối LAN).
     internal fun retainLanSocket(conn: IDeviceConnection) {
         if (!releaseLanSocketAfterPrint) return
-        val entry = connections.entries.firstOrNull { it.value === conn } ?: return
-        if (connectionTypes[entry.key] != ConnectionType.LAN) return
-        lanJobCount.getOrPut(entry.key) { java.util.concurrent.atomic.AtomicInteger(0) }
-            .incrementAndGet()
+        val key = lanKeyOf(conn) ?: return
+        synchronized(lanJobs) {
+            lanKeys[conn] = key
+            lanJobs[conn] = (lanJobs[conn] ?: 0) + 1
+        }
+        cancelLanWatchdog(key, keep = conn)
     }
 
     /// Nhả socket LAN sau khi in xong. Giữ IP trong [registeredLanPrinters] để
@@ -887,15 +1053,27 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     /// [closeWhenIdle] = false khi đây mới là một lô GIỮA của lượt in dài: vẫn trả bộ
     /// đếm job (không trả sẽ rò, socket không bao giờ đóng được nữa) nhưng giữ socket
     /// cho lô kế tiếp dùng lại. Xem chú thích ở runPrintJob.
-    internal fun releaseLanSocket(conn: IDeviceConnection, closeWhenIdle: Boolean = true) {
+    ///
+    /// [retained] = false: gọi KHÔNG kèm [retainLanSocket] trước đó (VD vừa kết nối xong mà
+    /// chưa in) — không trừ bộ đếm; chỉ hẹn đóng nếu không có job nào đang dùng kết nối này.
+    internal fun releaseLanSocket(
+        conn: IDeviceConnection,
+        closeWhenIdle: Boolean = true,
+        retained: Boolean = true,
+    ) {
         if (!releaseLanSocketAfterPrint) return
-        val entry = connections.entries.firstOrNull { it.value === conn } ?: return
-        if (connectionTypes[entry.key] != ConnectionType.LAN) return
+        val key = lanKeyOf(conn) ?: return
 
-        // Còn job khác đang dùng socket này -> chưa được đóng.
-        val counter = lanJobCount[entry.key]
-        if (counter != null && counter.decrementAndGet() > 0) {
-            Log.i("PRINTER_LOG", "Giu socket ${entry.key}: con ${counter.get()} job dang in")
+        val left = synchronized(lanJobs) {
+            val n = lanJobs[conn] ?: 0
+            if (retained && n > 0) {
+                if (n - 1 > 0) lanJobs[conn] = n - 1 else lanJobs.remove(conn)
+                n - 1
+            } else n
+        }
+        // Còn job khác đang dùng kết nối này -> chưa được đóng.
+        if (left > 0) {
+            Log.i("PRINTER_LOG", "Giu socket $key: con $left job dang in")
             return
         }
 
@@ -904,27 +1082,34 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         // chừng, app bị kill, người dùng thoát màn hình) thì socket phải tự nhả, nếu
         // không máy khác sẽ vĩnh viễn không kết nối được.
         if (!closeWhenIdle) {
-            Log.i("PRINTER_LOG", "Giu socket ${entry.key}: con lo tem tiep theo")
-            scheduleLanWatchdog(entry.key)
+            Log.i("PRINTER_LOG", "Giu socket $key: con lo tem tiep theo")
+            scheduleLanWatchdog(key, conn)
             return
         }
 
         // Hoãn một nhịp ngắn rồi mới đóng. In nhiều bản (quantity > 1) là NHIỀU lời gọi
         // runPrintJob liên tiếp, nên bộ đếm về 0 ở khoảng trống GIỮA các bản; đóng ngay tại
         // đó buộc bản kế tiếp mở lại socket và có thể đụng socket chưa kịp giải phóng hẳn
-        // -> "Máy in đang bận, thử lại sau ...". Nếu trong nhịp chờ có job mới (bộ đếm > 0)
-        // thì giữ nguyên socket.
-        val key = entry.key
+        // -> "Máy in đang bận, thử lại sau ...". Nếu trong nhịp chờ có job mới thì giữ nguyên.
         cancelLanWatchdog(key)
         Handler(Looper.getMainLooper()).postDelayed({
-            val c = lanJobCount[key]
-            if (c != null && c.get() > 0) return@postDelayed
-            lanJobCount.remove(key)
-            val current = connections[key] ?: return@postDelayed
-            runCatching { current.close() }
-            connections.remove(key)
-            Log.i("PRINTER_LOG", "Đã nhả socket $key để thiết bị khác dùng")
+            closeLanIfIdle(key, conn, "để thiết bị khác dùng")
         }, LAN_IDLE_CLOSE_DELAY_MS)
+    }
+
+    /// Đóng [conn] nếu không còn job nào dùng nó. Kết nối đã bị thay (mồ côi) vẫn đóng — nó
+    /// đang chiếm kết nối duy nhất của máy in; chỉ gỡ khỏi [connections] khi còn là kết nối hiện tại.
+    private fun closeLanIfIdle(key: String, conn: IDeviceConnection, why: String) {
+        if (lanJobsOf(conn) > 0) return
+        // Mỗi kết nối chỉ nhả MỘT lần (nhiều lời hẹn đóng cùng trỏ tới một kết nối).
+        val tracked = synchronized(lanJobs) {
+            lanJobs.remove(conn)
+            lanKeys.remove(conn) != null
+        }
+        if (!tracked && connections[key] !== conn) return
+        runCatching { conn.close() }
+        connections.remove(key, conn)
+        Log.i("PRINTER_LOG", "Đã nhả socket $key $why")
     }
 
     /// Chờ trước khi đóng socket LAN rảnh — đủ để bản in kế tiếp tái dùng socket đang mở.
@@ -934,30 +1119,34 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
     /// lô kế tiếp (lô 10 ảnh, máy yếu) không bị cắt ngang.
     private val LAN_WATCHDOG_CLOSE_DELAY_MS = 15_000L
 
-    private val lanWatchdogs = java.util.concurrent.ConcurrentHashMap<String, Runnable>()
+    private val lanWatchdogs = java.util.concurrent.ConcurrentHashMap<String, LanWatchdog>()
 
     /// Hẹn giờ đóng socket phòng khi lượt in đứt giữa chừng. Mỗi lô mới gọi lại sẽ dời
     /// mốc ra xa, nên lượt in đang chạy bình thường không bao giờ chạm tới.
-    private fun scheduleLanWatchdog(key: String) {
+    private fun scheduleLanWatchdog(key: String, conn: IDeviceConnection) {
         cancelLanWatchdog(key)
         val handler = Handler(Looper.getMainLooper())
         val task = Runnable {
             lanWatchdogs.remove(key)
             if (isDetached) return@Runnable
-            val c = lanJobCount[key]
-            if (c != null && c.get() > 0) return@Runnable
-            lanJobCount.remove(key)
-            val current = connections[key] ?: return@Runnable
-            runCatching { current.close() }
-            connections.remove(key)
-            Log.i("PRINTER_LOG", "Đã nhả socket $key (quá hạn chờ lô tem cuối)")
+            closeLanIfIdle(key, conn, "(quá hạn chờ lô tem cuối)")
         }
-        lanWatchdogs[key] = task
+        lanWatchdogs[key] = LanWatchdog(conn, task)
         handler.postDelayed(task, LAN_WATCHDOG_CLOSE_DELAY_MS)
     }
 
-    private fun cancelLanWatchdog(key: String) {
-        lanWatchdogs.remove(key)?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
+    private class LanWatchdog(val conn: IDeviceConnection, val task: Runnable)
+
+    /// Huỷ mốc đóng dự phòng của [key]. Mốc đó thuộc kết nối KHÁC [keep] (kết nối cũ đã bị thay,
+    /// lô sau chạy trên kết nối mới): đóng luôn kết nối cũ — huỷ mà không đóng thì nó (và socket)
+    /// bị giữ mãi trong [lanKeys].
+    private fun cancelLanWatchdog(key: String, keep: IDeviceConnection? = null) {
+        val old = lanWatchdogs.remove(key) ?: return
+        val handler = Handler(Looper.getMainLooper())
+        handler.removeCallbacks(old.task)
+        if (keep != null && old.conn !== keep) {
+            handler.post { closeLanIfIdle(key, old.conn, "(kết nối cũ đã bị thay)") }
+        }
     }
 
     internal fun connectNet(ipAddress: String, result: Result) {
@@ -1976,6 +2165,12 @@ class PrinterLabelPlugin : FlutterPlugin, ActivityAware, PluginRegistry.Activity
         internal const val REQUEST_PERMISSIONS_CODE = 1002
         private const val ACTION_USB_PERMISSION = "com.printer.printer_label.USB_PERMISSION"
         private const val CONNECT_TIMEOUT_MS = 3_000L
+
+        /** Chờ một lệnh nối Bluetooth trả lời người gọi (kết nối vẫn nối tiếp ngầm sau đó). */
+        internal const val BT_CONNECT_TIMEOUT_MS = 6_000L
+
+        /** Lệnh nối Bluetooth quá chừng này chưa xong thì coi là hỏng, lệnh sau được mở cái mới. */
+        internal const val BT_CONNECTING_MAX_MS = 15_000L
 
         /// Thời gian chờ hệ thống tự cấp quyền USB cho app mặc định sau khi cắm máy in
         /// (xem [handleUsbDeviceAttached]). Hết thời gian mà vẫn chưa có quyền (người

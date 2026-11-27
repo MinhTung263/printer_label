@@ -2,7 +2,8 @@ library printer_label;
 
 export 'src/platform/printer_label.dart';
 export 'src/service/gprinter_udp.dart';
-export 'src/desktop/printer_language_probe.dart' show PrinterLanguage, PrinterLanguageProbe;
+export 'src/desktop/printer_language_probe.dart'
+    show PrinterLanguage, PrinterLanguageProbe;
 
 // Export models
 export 'src/models/barcode_model.dart';
@@ -25,6 +26,7 @@ export 'src/models/usb_connection_event.dart';
 export 'src/enums/cup_sticker_size.dart';
 export 'src/enums/label_per_row_enum.dart';
 export 'src/enums/paper_size_enum.dart';
+export 'src/enums/paper_sensor_state.dart';
 export 'src/enums/printer_connection_type.dart';
 export 'src/enums/printer_status.dart';
 

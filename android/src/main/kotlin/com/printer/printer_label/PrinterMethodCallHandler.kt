@@ -270,6 +270,20 @@ class PrinterMethodCallHandler(private val plugin: PrinterLabelPlugin) : MethodC
                     }.start()
                 }
 
+                "paper_status" -> {
+                    val id = call.argument<String>("device_id")
+                    result.success(if (id.isNullOrEmpty()) null else PrinterThermal.PaperStatusStore.get(id))
+                }
+
+                "probe_bluetooth" -> {
+                    val mac = call.argument<String>("mac_address")
+                    if (mac.isNullOrEmpty()) {
+                        result.success(false)
+                        return
+                    }
+                    plugin.probeBluetooth(mac, result)
+                }
+
                 "check_printer_status" -> {
                     // Hỏi trạng thái thật thì BẮT BUỘC phải có socket. Máy in LAN dùng chung
                     // đã nhả socket sau lần in trước nên phải mở lại, nếu không sẽ báo

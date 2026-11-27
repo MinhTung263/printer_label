@@ -59,6 +59,23 @@ class MethodChannelPrinterLabel extends PrinterLabelPlatform {
   }
 
   @override
+  Future<bool> probeBluetooth({required String macAddress}) async {
+    final String mac = macAddress.trim();
+    if (mac.isEmpty) return false;
+    return await _channel.invokeMethod<bool>(
+          PrinterMethod.probe_bluetooth.name,
+          {'mac_address': mac},
+        ) ??
+        false;
+  }
+
+  @override
+  Future<String?> lastPaperStatus({required String deviceId}) =>
+      _channel.invokeMethod<String>(PrinterMethod.paper_status.name, {
+        'device_id': deviceId,
+      });
+
+  @override
   Future<Map<String, bool>> getAllConnections() async {
     final result = await _channel.invokeMethod<Map>(
       PrinterMethod.checkConnect.name,

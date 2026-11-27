@@ -80,9 +80,7 @@ abstract final class PrinterLanguageProbe {
   /// Trả lời `ESC ! ?` hợp lệ: đúng MỘT mã trong bảng trạng thái TSPL — máy in hoá
   /// đơn không trả lời câu này.
   static bool classifyTspl(Uint8List? reply) =>
-      reply != null &&
-      reply.length == 1 &&
-      _tsplStatus.contains(reply.first);
+      reply != null && reply.length == 1 && _tsplStatus.contains(reply.first);
 
   /// Hãng chỉ làm máy in hoá đơn ESC/POS, không có máy in tem TSPL.
   static const Set<String> receiptOnlyVendors = {'Epson'};
